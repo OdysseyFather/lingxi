@@ -5,7 +5,14 @@ frontend-desktop/dist/
 # Build output
 backend-desktop/smart-agent
 dist-electron/
-electron/resources/
+
+# electron/resources/ holds large generated bundles (ai-engine, node-bin)
+# but bridge/ contains only our small source files (~5KB) and must be tracked.
+electron/resources/ai-engine/
+electron/resources/node-bin/
+electron/resources/ccr/
+electron/resources/bridge/node_modules/
+electron/resources/bridge/package-lock.json
 
 # IDE
 .idea/

@@ -1,0 +1,14 @@
+{
+  "name": "lingxi-bridge",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local Anthropic↔OpenAI translation server for Lingxi (powered by supermemoryai/llm-bridge)",
+  "main": "bridge-server.mjs",
+  "scripts": {
+    "start": "node bridge-server.mjs"
+  },
+  "dependencies": {
+    "llm-bridge": "^2.0.1"
+  }
+}
