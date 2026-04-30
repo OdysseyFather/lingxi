@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"lingxi-agent/db"
+	"lingxi-agent/router"
 )
 
 // ─── 激活档案运行时缓存 ──────────────────────────────────────────
@@ -78,6 +79,23 @@ func activeProfileSnapshot() (id int64, name, model, baseURL, token, protocol, t
 	defer activeRuntime.mu.RUnlock()
 	return activeRuntime.id, activeRuntime.name, activeRuntime.model, activeRuntime.baseURL,
 		activeRuntime.token, activeRuntime.protocol, activeRuntime.transformer
+}
+
+// clearActiveRuntimeIf 当内存中激活档案匹配指定 id 时清空（删除档案 / 切换激活时调用）
+func clearActiveRuntimeIf(id int64) bool {
+	activeRuntime.mu.Lock()
+	defer activeRuntime.mu.Unlock()
+	if activeRuntime.id != id {
+		return false
+	}
+	activeRuntime.id = 0
+	activeRuntime.name = ""
+	activeRuntime.model = ""
+	activeRuntime.baseURL = ""
+	activeRuntime.token = ""
+	activeRuntime.protocol = ""
+	activeRuntime.transformer = ""
+	return true
 }
 
 // ─── HTTP 接口 ───────────────────────────────────────────────────
@@ -165,6 +183,16 @@ func DeleteAPIProfile(c *gin.Context) {
 		c.Status(http.StatusInternalServerError)
 		return
 	}
+	// 如果删的恰好是当前激活档案：清内存 + 关闭 CCR + 通知前端刷新
+	if clearActiveRuntimeIf(id) {
+		router.Stop()
+		log.Printf("[provider] active profile %d deleted, runtime cleared", id)
+		payload, _ := json.Marshal(map[string]interface{}{
+			"id":      id,
+			"deleted": true,
+		})
+		globalHub.BroadcastAll("profile_changed", string(payload))
+	}
 	c.Status(http.StatusOK)
 }
 
@@ -178,6 +206,13 @@ func ActivateAPIProfile(c *gin.Context) {
 	if err := db.ActivateAPIProfile(id); err != nil {
 		c.Status(http.StatusInternalServerError)
 		return
+	}
+	// 切换激活档案：先清掉旧档案在内存中残留的明文 token，
+	// 并停掉旧 CCR；新 token 将由 Electron 在收到 profile_changed 事件后重新下发。
+	curID, _, _, _, _, _, _ := activeProfileSnapshot()
+	if curID != 0 && curID != id {
+		clearActiveRuntimeIf(curID)
+		router.Stop()
 	}
 	// 通知 Electron 重新下发明文
 	ap, _ := db.GetAPIProfile(id, false)
