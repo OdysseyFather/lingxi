@@ -940,9 +940,9 @@ func buildClaudeEnv(cfg *config.Config) []string {
 		modelEnv = cfg.Claude.ModelEnv
 	}
 
-	// 当激活档案为 openai 协议时，路由经本地 CCR 转 Anthropic
+	// 当激活档案为 openai 协议时，路由经本地 bridge 转 Anthropic
 	if rtProtocol == "openai" && rtToken != "" && rtBaseURL != "" && rtModel != "" {
-		ccrURL, err := router.EnsureRunning(router.Profile{
+		bridgeURL, err := router.EnsureRunning(router.Profile{
 			ID:          rtID,
 			Name:        rtName,
 			BaseURL:     rtBaseURL,
@@ -951,14 +951,14 @@ func buildClaudeEnv(cfg *config.Config) []string {
 			Transformer: rtTransformer,
 		})
 		if err != nil {
-			log.Printf("[chat] CCR EnsureRunning error: %v (fallback to direct env)", err)
+			log.Printf("[chat] bridge EnsureRunning error: %v (fallback to direct env)", err)
 		} else {
-			baseURL = ccrURL
-			// CCR 内部已持有真实上游 token；这里只需占位符
-			authToken = "ccr-internal"
+			baseURL = bridgeURL
+			// bridge 内部已持有真实上游 token；这里只需占位符
+			authToken = "bridge-internal"
 		}
 	} else {
-		// 非 openai 协议时，确保 CCR 不在运行（节省资源）
+		// 非 openai 协议时，确保 bridge 不在运行（节省资源）
 		router.Stop()
 	}
 

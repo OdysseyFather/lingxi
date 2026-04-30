@@ -157,7 +157,7 @@ func migrate() {
 
 	// 列级迁移：messages.usage（保存每条消息的 token/cost 摘要）
 	addColumnIfMissing("messages", "usage", "TEXT NOT NULL DEFAULT ''")
-	// 列级迁移：api_profiles.transformer（CCR 路由层的 transformer 名称，留空表示自动）
+	// 列级迁移：api_profiles.transformer（bridge 路由层保留字段，留空表示自动）
 	addColumnIfMissing("api_profiles", "transformer", "TEXT NOT NULL DEFAULT ''")
 
 	seedBuiltinProviders()
@@ -192,7 +192,7 @@ func addColumnIfMissing(table, column, def string) {
 func seedBuiltinProviders() {
 	type p struct{ code, name, protocol, baseURL, model, meta, doc string }
 	builtins := []p{
-		// ── Anthropic 协议（直连，不经过 CCR）─────────────────────────
+		// ── Anthropic 协议（直连，不经过 bridge 路由）──────────────────
 		{
 			code: "anthropic_official", name: "Anthropic Official", protocol: "anthropic",
 			baseURL: "", model: "claude-opus-4-5", meta: `{}`, doc: "https://docs.anthropic.com",
@@ -209,7 +209,7 @@ func seedBuiltinProviders() {
 			meta: `{"usage":{"endpoint":"https://api.deepseek.com/user/balance","auth_header":"Authorization","auth_prefix":"Bearer "}}`,
 			doc:  "https://platform.deepseek.com/",
 		},
-		// ── OpenAI 协议（经 CCR 路由）─────────────────────────────────
+		// ── OpenAI 协议（经 bridge 路由层翻译）─────────────────────────
 		{
 			code: "deepseek_openai", name: "DeepSeek (OpenAI Compatible)", protocol: "openai",
 			baseURL: "https://api.deepseek.com/v1/chat/completions", model: "deepseek-chat",

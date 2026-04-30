@@ -49,27 +49,24 @@ function getClaudeBin() {
   }
 }
 
-// ─── CCR (claude-code-router) 二进制 + 隔离目录 ──────────────────
-// 用于 OpenAI 协议的供应商：ccr 在本地 127.0.0.1:<port> 启一个
-// Anthropic 协议端点，把 OpenAI 请求转发给上游（DeepSeek/Qwen/Gemini 等）
-function getCcrBin() {
+// ─── Bridge 二进制 + 隔离目录 ────────────────────────────────────
+// 用于 OpenAI 协议的供应商：bridge 在本地 127.0.0.1:<port> 启一个
+// Anthropic 协议端点，使用 supermemoryai/llm-bridge 把 Anthropic 请求
+// 翻译成 OpenAI 转发给上游（DeepSeek/Qwen/Gemini 等），并把响应 SSE 翻译回来。
+function getBridgeBin() {
   const resourcesDir = app.isPackaged
     ? process.resourcesPath
     : path.join(__dirname, 'resources');
-  const bundled = path.join(resourcesDir, 'ccr', 'ccr');
+  const bundled = path.join(resourcesDir, 'bridge', 'bridge');
   if (fs.existsSync(bundled)) {
     try { fs.chmodSync(bundled, 0o755); } catch (e) {}
     return bundled;
   }
-  try {
-    return require('child_process').execSync('which ccr').toString().trim();
-  } catch {
-    return '';
-  }
+  return '';
 }
 
-function getCcrHome() {
-  return path.join(app.getPath('userData'), 'ccr-home');
+function getBridgeHome() {
+  return path.join(app.getPath('userData'), 'bridge-home');
 }
 
 // ─── 获取应用隔离 HOME 目录 ──────────────────────────────────────
@@ -290,9 +287,9 @@ function startBackend() {
       HOME: appHome,
       // 内置 AI 引擎路径
       CLAUDE_BIN: claudeBin,
-      // CCR (OpenAI → Anthropic 路由) 二进制 + 隔离数据目录
-      CCR_BIN: getCcrBin(),
-      CCR_HOME: getCcrHome(),
+      // Bridge (OpenAI ↔ Anthropic 路由层) 二进制 + 隔离数据目录
+      BRIDGE_BIN: getBridgeBin(),
+      BRIDGE_HOME: getBridgeHome(),
       // 显式传入知识库和技能路径，避免 Go 自己拼路径时受 HOME 空格影响
       KB_PATH: kbPath,
       SKILLS_PATH: skillsPath,

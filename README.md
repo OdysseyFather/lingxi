@@ -155,7 +155,7 @@ After launching, go to **Settings → Models & Endpoints** to:
 | DeepSeek (Anthropic) | ✓ | DeepSeek's Anthropic-compatible endpoint |
 | Custom (Anthropic) | manual | Bring your own endpoint |
 
-**OpenAI-compatible (routed through built-in CCR):**
+**OpenAI-compatible (routed through built-in bridge layer):**
 
 | Provider | Default Model | Usage Query |
 |---------|---------------|-------------|
@@ -172,22 +172,23 @@ After launching, go to **Settings → Models & Endpoints** to:
 | OpenAI Official | `gpt-4o` | manual |
 | Custom (OpenAI) | manual | manual |
 
-> When you activate an OpenAI-compatible profile, the app automatically launches a local proxy ([claude-code-router](https://github.com/musistudio/claude-code-router)) on `127.0.0.1:<random>` that translates Anthropic protocol ↔ OpenAI protocol in real-time. **Everything stays on your machine** — no third-party gateways involved.
+> When you activate an OpenAI-compatible profile, the app automatically launches a tiny local proxy that uses [supermemoryai/llm-bridge](https://github.com/supermemoryai/llm-bridge) to translate Anthropic protocol ↔ OpenAI protocol in real-time. **Everything stays on your machine** — no third-party gateways involved.
 
-### Routing Layer (CCR)
+### Routing Layer (llm-bridge)
 
-The bundled routing layer is the community-standard `@musistudio/claude-code-router`. It is automatically managed for you:
+The bundled routing layer is a ~200-line Node.js HTTP server that imports `llm-bridge` directly. It is automatically managed for you:
 
 ```
-┌──────────────────┐   Anthropic    ┌─────────┐   OpenAI   ┌──────────────┐
-│ Claude CLI       │ ─────────────▶ │  CCR    │ ─────────▶ │ DeepSeek /   │
-│ (lingxi backend) │   stream-json  │ (local) │   stream   │ Qwen / GLM…  │
-└──────────────────┘                └─────────┘            └──────────────┘
+┌──────────────────┐   Anthropic    ┌──────────┐   OpenAI   ┌──────────────┐
+│ Claude CLI       │ ─────────────▶ │  bridge  │ ─────────▶ │ DeepSeek /   │
+│ (lingxi backend) │   stream-json  │ (local)  │   stream   │ Qwen / GLM…  │
+└──────────────────┘                └──────────┘            └──────────────┘
 ```
 
-- **Lifecycle**: spawned on demand when an OpenAI profile is activated; killed when switching back to an Anthropic profile.
-- **Isolation**: writes config and logs to `~/Library/Application Support/lingxi-agent/ccr-home/` only. Never touches `~/.claude-code-router/`.
-- **Configuration**: rendered automatically from your active profile (single-provider config). No manual editing required.
+- **Lifecycle**: spawned on demand when an OpenAI profile is activated; killed when switching back to an Anthropic profile. Profile switches reuse the running process (just re-pushes config).
+- **Isolation**: state lives only in `~/Library/Application Support/lingxi-agent/bridge-home/`.
+- **Configuration**: pushed in-memory via `POST /__config` from the Go backend. No JSON config file on disk.
+- **Bundle size**: only ~330KB (vs ~30MB for the previous CCR-based router).
 - **Status**: surfaced via the green "路由层 已就绪" pill in the title bar.
 
 If you need to inspect or stop the routing layer manually:
@@ -414,7 +415,7 @@ npm start
 | DeepSeek (Anthropic) | ✓ | DeepSeek 的 Anthropic 兼容端点 |
 | 自定义 (Anthropic) | 手动 | 自带端点 |
 
-**OpenAI 协议（经内置 CCR 路由层）：**
+**OpenAI 协议（经内置 bridge 路由层）：**
 
 | 供应商 | 默认模型 | 额度查询 |
 |--------|---------|---------|
@@ -431,15 +432,16 @@ npm start
 | OpenAI 官方 | `gpt-4o` | 手动 |
 | 自定义 (OpenAI) | 自配 | 手动 |
 
-> 激活 OpenAI 协议的接入点后，应用会自动在 `127.0.0.1:<随机端口>` 启动一个本地代理（[claude-code-router](https://github.com/musistudio/claude-code-router)），实时把 Anthropic 协议 ↔ OpenAI 协议进行双向翻译。**全程发生在本机**，不经过任何第三方网关。
+> 激活 OpenAI 协议的接入点后，应用会自动在 `127.0.0.1:<随机端口>` 启动一个本地代理（基于 [supermemoryai/llm-bridge](https://github.com/supermemoryai/llm-bridge)），实时把 Anthropic 协议 ↔ OpenAI 协议进行双向翻译。**全程发生在本机**，不经过任何第三方网关。
 
-### 路由层（CCR）
+### 路由层（llm-bridge）
 
-应用内置的路由层是社区标准 `@musistudio/claude-code-router`，全自动托管：
+应用内置的路由层是约 200 行的 Node.js HTTP 服务，直接 import `llm-bridge`，全自动托管：
 
-- **生命周期**：激活 OpenAI 协议接入点时自动启动；切回 Anthropic 协议时自动停止。
-- **隔离**：配置 / 日志只写入 `~/Library/Application Support/lingxi-agent/ccr-home/`，绝不污染 `~/.claude-code-router/`。
-- **配置**：由当前激活档案自动渲染（单 provider 模式），无需手动编辑。
+- **生命周期**：激活 OpenAI 协议接入点时自动启动；切回 Anthropic 协议时自动停止；切换 profile 时复用进程（只重推 config）。
+- **隔离**：进程数据写入 `~/Library/Application Support/lingxi-agent/bridge-home/`。
+- **配置**：通过 `POST /__config` 内存推送，磁盘上不留任何配置文件。
+- **包体积**：约 330KB（旧 CCR 方案约 30MB）。
 - **状态**：标题栏的绿色「路由层 已就绪」徽章实时反映状态。
 
 排障接口：

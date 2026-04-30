@@ -34,7 +34,7 @@ export function ProfilesPage() {
         <div>
           <h1 className="text-xl font-semibold">模型与接入点</h1>
           <p className="text-sm text-[color:var(--text-soft)] mt-0.5">
-            原生 Anthropic 协议直连，或经本地路由层（CCR）接入 DeepSeek / Qwen / Doubao / GLM / Gemini / OpenRouter / Ollama 等 OpenAI 协议供应商
+            原生 Anthropic 协议直连，或经本地路由层（llm-bridge）接入 DeepSeek / Qwen / Doubao / GLM / Gemini / OpenRouter / Ollama 等 OpenAI 协议供应商
           </p>
         </div>
         <Button onClick={() => setEditing({ __new: true })}>
@@ -64,7 +64,7 @@ export function ProfilesPage() {
                       {p.name}
                       {p.is_active && <Badge tone="accent">激活</Badge>}
                       {p.provider_protocol === 'openai' ? (
-                        <Badge tone="info">OpenAI · CCR 路由</Badge>
+                        <Badge tone="info">OpenAI · 路由层</Badge>
                       ) : (
                         <Badge tone="default">Anthropic · 直连</Badge>
                       )}
@@ -219,9 +219,9 @@ function ProfileEditor({ providers, profile, onClose, onSaved }) {
         </Field>
         {isOpenAI && (
           <div className="rounded-lg border border-[color:var(--line)] bg-[color:var(--bg-soft)] p-3 text-xs text-[color:var(--text-soft)] leading-relaxed">
-            该供应商为 <b>OpenAI 兼容协议</b>。激活后，本应用将自动启动本地路由层（claude-code-router）把
-            Anthropic 请求实时翻译为 OpenAI 格式后转发至 {provider?.name}，整个流程发生在你的电脑上，
-            不经过任何中间服务器。
+            该供应商为 <b>OpenAI 兼容协议</b>。激活后，本应用将自动启动本地路由层（基于
+            llm-bridge）把 Anthropic 请求实时翻译为 OpenAI 格式后转发至 {provider?.name}，
+            整个流程发生在你的电脑上，不经过任何中间服务器。
           </div>
         )}
         <Field label="Base URL">
@@ -258,14 +258,14 @@ function ProfileEditor({ providers, profile, onClose, onSaved }) {
             </button>
             {showAdvanced && (
               <div className="mt-2">
-                <Field label="Transformer (CCR)">
+                <Field label="Transformer">
                   <Input
                     value={transformer}
                     onChange={(e) => setTransformer(e.target.value)}
-                    placeholder="留空 = 自动；常用：deepseek / gemini / tooluse / openrouter"
+                    placeholder="留空 = 自动；保留字段，未来用于 per-provider 偏差修正"
                   />
                   <div className="mt-1 text-[11px] text-[color:var(--text-faint)]">
-                    针对个别供应商的请求适配器。不确定时留空，绝大多数供应商无需配置。
+                    保留配置项；当前路由层（llm-bridge）会自动处理多数协议差异，留空即可。
                   </div>
                 </Field>
               </div>

@@ -45,8 +45,8 @@
         "to": "node-bin"
       },
       {
-        "from": "resources/ccr",
-        "to": "ccr"
+        "from": "resources/bridge",
+        "to": "bridge"
       },
       {
         "from": "../ai-config",

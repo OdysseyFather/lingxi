@@ -92,7 +92,7 @@ func main() {
 	// Electron 启动时下发激活档案明文 token
 	api.POST("/runtime/active-secret", handler.SetActiveSecret)
 
-	// CCR 路由层（OpenAI → Anthropic 转换代理）
+	// Bridge 路由层（OpenAI ↔ Anthropic 转换代理，由 supermemoryai/llm-bridge 实现）
 	api.GET("/router/status", handler.GetRouterStatus)
 	api.POST("/router/stop", handler.StopRouter)
 

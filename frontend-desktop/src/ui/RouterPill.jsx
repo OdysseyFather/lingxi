@@ -4,7 +4,7 @@ import { useStore } from '../state/useStore';
 import { api } from '../api/client';
 import { Badge, cn } from './primitives';
 
-// RouterPill 仅在激活档案为 OpenAI 协议时显示，反映 CCR 路由层运行状态
+// RouterPill 仅在激活档案为 OpenAI 协议时显示，反映 bridge 路由层运行状态
 export function RouterPill() {
   const active = useStore((s) => s.activeProfile);
   const [status, setStatus] = useState(null);
@@ -44,7 +44,7 @@ export function RouterPill() {
     return (
       <span
         className="inline-flex items-center gap-1 px-2 h-7 rounded-md text-[11px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-        title={`CCR 已运行于 127.0.0.1:${status.port}`}
+        title={`路由层运行于 127.0.0.1:${status.port}`}
       >
         <Network size={11} /> 路由层 已就绪
       </span>

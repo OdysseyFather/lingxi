@@ -39,7 +39,7 @@ export const api = {
   getUsage: (range = '7d') => req('GET', `/api/usage?range=${range}`),
   getQuota: (profileId) => req('GET', `/api/usage/quota?profile_id=${profileId}`),
 
-  // router (CCR) status
+  // router (bridge) status
   getRouterStatus: () => req('GET', '/api/router/status'),
   stopRouter: () => req('POST', '/api/router/stop'),
 };

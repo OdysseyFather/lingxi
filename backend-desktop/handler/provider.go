@@ -183,7 +183,7 @@ func DeleteAPIProfile(c *gin.Context) {
 		c.Status(http.StatusInternalServerError)
 		return
 	}
-	// 如果删的恰好是当前激活档案：清内存 + 关闭 CCR + 通知前端刷新
+	// 如果删的恰好是当前激活档案：清内存 + 关闭 bridge + 通知前端刷新
 	if clearActiveRuntimeIf(id) {
 		router.Stop()
 		log.Printf("[provider] active profile %d deleted, runtime cleared", id)
@@ -208,7 +208,7 @@ func ActivateAPIProfile(c *gin.Context) {
 		return
 	}
 	// 切换激活档案：先清掉旧档案在内存中残留的明文 token，
-	// 并停掉旧 CCR；新 token 将由 Electron 在收到 profile_changed 事件后重新下发。
+	// 并停掉旧 bridge；新 token 将由 Electron 在收到 profile_changed 事件后重新下发。
 	curID, _, _, _, _, _, _ := activeProfileSnapshot()
 	if curID != 0 && curID != id {
 		clearActiveRuntimeIf(curID)
