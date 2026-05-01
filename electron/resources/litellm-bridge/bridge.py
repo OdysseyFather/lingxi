@@ -45,6 +45,28 @@ HOST = os.environ.get("BRIDGE_HOST", "127.0.0.1")
 PORT = int(os.environ.get("BRIDGE_PORT", "0"))
 LOG_PREFIX = "[litellm-bridge]"
 
+# 给经过本 bridge 的 OpenAI 兼容小模型（qwen-plus / deepseek-chat / glm-4 等）追加的强约束。
+# Claude 等强模型走 Anthropic 直连不会经过这里，不受影响。
+# 目的：阻止小模型在调用 Skill 后忽略 SKILL.md 内容、自行猜测路径/解释器、陷入 Bash 探路循环。
+SMALL_MODEL_TOOL_DISCIPLINE = """
+
+[CRITICAL — Tool & Skill Discipline]
+你正通过 OpenAI 兼容协议运行，工具调用纪律必须严格执行：
+
+1. 调用 Skill 工具拿到返回内容（通常是 SKILL.md 全文）后，**必须先完整阅读返回内容**，
+   再决定下一步动作。SKILL.md 里指定的工作目录、Python 解释器路径、命令行参数、
+   日期格式等细节都是经过实测的，**禁止自行替换、猜测或简化**。
+2. 当 SKILL.md 指定 `./venv_xxx/bin/python3` 之类的解释器时，必须使用该解释器，
+   不要回落到系统 `python3` / `python`。
+3. 调用 Bash 工具前先确认参数完整：单次给出可一次成功的完整命令，**不要**在路径未确认时
+   先 `ls` 一通试探。Bash 不是用来摸索的，是用来执行已经想清楚的命令。
+4. 如果一次工具调用失败，先看错误信息再决定下一步；不要把同一类命令换不同写法盲试 5 次以上。
+5. SKILL.md 里写"何时启用"列出的关键词若与用户请求匹配，应严格按其文档章节顺序执行，
+   不要跳过参数细节或区域代码（regionCode）等关键字段。
+
+违反以上纪律会导致任务失败。请按用户最初的请求一次到位。
+"""
+
 # 激活档案（仅内存，不落盘）
 active = None  # { profileId, name, baseUrl, model, token }
 stats = {"requests": 0, "errors": 0, "last_err": ""}
@@ -103,7 +125,13 @@ def anthropic_to_openai_messages(anthropic_messages: list, system=None) -> list:
     if system:
         system_text = _content_to_text(system)
         if system_text:
-            messages.append({"role": "system", "content": system_text})
+            # 追加 OpenAI 小模型工具纪律约束
+            messages.append({"role": "system", "content": system_text + SMALL_MODEL_TOOL_DISCIPLINE})
+        else:
+            messages.append({"role": "system", "content": SMALL_MODEL_TOOL_DISCIPLINE.strip()})
+    else:
+        # 即使上游没下发 system，也注入纪律约束
+        messages.append({"role": "system", "content": SMALL_MODEL_TOOL_DISCIPLINE.strip()})
 
     for msg in anthropic_messages:
         role = msg.get("role", "user")

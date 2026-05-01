@@ -23,6 +23,44 @@ const LOG_PREFIX = '[bridge]'
 let active = null // { profileId, name, baseUrl, model, token }
 let stats = { requests: 0, errors: 0, lastErr: '', startedAt: new Date().toISOString() }
 
+// 给经过本 bridge 的 OpenAI 兼容小模型追加的强约束（Claude 走 Anthropic 直连不经此路径）。
+const SMALL_MODEL_TOOL_DISCIPLINE = `
+
+[CRITICAL — Tool & Skill Discipline]
+你正通过 OpenAI 兼容协议运行，工具调用纪律必须严格执行：
+
+1. 调用 Skill 工具拿到返回内容（通常是 SKILL.md 全文）后，必须先完整阅读返回内容，
+   再决定下一步动作。SKILL.md 里指定的工作目录、Python 解释器路径、命令行参数、
+   日期格式等细节都是经过实测的，禁止自行替换、猜测或简化。
+2. 当 SKILL.md 指定 ./venv_xxx/bin/python3 之类的解释器时，必须使用该解释器，
+   不要回落到系统 python3 / python。
+3. 调用 Bash 工具前先确认参数完整：单次给出可一次成功的完整命令，不要在路径未确认时
+   先 ls 一通试探。Bash 不是用来摸索的，是用来执行已经想清楚的命令。
+4. 如果一次工具调用失败，先看错误信息再决定下一步；不要把同一类命令换不同写法盲试 5 次以上。
+5. SKILL.md 里"何时启用"列出的关键词若与用户请求匹配，应严格按其文档章节顺序执行，
+   不要跳过参数细节或区域代码（regionCode）等关键字段。
+
+违反以上纪律会导致任务失败。请按用户最初的请求一次到位。
+`
+
+// 把工具纪律约束注入到 OpenAI messages 数组的 system 消息里。
+function injectToolDiscipline(openaiBody) {
+  if (!openaiBody || !Array.isArray(openaiBody.messages)) return openaiBody
+  const sysIdx = openaiBody.messages.findIndex((m) => m.role === 'system')
+  if (sysIdx >= 0) {
+    const existing = openaiBody.messages[sysIdx]
+    const baseText = typeof existing.content === 'string'
+      ? existing.content
+      : Array.isArray(existing.content)
+        ? existing.content.map((c) => (typeof c === 'string' ? c : c?.text || '')).join('')
+        : ''
+    openaiBody.messages[sysIdx] = { ...existing, content: baseText + SMALL_MODEL_TOOL_DISCIPLINE }
+  } else {
+    openaiBody.messages.unshift({ role: 'system', content: SMALL_MODEL_TOOL_DISCIPLINE.trim() })
+  }
+  return openaiBody
+}
+
 function log(...args) {
   console.log(LOG_PREFIX, ...args)
 }
@@ -164,6 +202,9 @@ async function handleMessages(req, res) {
   // 让 OpenAI 兼容上游在 stream 中也带 usage（DashScope/DeepSeek/GLM 等都支持），
   // 否则 llm-bridge 的 emitter 会回 output_tokens=0
   openaiBody.stream_options = { ...(openaiBody.stream_options || {}), include_usage: true }
+
+  // 注入 OpenAI 小模型工具纪律约束（修复 qwen-plus 等忽略 SKILL.md 的问题）
+  injectToolDiscipline(openaiBody)
 
   // 一些上游对 max_tokens 上限敏感（如阿里 qwen-max 限 8192）
   // 通用 clamp：> 8192 时下调到 8192
