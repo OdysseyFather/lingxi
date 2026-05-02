@@ -17,11 +17,18 @@ async function req(method, path, body) {
 
 export const api = {
   // sessions
-  listSessions: () => req('GET', '/api/sessions'),
-  createSession: (title) => req('POST', '/api/sessions', { title }),
+  listSessions: (agentId) =>
+    req('GET', `/api/sessions${agentId != null ? `?agent_id=${agentId}` : ''}`),
+  createSession: (titleOrPayload) =>
+    req('POST', '/api/sessions',
+      typeof titleOrPayload === 'string'
+        ? { title: titleOrPayload }
+        : (titleOrPayload || {})
+    ),
   renameSession: (id, title) => req('PATCH', `/api/sessions/${id}`, { title }),
   deleteSession: (id) => req('DELETE', `/api/sessions/${id}`),
   listMessages: (id) => req('GET', `/api/sessions/${id}/messages`),
+  setSessionAgent: (id, agent_id) => req('POST', `/api/sessions/${id}/agent`, { agent_id }),
 
   // chat
   sendChat: (payload) => req('POST', '/api/chat', payload),
@@ -34,6 +41,22 @@ export const api = {
   deleteProfile: (id) => req('DELETE', `/api/api-profiles/${id}`),
   activateProfile: (id) => req('POST', `/api/api-profiles/${id}/activate`),
   testProfile: (id, body) => req('POST', `/api/api-profiles/${id}/test`, body || {}),
+
+  // skills / knowledge
+  listSkills: () => req('GET', '/api/skills'),
+  listKnowledge: () => req('GET', '/api/knowledge'),
+
+  // MCP
+  listMCP: () => req('GET', '/api/mcp'),
+  saveMCP: (m) => req('POST', '/api/mcp', m),
+  deleteMCP: (id) => req('DELETE', `/api/mcp/${id}`),
+  toggleMCP: (id, enabled) => req('POST', `/api/mcp/${id}/toggle`, { enabled }),
+
+  // Agents（智能体工厂）
+  listAgents: () => req('GET', '/api/agents'),
+  getAgent: (id) => req('GET', `/api/agents/${id}`),
+  saveAgent: (a) => req('POST', '/api/agents', a),
+  deleteAgent: (id) => req('DELETE', `/api/agents/${id}`),
 
   // usage
   getUsage: (range = '7d') => req('GET', `/api/usage?range=${range}`),

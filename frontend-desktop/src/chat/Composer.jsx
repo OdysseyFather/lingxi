@@ -14,6 +14,11 @@ export function Composer() {
   const [useKB, setUseKB] = useState(false);
   const [images, setImages] = useState([]); // [{ mediaType, data, preview }]
   const taRef = useRef(null);
+  // IME 组合状态：onCompositionStart=true，onCompositionEnd=false
+  // 单独 ref 跟踪是为了规避 React isComposing 在某些 IME（搜狗/微软拼音）下不可靠
+  const composingRef = useRef(false);
+  // composition 刚结束的瞬间一些 IME 仍会把 Enter 当作选词确认而非提交，留 50ms 缓冲
+  const composingEndTsRef = useRef(0);
 
   useEffect(() => {
     const el = taRef.current;
@@ -45,10 +50,31 @@ export function Composer() {
   };
 
   const onKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-      e.preventDefault();
-      onSubmit();
+    if (e.key !== 'Enter' || e.shiftKey) return;
+    // 1. React 合成事件的 isComposing
+    // 2. 原生事件的 isComposing（部分 IME 仅在原生事件上设置）
+    // 3. keyCode === 229（IME 处理中的标准信号）
+    // 4. 组件自跟踪的 composingRef
+    // 5. composition 结束后 50ms 内的 Enter 仍视为输入法确认
+    if (
+      e.isComposing ||
+      e.nativeEvent?.isComposing ||
+      e.keyCode === 229 ||
+      composingRef.current ||
+      Date.now() - composingEndTsRef.current < 50
+    ) {
+      return;
     }
+    e.preventDefault();
+    onSubmit();
+  };
+
+  const onCompositionStart = () => {
+    composingRef.current = true;
+  };
+  const onCompositionEnd = () => {
+    composingRef.current = false;
+    composingEndTsRef.current = Date.now();
   };
 
   const onPickFiles = async (files) => {
@@ -106,6 +132,8 @@ export function Composer() {
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
+            onCompositionStart={onCompositionStart}
+            onCompositionEnd={onCompositionEnd}
             onPaste={onPaste}
             placeholder="输入消息，Shift+Enter 换行"
             rows={1}

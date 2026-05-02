@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, Cpu, Pencil, Trash2, Zap, ExternalLink, ShieldCheck, Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Plus, Cpu, Pencil, Trash2, Zap, ExternalLink, ShieldCheck, Loader2, CheckCircle2, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { useStore } from '../state/useStore';
 import { api, electron } from '../api/client';
 import { Button, Input, Modal, Select, Badge, Card } from '../ui/primitives';
@@ -124,6 +124,7 @@ function ProfileEditor({ providers, profile, onClose, onSaved }) {
   const [token, setToken] = useState('');
   const [transformer, setTransformer] = useState(profile?.transformer || '');
   const [showAdvanced, setShowAdvanced] = useState(!!profile?.transformer);
+  const [showToken, setShowToken] = useState(false);
   const [saving, setSaving] = useState(false);
   const pushNotification = useStore((s) => s.pushNotification);
 
@@ -236,13 +237,24 @@ function ProfileEditor({ providers, profile, onClose, onSaved }) {
           <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={provider?.default_model || ''} />
         </Field>
         <Field label={isEdit ? '密钥（留空则保留旧值）' : 'API Key / AKSK Token'}>
-          <Input
-            type="password"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder={isEdit ? '••••••••' : 'sk-...'}
-            autoComplete="off"
-          />
+          <div className="relative">
+            <Input
+              type={showToken ? 'text' : 'password'}
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder={isEdit ? '••••••••' : 'sk-...'}
+              autoComplete="off"
+              className="pr-9"
+            />
+            <button
+              type="button"
+              onClick={() => setShowToken((v) => !v)}
+              className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 inline-flex items-center justify-center rounded-md text-[color:var(--text-faint)] hover:bg-[color:var(--bg-soft)] hover:text-[color:var(--text)]"
+              title={showToken ? '隐藏密钥' : '显示密钥'}
+            >
+              {showToken ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </div>
           <div className="mt-1 text-[11px] text-[color:var(--text-faint)] flex items-center gap-1">
             <ShieldCheck size={12} /> 通过系统 Keychain 加密存储，仅本机可解
           </div>

@@ -11,12 +11,25 @@ import (
 	"lingxi-agent/model"
 )
 
-// ListSessions GET /api/sessions
+// ListSessions GET /api/sessions?agent_id=N
 func ListSessions(c *gin.Context) {
-	rows, err := db.DB.Query(`
-		SELECT id, title, message_count, created_at, updated_at
-		FROM sessions ORDER BY updated_at DESC
-	`)
+	agentIDStr := c.Query("agent_id")
+	var (
+		rows *sql.Rows
+		err  error
+	)
+	if agentIDStr != "" {
+		agentID, _ := strconv.ParseInt(agentIDStr, 10, 64)
+		rows, err = db.DB.Query(`
+			SELECT id, title, message_count, COALESCE(agent_id,0), created_at, updated_at
+			FROM sessions WHERE COALESCE(agent_id,0)=? ORDER BY updated_at DESC
+		`, agentID)
+	} else {
+		rows, err = db.DB.Query(`
+			SELECT id, title, message_count, COALESCE(agent_id,0), created_at, updated_at
+			FROM sessions ORDER BY updated_at DESC
+		`)
+	}
 	if err != nil {
 		log.Printf("[session] list error: %v", err)
 		c.Status(http.StatusInternalServerError)
@@ -27,7 +40,7 @@ func ListSessions(c *gin.Context) {
 	sessions := make([]model.Session, 0)
 	for rows.Next() {
 		var s model.Session
-		if err := rows.Scan(&s.ID, &s.Title, &s.MessageCount, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.MessageCount, &s.AgentID, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			continue
 		}
 		sessions = append(sessions, s)
@@ -38,21 +51,22 @@ func ListSessions(c *gin.Context) {
 // CreateSession POST /api/sessions
 func CreateSession(c *gin.Context) {
 	var body struct {
-		Title string `json:"title"`
+		Title   string `json:"title"`
+		AgentID int64  `json:"agent_id"`
 	}
 	_ = c.ShouldBindJSON(&body)
 	if body.Title == "" {
 		body.Title = "新对话"
 	}
 
-	res, err := db.DB.Exec(`INSERT INTO sessions (title) VALUES (?)`, body.Title)
+	res, err := db.DB.Exec(`INSERT INTO sessions (title, agent_id) VALUES (?,?)`, body.Title, body.AgentID)
 	if err != nil {
 		log.Printf("[session] create error: %v", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
 	id, _ := res.LastInsertId()
-	c.JSON(http.StatusOK, gin.H{"id": id, "title": body.Title})
+	c.JSON(http.StatusOK, gin.H{"id": id, "title": body.Title, "agent_id": body.AgentID})
 }
 
 // UpdateSession PATCH /api/sessions/:id

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, safeStorage, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
@@ -94,6 +94,11 @@ function getAppHome() {
 // 知识库目录：userData/knowledge
 function getKbPath() {
   return path.join(app.getPath('userData'), 'knowledge');
+}
+
+// 用户上传图片持久化目录：userData/uploads
+function getUploadsPath() {
+  return path.join(app.getPath('userData'), 'uploads');
 }
 
 // skills 目录：隔离 HOME/.claude/skills（与 initClaudeConfig 同步的位置一致）
@@ -249,9 +254,11 @@ function startBackend() {
   const claudeBin = getClaudeBin();
   const kbPath = getKbPath();
   const skillsPath = getSkillsPath();
+  const uploadsPath = getUploadsPath();
 
-  // 确保知识库目录存在
+  // 确保知识库目录 + 上传目录存在
   fs.mkdirSync(kbPath, { recursive: true });
+  fs.mkdirSync(uploadsPath, { recursive: true });
 
   console.log('[electron] starting Go backend:', goBin);
   console.log('[electron] engine bin:', claudeBin);
@@ -308,6 +315,7 @@ function startBackend() {
       // 显式传入知识库和技能路径，避免 Go 自己拼路径时受 HOME 空格影响
       KB_PATH: kbPath,
       SKILLS_PATH: skillsPath,
+      UPLOADS_PATH: uploadsPath,
       // 认证信息（从 settings.json 读取，注入给 Go 后端，再透传给 AI 引擎）
       ...authEnv,
     },
@@ -358,7 +366,69 @@ function waitForBackend(timeout = BACKEND_STARTUP_TIMEOUT) {
   });
 }
 
-// ─── 创建主窗口 ──────────────────────────────────────────────────
+// ─── 应用菜单（确保 Cmd+C/V/X/A 等快捷键在 webview 内可用）─────
+function buildAppMenu() {
+  const isMac = process.platform === 'darwin';
+  const template = [
+    ...(isMac ? [{
+      label: app.name,
+      submenu: [
+        { role: 'about' },
+        { type: 'separator' },
+        { role: 'services' },
+        { type: 'separator' },
+        { role: 'hide' },
+        { role: 'hideOthers' },
+        { role: 'unhide' },
+        { type: 'separator' },
+        { role: 'quit' },
+      ],
+    }] : []),
+    {
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        ...(isMac
+          ? [
+              { role: 'pasteAndMatchStyle' },
+              { role: 'delete' },
+              { role: 'selectAll' },
+            ]
+          : [{ role: 'delete' }, { type: 'separator' }, { role: 'selectAll' }]),
+      ],
+    },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      role: 'window',
+      submenu: [
+        { role: 'minimize' },
+        { role: 'zoom' },
+        ...(isMac ? [{ type: 'separator' }, { role: 'front' }] : [{ role: 'close' }]),
+      ],
+    },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,
@@ -502,6 +572,8 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error('[electron] initClaudeConfig error:', err);
   }
+
+  buildAppMenu();
 
   startBackend();
 

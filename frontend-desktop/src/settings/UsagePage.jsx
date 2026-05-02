@@ -128,7 +128,12 @@ export function UsagePage() {
           ) : !quota ? (
             <div className="py-6 text-center text-sm text-[color:var(--text-faint)]">加载中…</div>
           ) : !quota.available ? (
-            <div className="py-6 text-center text-sm text-[color:var(--text-faint)]">{quota.reason || '当前供应商未提供额度查询'}</div>
+            <div className="py-6 text-center text-sm text-[color:var(--text-faint)]">
+              <div>当前供应商未开放账户额度查询</div>
+              {quota.reason && (
+                <div className="mt-1 text-[11px] opacity-70 break-all px-3">{friendlyQuotaReason(quota.reason)}</div>
+              )}
+            </div>
           ) : (
             <div className="space-y-2 text-sm">
               {quota.balance && <Row label="可用余额" value={`${quota.balance} ${quota.currency || ''}`} />}
@@ -201,4 +206,14 @@ function Row({ label, value }) {
       <span className="font-medium">{value}</span>
     </div>
   );
+}
+
+// DashScope 等供应商的余额接口对个人账户常返回 HTTP 404；这里转成更友好的提示。
+function friendlyQuotaReason(raw) {
+  const s = String(raw || '');
+  if (/HTTP\s*404/i.test(s)) return '该账号或密钥未开通余额查询权限（可正常调用模型）';
+  if (/HTTP\s*401|invalid.*key|unauthorized/i.test(s)) return '密钥无效或权限不足';
+  if (/HTTP\s*403/i.test(s)) return '密钥被拒绝（403），请检查权限范围';
+  if (/timeout|timed out/i.test(s)) return '上游接口响应超时';
+  return s;
 }

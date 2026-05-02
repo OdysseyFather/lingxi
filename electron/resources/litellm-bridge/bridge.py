@@ -245,6 +245,7 @@ def stream_to_anthropic_sse(response_iter, model: str, message_id: str):
 
     next_block_idx = 0          # 下一个 Anthropic block 的 index
     text_block_idx = None       # 文本 block 使用的 index（None=尚未开始）
+    thinking_block_idx = None   # 思考链 block 使用的 index
     # oai_tool_call_index -> {"block_idx": int, "id": str, "name": str}
     tool_blocks: dict = {}
     input_tokens = 0
@@ -271,9 +272,45 @@ def stream_to_anthropic_sse(response_iter, model: str, message_id: str):
             finish = getattr(choice, "finish_reason", None)
 
             if delta:
+                # ── 思考链 delta（OpenAI 兼容供应商透传 reasoning_content / reasoning）──
+                # 优先尝试属性，再尝试 dict 形式（部分供应商把 reasoning 放在 model_extra 里）
+                reasoning_text = (
+                    getattr(delta, "reasoning_content", None)
+                    or getattr(delta, "reasoning", None)
+                )
+                if not reasoning_text:
+                    # 尝试从原始 dict 取（litellm 有时通过 model_extra 暴露）
+                    try:
+                        raw = delta.model_dump() if hasattr(delta, "model_dump") else None
+                    except Exception:
+                        raw = None
+                    if isinstance(raw, dict):
+                        reasoning_text = raw.get("reasoning_content") or raw.get("reasoning")
+                if reasoning_text:
+                    if thinking_block_idx is None:
+                        thinking_block_idx = next_block_idx
+                        next_block_idx += 1
+                        yield sse_event("content_block_start", {
+                            "type": "content_block_start",
+                            "index": thinking_block_idx,
+                            "content_block": {"type": "thinking", "thinking": ""},
+                        })
+                    yield sse_event("content_block_delta", {
+                        "type": "content_block_delta",
+                        "index": thinking_block_idx,
+                        "delta": {"type": "thinking_delta", "thinking": reasoning_text},
+                    })
+
                 # ── 文本 delta ──
                 text = getattr(delta, "content", None)
                 if text:
+                    # 思考链结束（开始进入正式文本输出）→ 关闭 thinking block
+                    if thinking_block_idx is not None:
+                        yield sse_event("content_block_stop", {
+                            "type": "content_block_stop",
+                            "index": thinking_block_idx,
+                        })
+                        thinking_block_idx = None
                     if text_block_idx is None:
                         text_block_idx = next_block_idx
                         next_block_idx += 1
@@ -350,11 +387,17 @@ def stream_to_anthropic_sse(response_iter, model: str, message_id: str):
         traceback.print_exc(file=sys.stderr)
 
     # ── 关闭所有 block ──────────────────────────────────────────
+    if thinking_block_idx is not None:
+        yield sse_event("content_block_stop", {
+            "type": "content_block_stop",
+            "index": thinking_block_idx,
+        })
     if text_block_idx is not None:
         yield sse_event("content_block_stop", {
             "type": "content_block_stop",
             "index": text_block_idx,
         })
+
 
     for tb in sorted(tool_blocks.values(), key=lambda x: x["block_idx"]):
         yield sse_event("content_block_stop", {

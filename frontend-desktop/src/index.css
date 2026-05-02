@@ -181,10 +181,29 @@ body {
   background: var(--bg-soft);
   border-radius: 12px;
 }
-.surface-hover:hover {
-  border-color: var(--line-strong);
-  box-shadow: 0 6px 24px rgba(15,18,24,.06);
-  transform: translateY(-1px);
+/* 渐变描边卡片：用于 Hero / 突出展示区 */
+.surface-grad {
+  position: relative;
+  background: var(--bg-elev);
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgba(15,18,24,.04), 0 12px 48px rgba(15,18,24,.06);
+}
+.surface-grad::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 50%, transparent 100%);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0.55;
+}
+[data-theme="dark"] .surface-grad, [data-theme="midnight"] .surface-grad {
+  box-shadow: 0 1px 2px rgba(0,0,0,.4), 0 12px 48px rgba(0,0,0,.3);
 }
 
 /* 输入区 */

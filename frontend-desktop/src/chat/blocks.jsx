@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Brain, Wrench, Search, Globe, FileText, Code2, Pencil,
   ListTodo, FolderOpen, Terminal, ChevronDown, ChevronRight,
-  Loader2, CheckCircle2, Cpu, Coins, Clock,
+  Loader2, CheckCircle2, AlertCircle, Cpu, Coins, Clock,
 } from 'lucide-react';
 import { Badge, cn } from '../ui/primitives';
 
@@ -73,35 +73,94 @@ export function ThinkingCard({ text, live }) {
   );
 }
 
-export function ToolCard({ name, label, done, startedAt, endedAt }) {
+function toolCategory(name) {
+  if (!name) return { tag: '系统', tone: 'info' };
+  if (name.startsWith('mcp__playwright__')) return { tag: '浏览器', tone: 'info' };
+  if (name.startsWith('mcp__')) return { tag: 'MCP', tone: 'success' };
+  if (['Bash', 'Write', 'Edit', 'MultiEdit'].includes(name)) return { tag: '系统', tone: 'warn' };
+  if (['WebFetch', 'WebSearch'].includes(name)) return { tag: '网络', tone: 'info' };
+  return { tag: '工具', tone: 'info' };
+}
+
+export function ToolCard({ name, label, done, startedAt, endedAt, input, ms, status }) {
   const Icon = iconForTool(name);
-  const dur = endedAt && startedAt ? Math.max(1, endedAt - startedAt) : null;
+  const [open, setOpen] = useState(false);
+  const dur = ms != null ? ms : (endedAt && startedAt ? Math.max(1, endedAt - startedAt) : null);
+  const cat = toolCategory(name);
+  const failed = status === 'failed';
+
+  const showDetail = Boolean(input);
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-      className="surface-soft my-2 px-3 py-2 flex items-center gap-3 border border-[color:var(--line)]"
+      className={cn(
+        'surface-soft my-2 border overflow-hidden',
+        failed ? 'border-red-500/40' : 'border-[color:var(--line)]',
+      )}
     >
-      <div className={cn(
-        'w-8 h-8 rounded-lg flex items-center justify-center shrink-0',
-        done ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]',
-      )}>
-        <Icon size={16} />
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="text-sm font-medium">{label || '执行技能'}</div>
-        <div className="text-xs text-[color:var(--text-faint)] truncate">{name}</div>
-      </div>
-      <div className="text-xs">
-        {done ? (
-          <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-            <CheckCircle2 size={14} />完成{dur ? ` · ${(dur / 1000).toFixed(1)}s` : ''}
-          </span>
-        ) : (
-          <span className="inline-flex items-center gap-1 text-[color:var(--accent)]">
-            <Loader2 size={14} className="animate-spin" />进行中
-          </span>
+      <button
+        type="button"
+        onClick={() => showDetail && setOpen((v) => !v)}
+        className={cn(
+          'w-full px-3 py-2 flex items-center gap-3 text-left transition',
+          showDetail && 'hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer',
         )}
-      </div>
+      >
+        <div className={cn(
+          'w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-all',
+          failed
+            ? 'bg-red-500/10 text-red-500'
+            : done
+              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+              : 'bg-[color:var(--accent-soft)] text-[color:var(--accent)] shadow-glow',
+        )}>
+          <Icon size={16} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-medium flex items-center gap-2">
+            <span className="truncate">{label || '执行技能'}</span>
+            <Badge tone={cat.tone}>{cat.tag}</Badge>
+          </div>
+          <div className="text-xs text-[color:var(--text-faint)] truncate font-mono">
+            {input || name}
+          </div>
+        </div>
+        <div className="text-xs flex items-center gap-2">
+          {failed ? (
+            <span className="inline-flex items-center gap-1 text-red-500">
+              <AlertCircle size={14} />失败
+            </span>
+          ) : done ? (
+            <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+              <CheckCircle2 size={14} />完成{dur ? ` · ${(dur / 1000).toFixed(1)}s` : ''}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 text-[color:var(--accent)]">
+              <Loader2 size={14} className="animate-spin" />进行中
+            </span>
+          )}
+          {showDetail && (open ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
+        </div>
+      </button>
+      <AnimatePresence initial={false}>
+        {open && showDetail && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="px-4 pb-3 pt-0 text-[12px] font-mono text-[color:var(--text-soft)] whitespace-pre-wrap break-all">
+              <div className="text-[10px] uppercase tracking-wide text-[color:var(--text-faint)] mb-1">输入摘要</div>
+              <div>{input}</div>
+              <div className="mt-1 text-[10px] text-[color:var(--text-faint)]">
+                工具: {name}
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

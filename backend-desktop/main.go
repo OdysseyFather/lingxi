@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"lingxi-agent/config"
 	"lingxi-agent/connector"
@@ -24,8 +26,19 @@ func main() {
 	r.Static("/assets", dist+"/assets")
 	r.StaticFile("/favicon.svg", dist+"/favicon.svg")
 	r.StaticFile("/icons.svg", dist+"/icons.svg")
+	r.StaticFile("/logo.png", dist+"/logo.png")
+	r.StaticFile("/logo.jpg", dist+"/logo.jpg")
+	r.StaticFile("/favicon.ico", dist+"/favicon.ico")
 
 	api := r.Group("/api")
+
+	// 用户上传图片静态目录
+	uploadsDir := os.Getenv("UPLOADS_PATH")
+	if uploadsDir == "" {
+		uploadsDir = filepath.Join(os.TempDir(), "lingxi-uploads")
+	}
+	os.MkdirAll(uploadsDir, 0755)
+	api.Static("/uploads", uploadsDir)
 
 	// 初始化 IM 连接器管理器（在路由组创建后立即初始化，wecom 会注册子路由）
 	connector.InitManager(api)
@@ -88,6 +101,20 @@ func main() {
 	// 用量
 	api.GET("/usage", handler.GetUsage)
 	api.GET("/usage/quota", handler.GetUsageQuota)
+
+	// MCP 服务器
+	api.GET("/mcp", handler.ListMCPServers)
+	api.POST("/mcp", handler.UpsertMCPServer)
+	api.DELETE("/mcp/:id", handler.DeleteMCPServer)
+	api.POST("/mcp/:id/toggle", handler.ToggleMCPServer)
+	api.GET("/mcp/export", handler.ExportMCPConfig)
+
+	// 智能体工厂
+	api.GET("/agents", handler.ListAgents)
+	api.GET("/agents/:id", handler.GetAgent)
+	api.POST("/agents", handler.UpsertAgent)
+	api.DELETE("/agents/:id", handler.DeleteAgent)
+	api.POST("/sessions/:id/agent", handler.SetSessionAgent)
 
 	// Electron 启动时下发激活档案明文 token
 	api.POST("/runtime/active-secret", handler.SetActiveSecret)

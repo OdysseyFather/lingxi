@@ -58,7 +58,7 @@ export function ModelSwitcher() {
       ) : null}
 
       {open && (
-        <div className="absolute top-11 left-0 z-40 w-[340px] surface shadow-soft p-2 animate-rise">
+        <div className="absolute top-11 right-0 z-40 w-[340px] surface shadow-soft p-2 animate-rise">
           <div className="px-2 pt-1 pb-2 text-xs text-[color:var(--text-faint)]">选择接入档案</div>
           <div className="max-h-[320px] overflow-y-auto scrollable -mx-1 px-1 space-y-1">
             {profiles.length === 0 && (

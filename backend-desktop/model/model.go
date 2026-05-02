@@ -7,6 +7,7 @@ type Session struct {
 	Title           string    `json:"title"`
 	ClaudeSessionID string    `json:"claude_session_id,omitempty"`
 	MessageCount    int       `json:"message_count"`
+	AgentID         int64     `json:"agent_id"`
 	CreatedAt       time.Time `json:"created_at"`
 	UpdatedAt       time.Time `json:"updated_at"`
 }

@@ -98,6 +98,12 @@ func SendNotification(title, body string) {
 	globalHub.BroadcastAll("notification", string(payload))
 }
 
+// BroadcastEvent 把任意事件广播给所有连接（payload 自动 JSON 序列化）
+func BroadcastEvent(event string, payload any) {
+	b, _ := json.Marshal(payload)
+	globalHub.BroadcastAll(event, string(b))
+}
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }

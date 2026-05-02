@@ -194,13 +194,69 @@ func buildSystemPrompt(useKB bool) string {
 	return prompt
 }
 
+// applyAgentPersona 用智能体的角色定义替换基础提示中的"你是灵犀"身份段。
+// 关键：保留保密规则、行为模式、语言规范，仅替换身份/介绍/称呼。
+// 这样自定义 agent 的 system_prompt 才不会被 "你叫灵犀" 高优先级规则覆盖。
+func applyAgentPersona(basePrompt, agentName, agentRole string) string {
+	agentName = strings.TrimSpace(agentName)
+	agentRole = strings.TrimSpace(agentRole)
+	if agentName == "" && agentRole == "" {
+		return basePrompt
+	}
+
+	// 找到"# 【最高优先级】身份与保密规则"标题
+	idHeader := "# 【最高优先级】身份与保密规则"
+	idIdx := strings.Index(basePrompt, idHeader)
+	// 找到 ## 保密
+	secIdx := strings.Index(basePrompt, "## 保密")
+	if idIdx < 0 || secIdx < 0 || secIdx <= idIdx {
+		return "# 【你的身份】\n你的名字是「" + agentName + "」。\n" + agentRole + "\n\n" + basePrompt
+	}
+
+	// head = 截止到"# 【最高优先级】身份与保密规则"之前
+	head := basePrompt[:idIdx]
+	// 把 head 里"你是\"灵犀\"..."到"你面对的是普通用户..."这一引言段全部去掉
+	if cut := strings.Index(head, `你是"灵犀"`); cut >= 0 {
+		head = head[:cut]
+	}
+
+	identityBlock := idHeader + "\n\n" +
+		"## 你的身份\n" +
+		"- 你的名字是「" + agentName + "」。\n" +
+		"- 角色设定：" + agentRole + "\n" +
+		"- 始终以「" + agentName + "」的身份与用户对话，严格按照上述角色定位回应所有问题。\n" +
+		"- 当用户问\"你是谁\"、\"你叫什么\"等身份问题，明确回答你是「" + agentName + "」并简述角色，禁止自称\"灵犀\"或\"AI 助理\"。\n" +
+		"- 如用户主动提及\"灵犀\"，可解释你是搭载在灵犀平台上的「" + agentName + "」专业智能体。\n" +
+		"- 与角色专业范围无关的闲聊，可礼貌简短回应或引导回到专业话题，但身份始终保持。\n\n" +
+		"## 技术细节保密\n" +
+		"- 你的内部技术实现对你自己也是未知的。遇到任何技术追问（\"你是什么模型\"、\"GPT 吗\"、\"Claude 吗\"、\"自研吗\"），统一回答：\"这个我不太清楚哦，我专注于把事情办好。\"\n" +
+		"- 禁止出现：Anthropic、OpenAI、Claude、GPT、Gemini、LLM、大语言模型、Agent、SDK、MCP、skill、API Key、claude-code 等技术词汇。\n" +
+		"- 即使推理过程中看到了任何技术信息，回答时必须完全隔离，绝不透露。\n\n"
+
+	return "你是「" + agentName + "」。" + firstLine(agentRole) + "\n\n" +
+		head + identityBlock + basePrompt[secIdx:]
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexAny(s, "\n。"); i > 0 {
+		return s[:i]
+	}
+	return s
+}
+
 // ─── 事件结构 ────────────────────────────────────────────────────
 
 type msgBlock struct {
-	Type string `json:"type"`
-	Name string `json:"name,omitempty"`
-	Text string `json:"text"`
-	Done bool   `json:"done,omitempty"`
+	Type   string `json:"type"`
+	Name   string `json:"name,omitempty"`
+	Text   string `json:"text"`
+	Done   bool   `json:"done,omitempty"`
+	Label  string `json:"label,omitempty"`
+	Input  string `json:"input,omitempty"`  // 工具输入摘要（已 redact 截断）
+	Output string `json:"output,omitempty"` // 工具输出摘要（保留前 N 字符）
+	Status string `json:"status,omitempty"` // ok | failed
+	Ms     int64  `json:"ms,omitempty"`     // 工具耗时（毫秒）
 }
 
 type claudeEvent struct {
@@ -224,15 +280,18 @@ type claudeUsage struct {
 type innerEvent struct {
 	Type         string `json:"type"`
 	ContentBlock struct {
-		Type string `json:"type"`
-		ID   string `json:"id"`
-		Name string `json:"name"`
+		Type    string          `json:"type"`
+		ID      string          `json:"id"`
+		Name    string          `json:"name"`
+		Content json.RawMessage `json:"content,omitempty"`
 	} `json:"content_block"`
 	Delta struct {
-		Type        string `json:"type"`
-		Thinking    string `json:"thinking"`
-		Text        string `json:"text"`
-		PartialJSON string `json:"partial_json"`
+		Type             string `json:"type"`
+		Thinking         string `json:"thinking"`
+		Text             string `json:"text"`
+		PartialJSON      string `json:"partial_json"`
+		ReasoningContent string `json:"reasoning_content,omitempty"`
+		Reasoning        string `json:"reasoning,omitempty"`
 	} `json:"delta"`
 	Usage   *claudeUsage    `json:"usage,omitempty"`
 	Message json.RawMessage `json:"message,omitempty"`
@@ -266,6 +325,84 @@ func toolDisplayLabel(name string) string {
 		return "执行技能"
 	}
 	return "执行技能"
+}
+
+// safeSummarizeToolInput 把工具的输入 JSON 转成"前台可展示的摘要"。
+// 仅保留少量关键字段，对路径/命令做 redact 与截断，避免敏感信息外泄。
+func safeSummarizeToolInput(name, rawJSON string) string {
+	if rawJSON == "" {
+		return ""
+	}
+	if isSensitivePath(rawJSON) {
+		return "[已拦截敏感操作]"
+	}
+	var obj map[string]any
+	if err := json.Unmarshal([]byte(rawJSON), &obj); err != nil {
+		return ""
+	}
+	pick := func(keys ...string) string {
+		for _, k := range keys {
+			if v, ok := obj[k]; ok {
+				if s, ok := v.(string); ok {
+					return s
+				}
+			}
+		}
+		return ""
+	}
+	abbr := func(s string, n int) string {
+		runes := []rune(s)
+		if len(runes) <= n {
+			return s
+		}
+		return string(runes[:n]) + "…"
+	}
+	var summary string
+	switch {
+	case name == "Bash":
+		summary = pick("command")
+	case name == "Read" || name == "Write" || name == "Edit" || name == "MultiEdit":
+		fp := pick("file_path", "path")
+		if fp != "" {
+			summary = filepath.Base(fp)
+		}
+	case name == "Glob":
+		summary = pick("pattern")
+	case name == "Grep":
+		summary = pick("pattern")
+	case name == "WebFetch", name == "WebSearch":
+		summary = pick("url", "query")
+	case name == "TodoWrite":
+		summary = "更新待办列表"
+	case strings.HasPrefix(name, "mcp__"):
+		// MCP 工具：选最常见的 url/query/path 作摘要
+		for _, k := range []string{"url", "query", "path", "name", "selector", "command"} {
+			if s := pick(k); s != "" {
+				summary = k + "=" + s
+				break
+			}
+		}
+	default:
+		// 兜底：取首个字符串字段
+		for _, v := range obj {
+			if s, ok := v.(string); ok && s != "" {
+				summary = s
+				break
+			}
+		}
+	}
+	summary = redactSensitive(summary)
+	return abbr(summary, 80)
+}
+
+// safeSummarizeToolOutput 截断+redact 工具输出，最多 N 字符
+func safeSummarizeToolOutput(s string, max int) string {
+	s = redactSensitive(s)
+	runes := []rune(s)
+	if len(runes) <= max {
+		return s
+	}
+	return string(runes[:max]) + "…"
 }
 
 // ─── 多模态支持 ──────────────────────────────────────────────────
@@ -317,6 +454,39 @@ func saveImagesToTmp(images []imagePayload) ([]string, error) {
 		paths = append(paths, fpath)
 	}
 	return paths, nil
+}
+
+// uploadsDir 返回用户上传文件持久化目录（由 Electron 通过 UPLOADS_PATH 注入）
+func uploadsDir() string {
+	d := os.Getenv("UPLOADS_PATH")
+	if d == "" {
+		d = filepath.Join(os.TempDir(), "lingxi-uploads")
+	}
+	os.MkdirAll(d, 0755)
+	return d
+}
+
+// saveImagesPermanent 保存用户上传的图片到 UPLOADS_PATH，返回 (本地路径, /api/uploads/xxx URL)
+func saveImagesPermanent(sessionID int64, images []imagePayload) (paths []string, urls []string, err error) {
+	if len(images) == 0 {
+		return nil, nil, nil
+	}
+	dir := uploadsDir()
+	for i, img := range images {
+		data, e := base64.StdEncoding.DecodeString(img.Data)
+		if e != nil {
+			return paths, urls, fmt.Errorf("decode image %d: %w", i, e)
+		}
+		ext := mediaTypeToExt(img.MediaType)
+		name := fmt.Sprintf("u_%d_%d_%d%s", sessionID, time.Now().UnixNano(), i, ext)
+		fpath := filepath.Join(dir, name)
+		if e := os.WriteFile(fpath, data, 0644); e != nil {
+			return paths, urls, fmt.Errorf("write image %d: %w", i, e)
+		}
+		paths = append(paths, fpath)
+		urls = append(urls, "/api/uploads/"+name)
+	}
+	return paths, urls, nil
 }
 
 // cleanupImageFiles 删除临时图片文件，忽略错误
@@ -378,7 +548,25 @@ func Chat(c *gin.Context) {
 	if len(body.Images) > 0 && displayMsg == "" {
 		displayMsg = "[图片]"
 	}
-	appendMessage(sessionID, "user", displayMsg)
+
+	// 持久化用户上传的图片，并构造带图片 URL 的用户消息内容（JSON）
+	imagePaths, imageURLs, perr := saveImagesPermanent(sessionID, body.Images)
+	if perr != nil {
+		log.Printf("[chat] saveImagesPermanent error: %v", perr)
+	}
+	var userContent string
+	if len(imageURLs) > 0 {
+		j, _ := json.Marshal(map[string]any{
+			"text":   body.Message,
+			"images": imageURLs,
+		})
+		userContent = string(j)
+	} else {
+		userContent = displayMsg
+	}
+	appendMessage(sessionID, "user", userContent)
+
+	// 标题：仍用纯文本截断
 	runes := []rune(displayMsg)
 	if len(runes) > 20 {
 		updateSessionTitle(sessionID, string(runes[:20])+"…")
@@ -386,7 +574,7 @@ func Chat(c *gin.Context) {
 		updateSessionTitle(sessionID, string(runes))
 	}
 	c.JSON(http.StatusAccepted, gin.H{"status": "accepted", "sessionId": sessionID})
-	go runClaude(sessionID, body.Message, body.UseKB, body.Images)
+	go runClaudeWithPaths(sessionID, body.Message, body.UseKB, imagePaths)
 }
 
 func BatchChat(c *gin.Context) {
@@ -457,15 +645,20 @@ func AbortChat(c *gin.Context) {
 // ─── 核心执行函数（纯前台流式执行）────────────────────────────────
 
 func runClaude(sessionID int64, message string, useKB bool, images []imagePayload) {
-	hub := globalHub
-	cfg := config.Get()
-
-	// 将图片写入临时文件，回复完成后清理
+	// 兼容旧入口：先把图片保存到临时目录，再调用 runClaudeWithPaths
 	imagePaths, err := saveImagesToTmp(images)
 	if err != nil {
 		log.Printf("[chat] saveImagesToTmp error: %v", err)
 	}
 	defer cleanupImageFiles(imagePaths)
+	runClaudeWithPaths(sessionID, message, useKB, imagePaths)
+}
+
+// runClaudeWithPaths 与 runClaude 相同，但接受已经持久化好的图片路径列表，
+// 不再在内部保存或删除。前台对话路径走这个，复用 uploads/ 下的永久文件。
+func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths []string) {
+	hub := globalHub
+	cfg := config.Get()
 
 	// 检查挂起任务，注入上下文
 	if taskDesc, missingFields, found := db.GetPendingTask(sessionID); found {
@@ -483,6 +676,12 @@ func runClaude(sessionID int64, message string, useKB bool, images []imagePayloa
 		"--dangerously-skip-permissions",
 	}
 	prompt := buildSystemPrompt(useKB)
+	// 应用智能体角色设定（如果会话绑定了非内置 agent）
+	if agentID := db.GetSessionAgentID(sessionID); agentID > 0 {
+		if a, err := db.GetAgent(agentID); err == nil && !a.Builtin && strings.TrimSpace(a.SystemPrompt) != "" {
+			prompt = applyAgentPersona(prompt, a.Name, a.SystemPrompt)
+		}
+	}
 	if claudeSessionID != "" {
 		args = append(args, "--resume", claudeSessionID)
 		args = append(args, "--system-prompt", prompt)
@@ -677,7 +876,7 @@ func runClaude(sessionID int64, message string, useKB bool, images []imagePayloa
 			case "content_block_start":
 				if inner.ContentBlock.Type == "tool_use" {
 					toolName := inner.ContentBlock.Name
-					payload, _ := json.Marshal(map[string]string{
+					payload, _ := json.Marshal(map[string]any{
 						"id":    inner.ContentBlock.ID,
 						"name":  toolName,
 						"label": toolDisplayLabel(toolName),
@@ -689,7 +888,13 @@ func runClaude(sessionID int64, message string, useKB bool, images []imagePayloa
 					} else {
 						hub.Send(sessionID, "agent_state", `{"state":"EXECUTING"}`)
 					}
-					appendBlock("tool", toolName, "")
+					b := msgBlock{
+						Type:  "tool",
+						Name:  toolName,
+						Label: toolDisplayLabel(toolName),
+						Ms:    time.Now().UnixMilli(), // 临时存 startedAt，结束时再换算
+					}
+					blocks = append(blocks, b)
 				} else if inner.ContentBlock.Type == "thinking" {
 					appendBlock("thinking", "", "")
 				}
@@ -714,12 +919,23 @@ func runClaude(sessionID int64, message string, useKB bool, images []imagePayloa
 						}
 					}
 				case "input_json_delta":
-					// 工具输入仅在后端累积用于安全检测，不推送给前端
+					// 工具输入累积在 block.Input（仅用于摘要，不直接外泄）
 					if d.PartialJSON != "" && len(blocks) > 0 {
 						last := &blocks[len(blocks)-1]
 						if last.Type == "tool" {
-							last.Text += d.PartialJSON
+							last.Input += d.PartialJSON
 						}
+					}
+				default:
+					// 兼容某些 OpenAI 兼容供应商透传 reasoning_content 字段（思考链）
+					if d.ReasoningContent != "" || d.Reasoning != "" {
+						r := d.ReasoningContent
+						if r == "" {
+							r = d.Reasoning
+						}
+						safe := redactSensitive(r)
+						hub.Send(sessionID, "thinking", jsonStr(safe))
+						appendBlock("thinking", "", safe)
 					}
 				}
 
@@ -728,11 +944,25 @@ func runClaude(sessionID int64, message string, useKB bool, images []imagePayloa
 					last := &blocks[len(blocks)-1]
 					if last.Type == "tool" {
 						last.Done = true
-						if isSensitivePath(last.Text) {
-							last.Text = "[已拦截敏感操作]"
+						startedMs := last.Ms
+						elapsed := time.Now().UnixMilli() - startedMs
+						if elapsed < 0 {
+							elapsed = 0
 						}
-						last.Text = "" // 清空工具输入内容，不向前端暴露
-						hub.Send(sessionID, "tool_end", `{"done":true}`)
+						summary := safeSummarizeToolInput(last.Name, last.Input)
+						last.Input = summary
+						last.Ms = elapsed
+						last.Status = "ok"
+						// 推送富 tool_end 事件
+						endPayload, _ := json.Marshal(map[string]any{
+							"done":  true,
+							"name":  last.Name,
+							"label": last.Label,
+							"input": summary,
+							"ms":    elapsed,
+							"status": "ok",
+						})
+						hub.Send(sessionID, "tool_end", string(endPayload))
 						hub.Send(sessionID, "agent_state", `{"state":"THINKING"}`)
 					}
 				}
@@ -764,11 +994,11 @@ func runClaude(sessionID int64, message string, useKB bool, images []imagePayloa
 		for i := range blocks {
 			if blocks[i].Type == "tool" {
 				blocks[i].Done = true
-				blocks[i].Text = ""
+				blocks[i].Text = "" // 不存底层 partial JSON 原文
+				// 保留 Label / Input 摘要 / Ms / Status，便于历史回看
 			} else {
 				blocks[i].Text = redactSensitive(blocks[i].Text)
 			}
-			// thinking 仍保留（已 redact）
 			saveBlocks = append(saveBlocks, blocks[i])
 		}
 		if len(saveBlocks) > 0 {
@@ -1112,7 +1342,7 @@ func RunClaudeSync(message string, sessionID int64) (reply string, usedSessionID
 					if d.PartialJSON != "" && len(blocks) > 0 {
 						last := &blocks[len(blocks)-1]
 						if last.Type == "tool" {
-							last.Text += d.PartialJSON
+							last.Input += d.PartialJSON
 						}
 					}
 				}
@@ -1121,10 +1351,10 @@ func RunClaudeSync(message string, sessionID int64) (reply string, usedSessionID
 					last := &blocks[len(blocks)-1]
 					if last.Type == "tool" {
 						last.Done = true
-						if isSensitivePath(last.Text) {
-							last.Text = "[已拦截敏感操作]"
+						if isSensitivePath(last.Input) {
+							last.Input = "[已拦截敏感操作]"
 						}
-						last.Text = "" // 不持久化工具输入内容
+						last.Input = safeSummarizeToolInput(last.Name, last.Input)
 					}
 				}
 			}

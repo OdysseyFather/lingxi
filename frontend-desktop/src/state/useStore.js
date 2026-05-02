@@ -29,12 +29,17 @@ export const useStore = create((set, get) => ({
     }
   },
   refreshSessions: async () => {
-    const sessions = await api.listSessions().catch(() => []);
+    const agentId = get().activeAgentId;
+    const sessions = await api.listSessions(agentId).catch(() => []);
     set({ sessions });
     return sessions;
   },
-  createSession: async (title) => {
-    const r = await api.createSession(title || '新对话');
+  createSession: async (titleOrPayload) => {
+    const activeAgentId = get().activeAgentId || 0;
+    const payload = typeof titleOrPayload === 'string'
+      ? { title: titleOrPayload || '新对话', agent_id: activeAgentId }
+      : { title: '新对话', agent_id: activeAgentId, ...(titleOrPayload || {}) };
+    const r = await api.createSession(payload);
     await get().refreshSessions();
     await get().setActiveSession(r.id);
     return r.id;
@@ -78,6 +83,32 @@ export const useStore = create((set, get) => ({
       await window.electronAPI.pushActiveSecret(id);
     }
     await get().refreshProfiles();
+  },
+
+  // ─── 智能体 ────────────────────────────────────────────────
+  agents: [],
+  activeAgentId: Number(localStorage.getItem('lingxi-active-agent')) || 1,
+  refreshAgents: async () => {
+    const agents = await api.listAgents().catch(() => []);
+    set({ agents });
+    // 校正 activeAgentId：如果当前选的 agent 不存在，则回退到第一个 builtin
+    const cur = get().activeAgentId;
+    if (!agents.find((a) => a.id === cur)) {
+      const fallback = (agents.find((a) => a.builtin) || agents[0]);
+      if (fallback) {
+        localStorage.setItem('lingxi-active-agent', String(fallback.id));
+        set({ activeAgentId: fallback.id });
+      }
+    }
+    return agents;
+  },
+  setActiveAgent: async (agentId) => {
+    localStorage.setItem('lingxi-active-agent', String(agentId));
+    set({ activeAgentId: agentId, activeSessionId: null, messages: [], liveBlocks: [] });
+    const sessions = await get().refreshSessions();
+    if (sessions.length > 0) {
+      await get().setActiveSession(sessions[0].id);
+    }
   },
 
   // ─── 用量摘要（顶部小标签）─────────────────────────────────
@@ -156,6 +187,13 @@ export const useStore = create((set, get) => ({
           if (blocks[i].type === 'tool' && !blocks[i].done) {
             blocks[i].done = true;
             blocks[i].endedAt = Date.now();
+            // 富 payload：input/label/ms/status
+            if (payload && typeof payload === 'object') {
+              if (payload.input != null) blocks[i].input = payload.input;
+              if (payload.label) blocks[i].label = payload.label;
+              if (payload.ms != null) blocks[i].ms = payload.ms;
+              if (payload.status) blocks[i].status = payload.status;
+            }
             break;
           }
         }
@@ -214,6 +252,14 @@ export const useStore = create((set, get) => ({
         state.pushNotification({ title: '已切换模型', body: payload?.name || '激活档案已更新' });
         break;
       }
+      case 'agent_changed': {
+        state.refreshAgents();
+        break;
+      }
+      case 'mcp_changed': {
+        state.pushNotification({ title: 'MCP 配置已更新', body: '将在下次新对话生效' });
+        break;
+      }
       case 'notification': {
         if (payload) state.pushNotification(payload);
         break;
@@ -228,12 +274,17 @@ export const useStore = create((set, get) => ({
     if (!sid) {
       sid = await get().createSession();
     }
-    // 立即在本地追加 user 消息
+    // 立即在本地追加 user 消息（含图片预览，data: URL 直接可渲染）
+    let localContent = message || (images.length ? '[图片]' : '');
+    if (images.length > 0) {
+      const previewImages = images.map((img) => `data:${img.mediaType};base64,${img.data}`);
+      localContent = JSON.stringify({ text: message || '', images: previewImages });
+    }
     const localUserMsg = {
       id: -Date.now(),
       session_id: sid,
       role: 'user',
-      content: message || (images.length ? '[图片]' : ''),
+      content: localContent,
       created_at: new Date().toISOString(),
     };
     set({
@@ -273,7 +324,10 @@ export function initStore() {
 
   refreshProfiles();
   refreshTodayUsage();
-  refreshSessions().then((list) => {
-    if (list.length > 0) setActiveSession(list[0].id);
+  // 先加载 agents（影响 sessions 过滤）
+  useStore.getState().refreshAgents().then(() => {
+    refreshSessions().then((list) => {
+      if (list.length > 0) setActiveSession(list[0].id);
+    });
   });
 }

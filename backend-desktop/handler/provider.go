@@ -266,23 +266,51 @@ func TestAPIProfile(c *gin.Context) {
 		return
 	}
 
-	// 发起一次最小 messages 请求，使用 anthropic 协议
-	reqBody, _ := json.Marshal(map[string]interface{}{
-		"model":      ap.Model,
-		"max_tokens": 16,
-		"messages":   []map[string]string{{"role": "user", "content": "ping"}},
-	})
-	httpReq, err := http.NewRequest("POST", baseURL+"/v1/messages", bytes.NewReader(reqBody))
+	// 按协议分支：OpenAI 兼容档案直接对 baseURL 发 OpenAI 协议请求；
+	// Anthropic 档案才发 /v1/messages。否则会出现
+	//   .../v1/chat/completions/v1/messages → 404 No static resource。
+	isOpenAI := ap.ProviderProtocol == "openai"
+	var (
+		reqURL  string
+		reqBody []byte
+	)
+	if isOpenAI {
+		// OpenAI 兼容端点：baseURL 通常已经包含 /chat/completions
+		reqURL = baseURL
+		if !strings.Contains(reqURL, "/chat/completions") {
+			reqURL = strings.TrimRight(reqURL, "/") + "/v1/chat/completions"
+		}
+		reqBody, _ = json.Marshal(map[string]interface{}{
+			"model":      ap.Model,
+			"max_tokens": 16,
+			"stream":     false,
+			"messages":   []map[string]string{{"role": "user", "content": "ping"}},
+		})
+	} else {
+		reqURL = baseURL + "/v1/messages"
+		reqBody, _ = json.Marshal(map[string]interface{}{
+			"model":      ap.Model,
+			"max_tokens": 16,
+			"messages":   []map[string]string{{"role": "user", "content": "ping"}},
+		})
+	}
+
+	httpReq, err := http.NewRequest("POST", reqURL, bytes.NewReader(reqBody))
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"ok": false, "error": err.Error()})
 		return
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("anthropic-version", "2023-06-01")
-	httpReq.Header.Set("x-api-key", token)
-	httpReq.Header.Set("Authorization", "Bearer "+token)
+	if isOpenAI {
+		httpReq.Header.Set("Authorization", "Bearer "+token)
+	} else {
+		httpReq.Header.Set("anthropic-version", "2023-06-01")
+		httpReq.Header.Set("x-api-key", token)
+		httpReq.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	client := &http.Client{Timeout: 12 * time.Second}
+	startTs := time.Now()
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{"ok": false, "error": err.Error()})
@@ -301,7 +329,7 @@ func TestAPIProfile(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"ok":      true,
 		"status":  resp.StatusCode,
-		"latency": fmt.Sprintf("%v", time.Now()), // 占位
+		"latency": fmt.Sprintf("%dms", time.Since(startTs).Milliseconds()),
 	})
 }
 

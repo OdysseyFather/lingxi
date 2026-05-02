@@ -148,6 +148,38 @@ func migrate() {
 			snapshot    TEXT    NOT NULL DEFAULT '{}',
 			fetched_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
+		// ── MCP Servers ──────────────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS mcp_servers (
+			id           INTEGER PRIMARY KEY AUTOINCREMENT,
+			name         TEXT    NOT NULL UNIQUE,
+			transport    TEXT    NOT NULL DEFAULT 'stdio',
+			command      TEXT    NOT NULL DEFAULT '',
+			args         TEXT    NOT NULL DEFAULT '[]',
+			env          TEXT    NOT NULL DEFAULT '{}',
+			url          TEXT    NOT NULL DEFAULT '',
+			headers      TEXT    NOT NULL DEFAULT '{}',
+			enabled      INTEGER NOT NULL DEFAULT 1,
+			builtin      INTEGER NOT NULL DEFAULT 0,
+			description  TEXT    NOT NULL DEFAULT '',
+			created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		// ── Agents（智能体工厂）─────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS agents (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			name            TEXT    NOT NULL,
+			avatar          TEXT    NOT NULL DEFAULT '✦',
+			description     TEXT    NOT NULL DEFAULT '',
+			system_prompt   TEXT    NOT NULL DEFAULT '',
+			profile_id      INTEGER NOT NULL DEFAULT 0,
+			skill_ids       TEXT    NOT NULL DEFAULT '[]',
+			mcp_server_ids  TEXT    NOT NULL DEFAULT '[]',
+			knowledge_ids   TEXT    NOT NULL DEFAULT '[]',
+			allow_all       INTEGER NOT NULL DEFAULT 1,
+			builtin         INTEGER NOT NULL DEFAULT 0,
+			created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := DB.Exec(s); err != nil {
@@ -159,8 +191,25 @@ func migrate() {
 	addColumnIfMissing("messages", "usage", "TEXT NOT NULL DEFAULT ''")
 	// 列级迁移：api_profiles.transformer（bridge 路由层保留字段，留空表示自动）
 	addColumnIfMissing("api_profiles", "transformer", "TEXT NOT NULL DEFAULT ''")
+	// 列级迁移：sessions.agent_id（关联智能体；0=通用助理）
+	addColumnIfMissing("sessions", "agent_id", "INTEGER NOT NULL DEFAULT 0")
 
 	seedBuiltinProviders()
+	seedBuiltinAgent()
+}
+
+// seedBuiltinAgent 插入内置「通用助理」agent（id=1）
+func seedBuiltinAgent() {
+	var cnt int
+	DB.QueryRow(`SELECT COUNT(1) FROM agents WHERE builtin=1`).Scan(&cnt)
+	if cnt > 0 {
+		return
+	}
+	_, err := DB.Exec(`INSERT INTO agents (name, avatar, description, system_prompt, allow_all, builtin)
+		VALUES ('通用助理', '✦', '默认通用智能助理，开箱即用、无任何限制。', '', 1, 1)`)
+	if err != nil {
+		log.Printf("[db] seed builtin agent error: %v", err)
+	}
 }
 
 // addColumnIfMissing 检查列是否存在，不存在则 ALTER TABLE 增加
