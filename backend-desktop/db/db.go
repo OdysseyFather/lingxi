@@ -193,6 +193,50 @@ func migrate() {
 	addColumnIfMissing("api_profiles", "transformer", "TEXT NOT NULL DEFAULT ''")
 	// 列级迁移：sessions.agent_id（关联智能体；0=通用助理）
 	addColumnIfMissing("sessions", "agent_id", "INTEGER NOT NULL DEFAULT 0")
+	// 列级迁移：sessions.pinned（置顶会话）
+	addColumnIfMissing("sessions", "pinned", "INTEGER NOT NULL DEFAULT 0")
+	addColumnIfMissing("usage_records", "estimated", "INTEGER NOT NULL DEFAULT 0")
+	addColumnIfMissing("agents", "temperature", "REAL NOT NULL DEFAULT 0")
+	addColumnIfMissing("agents", "max_tokens", "INTEGER NOT NULL DEFAULT 0")
+	addColumnIfMissing("skills", "source", "TEXT NOT NULL DEFAULT 'local'")
+	addColumnIfMissing("skills", "marketplace_id", "TEXT NOT NULL DEFAULT ''")
+	addColumnIfMissing("skills", "marketplace_version", "TEXT NOT NULL DEFAULT ''")
+	addColumnIfMissing("skills", "author", "TEXT NOT NULL DEFAULT ''")
+	addColumnIfMissing("messages", "feedback", "TEXT NOT NULL DEFAULT ''")
+
+	// ── 定时任务 表 ──────────────────────────────────────────────
+	for _, s := range []string{
+		`CREATE TABLE IF NOT EXISTS scheduled_tasks (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			name            TEXT    NOT NULL,
+			prompt          TEXT    NOT NULL DEFAULT '',
+			agent_id        INTEGER NOT NULL DEFAULT 0,
+			cron_expr       TEXT    NOT NULL DEFAULT '',
+			stateful        INTEGER NOT NULL DEFAULT 0,
+			session_id      INTEGER DEFAULT NULL,
+			notify_desktop  INTEGER NOT NULL DEFAULT 1,
+			enabled         INTEGER NOT NULL DEFAULT 1,
+			last_run_at     DATETIME DEFAULT NULL,
+			next_run_at     DATETIME DEFAULT NULL,
+			run_count       INTEGER NOT NULL DEFAULT 0,
+			created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS scheduled_task_runs (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			task_id     INTEGER NOT NULL,
+			session_id  INTEGER NOT NULL,
+			status      TEXT    NOT NULL DEFAULT 'running',
+			summary     TEXT    NOT NULL DEFAULT '',
+			started_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			finished_at DATETIME DEFAULT NULL
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_sched_runs_task ON scheduled_task_runs(task_id)`,
+	} {
+		if _, err := DB.Exec(s); err != nil {
+			log.Printf("[db] scheduled_tasks migrate: %v", err)
+		}
+	}
 
 	seedBuiltinProviders()
 	seedBuiltinAgent()
@@ -527,6 +571,12 @@ func DeleteKnowledge(id int64) (string, error) {
 	return filePath, nil
 }
 
+func UpdateKnowledge(id int64, title, category, tags, summary string) error {
+	_, err := DB.Exec(`UPDATE knowledge SET title=?, category=?, tags=?, summary=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+		title, category, tags, summary, id)
+	return err
+}
+
 // ─── IM Connectors ───────────────────────────────────────────────
 
 type IMConnector struct {
@@ -822,20 +872,25 @@ type UsageRecord struct {
 	CacheReadTokens   int64     `json:"cache_read_tokens"`
 	CacheWriteTokens  int64     `json:"cache_write_tokens"`
 	CostUSD           float64   `json:"cost_usd"`
+	Estimated         bool      `json:"estimated"`
 	DurationMs        int64     `json:"duration_ms"`
 	CreatedAt         time.Time `json:"created_at"`
 }
 
 func InsertUsageRecord(r *UsageRecord) (int64, error) {
+	est := 0
+	if r.Estimated {
+		est = 1
+	}
 	res, err := DB.Exec(`
 		INSERT INTO usage_records
 			(session_id, message_id, profile_id, model,
 			 input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
-			 cost_usd, duration_ms)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`,
+			 cost_usd, estimated, duration_ms)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
 		r.SessionID, r.MessageID, r.ProfileID, r.Model,
 		r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens,
-		r.CostUSD, r.DurationMs)
+		r.CostUSD, est, r.DurationMs)
 	if err != nil {
 		return 0, err
 	}
@@ -929,7 +984,7 @@ func ListRecentUsage(limit int) ([]map[string]interface{}, error) {
 	}
 	rows, err := DB.Query(`
 		SELECT u.id, u.session_id, COALESCE(s.title,''), u.model, u.input_tokens, u.output_tokens,
-		       u.cache_read_tokens, u.cache_write_tokens, u.cost_usd, u.duration_ms, u.created_at
+		       u.cache_read_tokens, u.cache_write_tokens, u.cost_usd, u.estimated, u.duration_ms, u.created_at
 		FROM usage_records u LEFT JOIN sessions s ON s.id=u.session_id
 		ORDER BY u.id DESC LIMIT ?`, limit)
 	if err != nil {
@@ -938,19 +993,23 @@ func ListRecentUsage(limit int) ([]map[string]interface{}, error) {
 	defer rows.Close()
 	out := make([]map[string]interface{}, 0)
 	for rows.Next() {
-		var id, sid, in, outT, cr, cw, dur int64
+		var id, sid, in, outT, cr, cw, est, dur int64
 		var title, model string
 		var cost float64
 		var createdAt time.Time
-		if err := rows.Scan(&id, &sid, &title, &model, &in, &outT, &cr, &cw, &cost, &dur, &createdAt); err != nil {
+		if err := rows.Scan(&id, &sid, &title, &model, &in, &outT, &cr, &cw, &cost, &est, &dur, &createdAt); err != nil {
 			continue
 		}
-		out = append(out, map[string]interface{}{
+		rec := map[string]interface{}{
 			"id": id, "session_id": sid, "session_title": title,
 			"model": model, "input_tokens": in, "output_tokens": outT,
 			"cache_read_tokens": cr, "cache_write_tokens": cw,
 			"cost_usd": cost, "duration_ms": dur, "created_at": createdAt,
-		})
+		}
+		if est == 1 {
+			rec["estimated"] = true
+		}
+		out = append(out, rec)
 	}
 	return out, nil
 }
@@ -972,4 +1031,209 @@ func GetUsageQuotaCache(profileID int64) (string, time.Time, bool) {
 		return "", time.Time{}, false
 	}
 	return snap, t, true
+}
+
+// ─── Scheduled Tasks ─────────────────────────────────────────────
+
+type ScheduledTask struct {
+	ID            int64      `json:"id"`
+	Name          string     `json:"name"`
+	Prompt        string     `json:"prompt"`
+	AgentID       int64      `json:"agent_id"`
+	CronExpr      string     `json:"cron_expr"`
+	Stateful      bool       `json:"stateful"`
+	SessionID     *int64     `json:"session_id"`
+	NotifyDesktop bool       `json:"notify_desktop"`
+	Enabled       bool       `json:"enabled"`
+	LastRunAt     *time.Time `json:"last_run_at"`
+	NextRunAt     *time.Time `json:"next_run_at"`
+	RunCount      int        `json:"run_count"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+}
+
+type ScheduledTaskRun struct {
+	ID         int64      `json:"id"`
+	TaskID     int64      `json:"task_id"`
+	SessionID  int64      `json:"session_id"`
+	Status     string     `json:"status"`
+	Summary    string     `json:"summary"`
+	StartedAt  time.Time  `json:"started_at"`
+	FinishedAt *time.Time `json:"finished_at"`
+}
+
+func scanScheduledTask(scanner interface{ Scan(...interface{}) error }) (*ScheduledTask, error) {
+	var t ScheduledTask
+	var stateful, notify, enabled int
+	var sessionID sql.NullInt64
+	var lastRun, nextRun sql.NullTime
+	err := scanner.Scan(&t.ID, &t.Name, &t.Prompt, &t.AgentID, &t.CronExpr,
+		&stateful, &sessionID, &notify, &enabled,
+		&lastRun, &nextRun, &t.RunCount, &t.CreatedAt, &t.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	t.Stateful = stateful == 1
+	t.NotifyDesktop = notify == 1
+	t.Enabled = enabled == 1
+	if sessionID.Valid {
+		v := sessionID.Int64
+		t.SessionID = &v
+	}
+	if lastRun.Valid {
+		t.LastRunAt = &lastRun.Time
+	}
+	if nextRun.Valid {
+		t.NextRunAt = &nextRun.Time
+	}
+	return &t, nil
+}
+
+const schedCols = `id, name, prompt, agent_id, cron_expr, stateful, session_id,
+	notify_desktop, enabled, last_run_at, next_run_at, run_count, created_at, updated_at`
+
+func ListScheduledTasks() ([]ScheduledTask, error) {
+	rows, err := DB.Query(`SELECT ` + schedCols + ` FROM scheduled_tasks ORDER BY created_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ScheduledTask, 0)
+	for rows.Next() {
+		t, err := scanScheduledTask(rows)
+		if err != nil {
+			continue
+		}
+		out = append(out, *t)
+	}
+	return out, nil
+}
+
+func GetScheduledTask(id int64) (*ScheduledTask, error) {
+	return scanScheduledTask(DB.QueryRow(`SELECT `+schedCols+` FROM scheduled_tasks WHERE id=?`, id))
+}
+
+func CreateScheduledTask(t *ScheduledTask) (int64, error) {
+	stateful, notify, enabled := 0, 1, 1
+	if t.Stateful {
+		stateful = 1
+	}
+	if !t.NotifyDesktop {
+		notify = 0
+	}
+	if !t.Enabled {
+		enabled = 0
+	}
+	res, err := DB.Exec(`INSERT INTO scheduled_tasks
+		(name, prompt, agent_id, cron_expr, stateful, notify_desktop, enabled, next_run_at)
+		VALUES (?,?,?,?,?,?,?,?)`,
+		t.Name, t.Prompt, t.AgentID, t.CronExpr, stateful, notify, enabled, t.NextRunAt)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func UpdateScheduledTask(t *ScheduledTask) error {
+	stateful, notify, enabled := 0, 1, 1
+	if t.Stateful {
+		stateful = 1
+	}
+	if !t.NotifyDesktop {
+		notify = 0
+	}
+	if !t.Enabled {
+		enabled = 0
+	}
+	_, err := DB.Exec(`UPDATE scheduled_tasks SET
+		name=?, prompt=?, agent_id=?, cron_expr=?, stateful=?,
+		notify_desktop=?, enabled=?, next_run_at=?, updated_at=CURRENT_TIMESTAMP
+		WHERE id=?`,
+		t.Name, t.Prompt, t.AgentID, t.CronExpr, stateful,
+		notify, enabled, t.NextRunAt, t.ID)
+	return err
+}
+
+func DeleteScheduledTask(id int64) error {
+	DB.Exec(`DELETE FROM scheduled_task_runs WHERE task_id=?`, id)
+	_, err := DB.Exec(`DELETE FROM scheduled_tasks WHERE id=?`, id)
+	return err
+}
+
+func ToggleScheduledTask(id int64, enabled bool) error {
+	v := 0
+	if enabled {
+		v = 1
+	}
+	_, err := DB.Exec(`UPDATE scheduled_tasks SET enabled=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, v, id)
+	return err
+}
+
+func UpdateScheduledTaskAfterRun(id int64, nextRunAt *time.Time) {
+	DB.Exec(`UPDATE scheduled_tasks SET
+		last_run_at=CURRENT_TIMESTAMP, next_run_at=?, run_count=run_count+1, updated_at=CURRENT_TIMESTAMP
+		WHERE id=?`, nextRunAt, id)
+}
+
+func SetScheduledTaskSession(id, sessionID int64) {
+	DB.Exec(`UPDATE scheduled_tasks SET session_id=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, sessionID, id)
+}
+
+func GetDueScheduledTasks() ([]ScheduledTask, error) {
+	rows, err := DB.Query(`SELECT `+schedCols+` FROM scheduled_tasks
+		WHERE enabled=1 AND next_run_at IS NOT NULL AND next_run_at <= datetime('now')
+		ORDER BY next_run_at ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ScheduledTask, 0)
+	for rows.Next() {
+		t, err := scanScheduledTask(rows)
+		if err != nil {
+			continue
+		}
+		out = append(out, *t)
+	}
+	return out, nil
+}
+
+// ─── Scheduled Task Runs ─────────────────────────────────────────
+
+func CreateScheduledTaskRun(taskID, sessionID int64) (int64, error) {
+	res, err := DB.Exec(`INSERT INTO scheduled_task_runs (task_id, session_id) VALUES (?,?)`, taskID, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+func FinishScheduledTaskRun(id int64, status, summary string) {
+	DB.Exec(`UPDATE scheduled_task_runs SET status=?, summary=?, finished_at=CURRENT_TIMESTAMP WHERE id=?`,
+		status, summary, id)
+}
+
+func ListScheduledTaskRuns(taskID int64, limit int) ([]ScheduledTaskRun, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := DB.Query(`SELECT id, task_id, session_id, status, summary, started_at, finished_at
+		FROM scheduled_task_runs WHERE task_id=? ORDER BY started_at DESC LIMIT ?`, taskID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]ScheduledTaskRun, 0)
+	for rows.Next() {
+		var r ScheduledTaskRun
+		var fin sql.NullTime
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.SessionID, &r.Status, &r.Summary, &r.StartedAt, &fin); err != nil {
+			continue
+		}
+		if fin.Valid {
+			r.FinishedAt = &fin.Time
+		}
+		out = append(out, r)
+	}
+	return out, nil
 }

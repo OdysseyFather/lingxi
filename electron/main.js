@@ -20,28 +20,39 @@ function getFrontendDistPath() {
   return path.join(__dirname, '..', 'frontend-desktop', 'dist');
 }
 
-// Go 二进制路径（打包后在 resources/smart-agent，开发时在 backend-desktop/smart-agent）
+// Go 二进制路径（打包后在 resources/smart-agent[.exe]，开发时在 backend-desktop/smart-agent[.exe]）
 function getGoBinPath() {
+  const ext = process.platform === 'win32' ? '.exe' : '';
   if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'smart-agent');
+    return path.join(process.resourcesPath, 'smart-agent' + ext);
   }
-  return path.join(__dirname, '..', 'backend-desktop', 'smart-agent');
+  return path.join(__dirname, '..', 'backend-desktop', 'smart-agent' + ext);
 }
 
 // 内置 AI 引擎路径
-// 打包后：resources/ai-engine/lingxi（bash 包装脚本，调用内置 node + cli.js）
-// 开发时：resources/ai-engine/lingxi（如果存在），否则使用系统 claude
+// macOS 打包后：resources/ai-engine/lingxi（bash 包装脚本）
+// Windows 打包后：resources/ai-engine/lingxi.cmd（cmd 包装脚本）
+// 开发时：对应脚本或系统 claude
 function getClaudeBin() {
-  // 优先使用 resources 目录下的内置版本（打包和开发都适用）
   const resourcesDir = app.isPackaged
     ? process.resourcesPath
     : path.join(__dirname, 'resources');
-  const bundled = path.join(resourcesDir, 'ai-engine', 'lingxi');
+  const isWin = process.platform === 'win32';
+  const bundled = path.join(resourcesDir, 'ai-engine', isWin ? 'lingxi.cmd' : 'lingxi');
   if (fs.existsSync(bundled)) {
-    try { fs.chmodSync(bundled, 0o755); } catch (e) {}
+    if (!isWin) {
+      try { fs.chmodSync(bundled, 0o755); } catch (e) {}
+    }
     return bundled;
   }
   // 回退到系统 claude
+  if (isWin) {
+    try {
+      return require('child_process').execSync('where claude', { encoding: 'utf-8' }).trim().split('\n')[0];
+    } catch {
+      return 'claude';
+    }
+  }
   try {
     return require('child_process').execSync('which claude').toString().trim();
   } catch {
@@ -60,19 +71,22 @@ function getBridgeBin() {
   const resourcesDir = app.isPackaged
     ? process.resourcesPath
     : path.join(__dirname, 'resources');
+  const isWin = process.platform === 'win32';
 
   // 优先：LiteLLM Bridge（Python）
-  const litellmBridge = path.join(resourcesDir, 'litellm-bridge', 'bridge');
+  const litellmName = isWin ? 'bridge.cmd' : 'bridge';
+  const litellmBridge = path.join(resourcesDir, 'litellm-bridge', litellmName);
   if (fs.existsSync(litellmBridge)) {
-    try { fs.chmodSync(litellmBridge, 0o755); } catch (e) {}
+    if (!isWin) { try { fs.chmodSync(litellmBridge, 0o755); } catch (e) {} }
     console.log('[electron] bridge: using litellm-bridge (Python)');
     return litellmBridge;
   }
 
   // 回退：Node llm-bridge
-  const nodeBridge = path.join(resourcesDir, 'bridge', 'bridge');
+  const bridgeName = isWin ? 'bridge.cmd' : 'bridge';
+  const nodeBridge = path.join(resourcesDir, 'bridge', bridgeName);
   if (fs.existsSync(nodeBridge)) {
-    try { fs.chmodSync(nodeBridge, 0o755); } catch (e) {}
+    if (!isWin) { try { fs.chmodSync(nodeBridge, 0o755); } catch (e) {} }
     console.log('[electron] bridge: using node llm-bridge (fallback)');
     return nodeBridge;
   }

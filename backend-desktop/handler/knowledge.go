@@ -312,6 +312,41 @@ func UploadKnowledge(c *gin.Context) {
 	})
 }
 
+// UpdateKnowledge PUT /api/knowledge/:id
+func UpdateKnowledge(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效 ID"})
+		return
+	}
+	var body struct {
+		Title    string `json:"title"`
+		Category string `json:"category"`
+		Tags     string `json:"tags"`
+		Summary  string `json:"summary"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数错误"})
+		return
+	}
+	if body.Title == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "标题不能为空"})
+		return
+	}
+	if body.Category == "" {
+		body.Category = "docs"
+	}
+	if body.Tags == "" {
+		body.Tags = "[]"
+	}
+	if err := db.UpdateKnowledge(id, body.Title, body.Category, body.Tags, body.Summary); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	rebuildIndex()
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 // DeleteKnowledge DELETE /api/knowledge/:id
 func DeleteKnowledge(c *gin.Context) {
 	idStr := c.Param("id")

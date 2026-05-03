@@ -1,23 +1,23 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { Send, ImagePlus, BookOpen, Square, Cpu, Coins, Slash } from 'lucide-react';
+import { Send, ImagePlus, BookOpen, Square, Cpu, Coins, Slash, Languages, FileText, Lightbulb, Code2, SearchCheck, RefreshCw, Wrench, Mail, Sparkles, GitCompare, Database, TestTube } from 'lucide-react';
 import { useStore } from '../state/useStore';
 import { Button, Tooltip } from '../ui/primitives';
 import { cn } from '../ui/cn';
 import { formatNum } from './blockUtils';
 
 const SLASH_COMMANDS = [
-  { cmd: '/translate', label: '翻译', desc: '翻译以下内容', prompt: '请将以下内容翻译为{目标语言}：\n\n' },
-  { cmd: '/summarize', label: '总结', desc: '总结长文要点', prompt: '请总结以下内容的要点：\n\n' },
-  { cmd: '/explain', label: '解释', desc: '通俗易懂地解释', prompt: '请用通俗易懂的语言解释以下内容：\n\n' },
-  { cmd: '/code', label: '写代码', desc: '根据描述编写代码', prompt: '请根据以下描述编写代码：\n\n' },
-  { cmd: '/review', label: '代码审查', desc: '审查代码并提出建议', prompt: '请审查以下代码，指出问题并提出改进建议：\n\n```\n\n```' },
-  { cmd: '/refactor', label: '重构', desc: '优化和重构代码', prompt: '请重构以下代码，使其更简洁、高效、易读：\n\n```\n\n```' },
-  { cmd: '/fix', label: '修复', desc: '分析并修复错误', prompt: '请分析以下错误并提供修复方案：\n\n' },
-  { cmd: '/email', label: '写邮件', desc: '撰写邮件内容', prompt: '请帮我撰写一封{正式/非正式}邮件，主题为：' },
-  { cmd: '/brainstorm', label: '头脑风暴', desc: '围绕主题发散创意', prompt: '请围绕以下主题进行头脑风暴，给出 5-10 个创意方向：\n\n' },
-  { cmd: '/compare', label: '对比分析', desc: '对比两个方案的优劣', prompt: '请对比以下方案，分析各自的优缺点：\n\n方案 A：\n方案 B：' },
-  { cmd: '/sql', label: 'SQL', desc: '根据描述生成 SQL', prompt: '请根据以下描述生成 SQL 查询语句：\n\n' },
-  { cmd: '/test', label: '写测试', desc: '生成单元测试', prompt: '请为以下代码编写单元测试：\n\n```\n\n```' },
+  { cmd: '/translate', label: '翻译', desc: '翻译以下内容', prompt: '请将以下内容翻译为{目标语言}：\n\n', icon: Languages },
+  { cmd: '/summarize', label: '总结', desc: '总结长文要点', prompt: '请总结以下内容的要点：\n\n', icon: FileText },
+  { cmd: '/explain', label: '解释', desc: '通俗易懂地解释', prompt: '请用通俗易懂的语言解释以下内容：\n\n', icon: Lightbulb },
+  { cmd: '/code', label: '写代码', desc: '根据描述编写代码', prompt: '请根据以下描述编写代码：\n\n', icon: Code2 },
+  { cmd: '/review', label: '代码审查', desc: '审查代码并提出建议', prompt: '请审查以下代码，指出问题并提出改进建议：\n\n```\n\n```', icon: SearchCheck },
+  { cmd: '/refactor', label: '重构', desc: '优化和重构代码', prompt: '请重构以下代码，使其更简洁、高效、易读：\n\n```\n\n```', icon: RefreshCw },
+  { cmd: '/fix', label: '修复', desc: '分析并修复错误', prompt: '请分析以下错误并提供修复方案：\n\n', icon: Wrench },
+  { cmd: '/email', label: '写邮件', desc: '撰写邮件内容', prompt: '请帮我撰写一封{正式/非正式}邮件，主题为：', icon: Mail },
+  { cmd: '/brainstorm', label: '头脑风暴', desc: '围绕主题发散创意', prompt: '请围绕以下主题进行头脑风暴，给出 5-10 个创意方向：\n\n', icon: Sparkles },
+  { cmd: '/compare', label: '对比分析', desc: '对比两个方案的优劣', prompt: '请对比以下方案，分析各自的优缺点：\n\n方案 A：\n方案 B：', icon: GitCompare },
+  { cmd: '/sql', label: 'SQL', desc: '根据描述生成 SQL', prompt: '请根据以下描述生成 SQL 查询语句：\n\n', icon: Database },
+  { cmd: '/test', label: '写测试', desc: '生成单元测试', prompt: '请为以下代码编写单元测试：\n\n```\n\n```', icon: TestTube },
 ];
 
 export function Composer({ useKB: controlledUseKB, setUseKB: setControlledUseKB } = {}) {
@@ -130,23 +130,36 @@ export function Composer({ useKB: controlledUseKB, setUseKB: setControlledUseKB 
     composingEndTsRef.current = Date.now();
   };
 
+  const arrayBufferToBase64 = (buf) => {
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  };
+
   const onPickFiles = async (files) => {
     const arr = [];
     for (const f of files) {
       if (!f.type.startsWith('image/')) continue;
       const buf = await f.arrayBuffer();
-      const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
-      arr.push({ mediaType: f.type, data: b64, preview: URL.createObjectURL(f) });
+      const b64 = arrayBufferToBase64(buf);
+      arr.push({ mediaType: f.type || 'image/png', data: b64, preview: URL.createObjectURL(f) });
     }
-    setImages((x) => [...x, ...arr].slice(0, 6));
+    if (arr.length > 0) {
+      setImages((x) => [...x, ...arr].slice(0, 6));
+    }
   };
 
   const onPaste = (e) => {
     const items = e.clipboardData?.items || [];
     const files = [];
-    for (const it of items) if (it.kind === 'file') {
-      const f = it.getAsFile();
-      if (f) files.push(f);
+    for (const it of items) {
+      if (it.kind === 'file' && it.type.startsWith('image/')) {
+        const f = it.getAsFile();
+        if (f) files.push(f);
+      }
     }
     if (files.length) {
       e.preventDefault();
@@ -170,31 +183,37 @@ export function Composer({ useKB: controlledUseKB, setUseKB: setControlledUseKB 
           {slashOpen && filteredCommands.length > 0 && (
             <div
               ref={slashRef}
-              className="absolute bottom-full left-0 right-0 mb-1 surface rounded-xl shadow-lg border border-[color:var(--line)] overflow-hidden z-50 animate-rise"
+              className="absolute bottom-full left-0 right-0 mb-1 glass rounded-xl shadow-lg border border-[color:var(--line)] overflow-hidden z-50 animate-rise"
             >
               <div className="px-3 py-1.5 border-b border-[color:var(--line)] text-[11px] font-medium text-[color:var(--text-faint)] uppercase tracking-wide flex items-center gap-1.5">
                 <Slash size={10} /> 快捷命令
               </div>
               <div className="max-h-[240px] overflow-y-auto scrollable py-1">
-                {filteredCommands.map((cmd, i) => (
-                  <button
-                    key={cmd.cmd}
-                    onMouseDown={(e) => { e.preventDefault(); applySlashCommand(cmd); }}
-                    onMouseEnter={() => setSlashIdx(i)}
-                    className={cn(
-                      'w-full flex items-center gap-3 px-3 py-2 text-left transition-colors',
-                      i === slashIdx ? 'bg-[color:var(--accent-soft)]' : 'hover:bg-[color:var(--bg-soft)]'
-                    )}
-                  >
-                    <span className="w-8 h-8 rounded-lg bg-[color:var(--bg-soft)] text-[color:var(--accent)] flex items-center justify-center text-xs font-mono shrink-0">
-                      {cmd.cmd.slice(0, 2)}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium">{cmd.cmd} <span className="text-[color:var(--text-faint)] font-normal ml-1">{cmd.label}</span></div>
-                      <div className="text-xs text-[color:var(--text-faint)] truncate">{cmd.desc}</div>
-                    </div>
-                  </button>
-                ))}
+                {filteredCommands.map((cmd, i) => {
+                  const CmdIcon = cmd.icon || Code2;
+                  return (
+                    <button
+                      key={cmd.cmd}
+                      onMouseDown={(e) => { e.preventDefault(); applySlashCommand(cmd); }}
+                      onMouseEnter={() => setSlashIdx(i)}
+                      className={cn(
+                        'w-full flex items-center gap-3 px-3 py-2 text-left transition-all relative',
+                        i === slashIdx ? 'bg-[color:var(--accent-soft)]' : 'hover:bg-[color:var(--bg-soft)]'
+                      )}
+                    >
+                      {i === slashIdx && (
+                        <span className="absolute left-0 top-1.5 bottom-1.5 w-[2px] rounded-full bg-[color:var(--accent)]" />
+                      )}
+                      <span className="w-8 h-8 rounded-lg bg-[color:var(--bg-soft)] text-[color:var(--accent)] flex items-center justify-center shrink-0">
+                        <CmdIcon size={15} />
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium">{cmd.cmd} <span className="text-[color:var(--text-faint)] font-normal ml-1">{cmd.label}</span></div>
+                        <div className="text-xs text-[color:var(--text-faint)] truncate">{cmd.desc}</div>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           )}

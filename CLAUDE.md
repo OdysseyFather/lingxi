@@ -56,10 +56,12 @@ lingxi-agent/
 │   │   ├── mcp.go            # MCP 服务管理
 │   │   ├── usage.go          # 用量统计
 │   │   ├── im_connector.go   # IM 连接器
+│   │   ├── scheduled.go      # 定时任务 CRUD
 │   │   └── ws_hub.go         # WebSocket Hub
 │   ├── connector/            # IM 平台对接（企微/钉钉/飞书）
 │   ├── model/                # 数据模型
 │   ├── router/               # AI 引擎路由（CCR）
+│   ├── scheduler/            # 定时任务调度器
 │   └── usage/                # 用量计算 + 定价
 │
 ├── frontend-desktop/         # React 前端
@@ -92,7 +94,8 @@ lingxi-agent/
 │   │   ├── SkillsPage.jsx
 │   │   ├── KnowledgePage.jsx
 │   │   ├── MCPPage.jsx
-│   │   └── IMConnectorPage.jsx
+│   │   ├── IMConnectorPage.jsx
+│   │   └── ScheduledTasksPage.jsx  # 定时任务管理
 │   ├── package.json
 │   ├── vite.config.js
 │   ├── tailwind.config.js
@@ -142,10 +145,12 @@ export PATH="/tmp/node22/bin:$PATH"  # 若系统 node < 20.19
 # 1. 退出现有程序
 pkill -x "灵犀" 2>/dev/null; sleep 1
 
-# 2. 一键构建
-./build-desktop.sh
+# 2. 一键构建（支持 mac / win / all）
+./build-desktop.sh          # 默认 macOS
+./build-desktop.sh win      # Windows（交叉编译）
+./build-desktop.sh all      # 同时构建两个平台
 
-# 3. 覆盖安装
+# 3. 覆盖安装（macOS）
 rm -rf "/Applications/灵犀.app"
 cp -R "dist-electron/mac-arm64/灵犀.app" "/Applications/灵犀.app"
 xattr -cr "/Applications/灵犀.app"
@@ -203,6 +208,8 @@ open "/Applications/灵犀.app"
 | DELETE | /api/sessions/:id | DeleteSession | 删除会话 |
 | GET | /api/sessions/:id/messages | ListMessages | 消息列表 |
 | GET | /api/messages/search | SearchMessages | 消息全文搜索 |
+| PUT | /api/messages/:id | UpdateMessage | 编辑用户消息（+删除后续） |
+| POST | /api/messages/:id/feedback | SetMessageFeedback | 消息反馈（up/down） |
 | POST | /api/chat | Chat | 发起对话 |
 | GET | /ws | WebSocket | 流式对话 |
 | GET/POST/PUT/DELETE | /api/agents/* | Agent CRUD | 智能体管理 |
@@ -213,7 +220,19 @@ open "/Applications/灵犀.app"
 | GET/POST/PUT/DELETE | /api/mcp-servers/* | MCP CRUD | MCP 管理 |
 | GET/POST/PUT/DELETE | /api/im-connectors/* | IM CRUD | IM 连接器管理 |
 | GET | /api/usage/* | Usage Query | 用量查询 |
+| GET | /api/skills/:id/content | GetSkillContent | 技能文件内容 |
+| PUT | /api/skills/:id/content | UpdateSkillContent | 更新技能文件 |
+| GET | /api/skills/:id/export | ExportSkill | 导出技能 ZIP |
+| GET | /api/skills/marketplace | MarketplaceSearch | Smithery 市场搜索 |
+| POST | /api/skills/marketplace/install | MarketplaceInstall | 安装市场技能 |
 | GET | /api/router/status | RouterStatus | 路由状态 |
+| GET | /api/scheduled-tasks | ListScheduledTasks | 定时任务列表 |
+| POST | /api/scheduled-tasks | CreateScheduledTask | 创建定时任务 |
+| PUT | /api/scheduled-tasks/:id | UpdateScheduledTask | 更新定时任务 |
+| DELETE | /api/scheduled-tasks/:id | DeleteScheduledTask | 删除定时任务 |
+| POST | /api/scheduled-tasks/:id/toggle | ToggleScheduledTask | 启用/禁用 |
+| POST | /api/scheduled-tasks/:id/run | TriggerScheduledTask | 手动触发 |
+| GET | /api/scheduled-tasks/:id/runs | ListScheduledTaskRuns | 执行记录 |
 
 ---
 
@@ -255,11 +274,27 @@ xattr -cr "/Applications/灵犀.app"
 - 对话导出为 Markdown
 - / 斜杠命令快捷输入（12 个内置命令）
 - 虚拟滚动（100+ 条消息自动启用）
+- **统一 Agent 模式（自主执行）**
+- **交互式信息收集块（选择块 + 输入块），Agent 按需向用户提问**
+- **用户 & 智能体头像显示**
+- **图片粘贴（Cmd+V）+ 聊天中图片展示**
+- **OpenAI 兼容模型思考链（reasoning）展示**
+- **消息编辑/重发（hover 编辑按钮 → textarea 内联编辑 → 保存并重发，自动截断后续消息）**
+- **消息反馈（thumbs up/down，持久化到 SQLite，选中状态高亮）**
+- **知识库 RAG 引用可视化（内联 [N] 上角标 + hover 弹出引用详情 + 气泡底部引用列表折叠卡片）**
 
 ### 智能体
 - 智能体工厂（创建/编辑/删除）
+- **四步引导式创建向导（身份/角色/能力/预览）**
+- **支持 temperature、max_tokens 参数调整**
 - 模板市场（4 类 17 个模板：商业办公/技术开发/内容创意/生活效率）
 - 智能体绑定模型/技能/MCP/知识库
+
+### 技能管理
+- **Smithery.ai 技能市场集成（搜索/安装/同步）**
+- **在线查看/编辑技能文件（SKILL.md + 脚本）**
+- **技能导出为 ZIP 包**
+- AI 生成技能 / ZIP 上传导入
 
 ### 知识库
 - 支持 .md/.txt/.csv/.tsv/.json/.pdf/.docx 格式
@@ -272,10 +307,23 @@ xattr -cr "/Applications/灵犀.app"
 - AnimatePresence 页面切换动画
 - 会话重命名（双击编辑）
 - Modal 化删除确认
+- **费用估算（非官方 API 本地定价表兜底，标注"~"估算标记）**
 - 用量统计 + 预算预警
+- **交互式向导流（Wizard Flow）：多选择题逐一展示，支持前后翻页、进度指示、汇总确认后才继续对话**
+- **两阶段规划模式：用户决定是否进入规划模式，进入后沉浸式多维度选择面板，全部确认后再执行**
+- **精致化 UI 细节：气泡圆角/阴影/hover 微交互、超薄滚动条、三点波浪连接动画、增强版空状态页**
+
+### 定时任务
+- **周期性自动执行 Agent 任务（每 N 分钟/小时/每天/每周/每月/自定义 Cron）**
+- **有状态/无状态模式（有状态保持同一会话，Agent 可记忆上次执行内容）**
+- **执行完成桌面通知**
+- **执行记录查看 + 跳转到对应会话**
+- **手动触发执行**
 
 ### 平台能力
 - 多模型多供应商接入
 - MCP 工具管理（stdio/SSE/HTTP）
-- 技能管理（AI 生成/ZIP 导入）
 - IM 集成（企业微信/钉钉/飞书）
+- **Windows 构建支持（NSIS 安装包 + Portable）**
+- **OpenAI 兼容模型技能识别增强（自动注入已安装技能清单到 system prompt）**
+- **防死循环保护（禁止调用 Cursor 专有工具，避免 tool_use 循环）**

@@ -26,9 +26,14 @@ export const api = {
         : (titleOrPayload || {})
     ),
   renameSession: (id, title) => req('PATCH', `/api/sessions/${id}`, { title }),
+  pinSession: (id, pinned) => req('PATCH', `/api/sessions/${id}`, { pinned }),
   deleteSession: (id) => req('DELETE', `/api/sessions/${id}`),
   listMessages: (id) => req('GET', `/api/sessions/${id}/messages`),
   setSessionAgent: (id, agent_id) => req('POST', `/api/sessions/${id}/agent`, { agent_id }),
+
+  // messages
+  updateMessage: (id, content) => req('PUT', `/api/messages/${id}`, { content }),
+  setMessageFeedback: (id, feedback) => req('POST', `/api/messages/${id}/feedback`, { feedback }),
 
   // chat
   sendChat: (payload) => req('POST', '/api/chat', payload),
@@ -44,6 +49,16 @@ export const api = {
 
   // skills / knowledge
   listSkills: () => req('GET', '/api/skills'),
+  getSkillContent: (id) => req('GET', `/api/skills/${id}/content`),
+  updateSkillContent: (id, files) => req('PUT', `/api/skills/${id}/content`, { files }),
+  exportSkillUrl: (id) => `/api/skills/${id}/export`,
+  searchMarketplace: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return req('GET', `/api/skills/marketplace?${qs}`);
+  },
+  getMarketplaceSkill: (ns, slug) => req('GET', `/api/skills/marketplace/${ns}/${slug}`),
+  installMarketplaceSkill: (data) => req('POST', '/api/skills/marketplace/install', data),
+  getMarketplaceCategories: () => req('GET', '/api/skills/marketplace/categories'),
   listKnowledge: () => req('GET', '/api/knowledge'),
 
   // MCP
@@ -65,6 +80,15 @@ export const api = {
   // router (bridge) status
   getRouterStatus: () => req('GET', '/api/router/status'),
   stopRouter: () => req('POST', '/api/router/stop'),
+
+  // scheduled tasks
+  listScheduledTasks: () => req('GET', '/api/scheduled-tasks'),
+  createScheduledTask: (data) => req('POST', '/api/scheduled-tasks', data),
+  updateScheduledTask: (id, data) => req('PUT', `/api/scheduled-tasks/${id}`, data),
+  deleteScheduledTask: (id) => req('DELETE', `/api/scheduled-tasks/${id}`),
+  toggleScheduledTask: (id, enabled) => req('POST', `/api/scheduled-tasks/${id}/toggle`, { enabled }),
+  triggerScheduledTask: (id) => req('POST', `/api/scheduled-tasks/${id}/run`),
+  listScheduledTaskRuns: (id) => req('GET', `/api/scheduled-tasks/${id}/runs`),
 };
 
 // ─── WebSocket ────────────────────────────────────────────────────

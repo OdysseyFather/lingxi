@@ -104,6 +104,11 @@ func BroadcastEvent(event string, payload any) {
 	globalHub.BroadcastAll(event, string(b))
 }
 
+// BroadcastWSEvent 广播原始 JSON 字符串事件（供 scheduler 等外部包调用）
+func BroadcastWSEvent(event, data string) {
+	globalHub.BroadcastAll(event, data)
+}
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"lingxi-agent/connector"
 	"lingxi-agent/db"
 	"lingxi-agent/handler"
+	"lingxi-agent/scheduler"
 
 	"github.com/gin-gonic/gin"
 )
@@ -55,6 +57,8 @@ func main() {
 	api.DELETE("/sessions/:id", handler.DeleteSession)
 	api.GET("/sessions/:id/messages", handler.ListMessages)
 	api.GET("/messages/search", handler.SearchMessages)
+	api.PUT("/messages/:id", handler.UpdateMessage)
+	api.POST("/messages/:id/feedback", handler.SetMessageFeedback)
 
 	api.POST("/chat", handler.Chat)
 	api.POST("/chat/batch", handler.BatchChat)
@@ -74,6 +78,13 @@ func main() {
 	api.POST("/skills/batch-upload", handler.BatchUploadSkill)
 	api.POST("/skills/generate/stream", handler.GenerateSkillStream)
 	api.POST("/skills/generate/confirm", handler.ConfirmGeneratedSkill)
+	api.GET("/skills/marketplace", handler.MarketplaceSearch)
+	api.GET("/skills/marketplace/categories", handler.MarketplaceCategories)
+	api.GET("/skills/marketplace/:namespace/:slug", handler.MarketplaceGetSkill)
+	api.POST("/skills/marketplace/install", handler.MarketplaceInstall)
+	api.GET("/skills/:id/content", handler.GetSkillContent)
+	api.PUT("/skills/:id/content", handler.UpdateSkillContent)
+	api.GET("/skills/:id/export", handler.ExportSkill)
 	api.POST("/skills/:id/install", handler.InstallSkill)
 	api.POST("/skills/:id/uninstall", handler.UninstallSkill)
 	api.DELETE("/skills/:id", handler.DeleteSkill)
@@ -81,6 +92,7 @@ func main() {
 	// 知识库
 	api.GET("/knowledge", handler.ListKnowledge)
 	api.POST("/knowledge", handler.UploadKnowledge)
+	api.PUT("/knowledge/:id", handler.UpdateKnowledge)
 	api.DELETE("/knowledge/:id", handler.DeleteKnowledge)
 	api.GET("/knowledge/:id/preview", handler.PreviewKnowledge)
 
@@ -117,6 +129,15 @@ func main() {
 	api.DELETE("/agents/:id", handler.DeleteAgent)
 	api.POST("/sessions/:id/agent", handler.SetSessionAgent)
 
+	// 定时任务
+	api.GET("/scheduled-tasks", handler.ListScheduledTasks)
+	api.POST("/scheduled-tasks", handler.CreateScheduledTask)
+	api.PUT("/scheduled-tasks/:id", handler.UpdateScheduledTask)
+	api.DELETE("/scheduled-tasks/:id", handler.DeleteScheduledTask)
+	api.POST("/scheduled-tasks/:id/toggle", handler.ToggleScheduledTask)
+	api.POST("/scheduled-tasks/:id/run", handler.TriggerScheduledTask)
+	api.GET("/scheduled-tasks/:id/runs", handler.ListScheduledTaskRuns)
+
 	// Electron 启动时下发激活档案明文 token
 	api.POST("/runtime/active-secret", handler.SetActiveSecret)
 
@@ -131,6 +152,16 @@ func main() {
 		}
 		c.File(dist + "/index.html")
 	})
+
+	// 启动定时任务调度器
+	scheduler.Init(handler.RunClaudeSync, func(taskName, summary string) {
+		payload, _ := json.Marshal(map[string]string{
+			"title": "定时任务 — " + taskName,
+			"body":  summary,
+		})
+		handler.BroadcastWSEvent("desktop_notify", string(payload))
+	})
+	scheduler.Start()
 
 	log.Printf("[main] desktop mode, listening on :%s", cfg.Server.Port)
 	if err := r.Run(":" + cfg.Server.Port); err != nil {

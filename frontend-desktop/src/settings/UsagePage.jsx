@@ -103,7 +103,7 @@ export function UsagePage() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard icon={<Coins size={18} />} label="本期费用" value={`$${(summary.cost_usd || 0).toFixed(4)}`} sub={`今日 $${(today.cost_usd || 0).toFixed(4)}`} />
+        <StatCard icon={<Coins size={18} />} label="本期费用" value={`$${(summary.cost_usd || 0).toFixed(4)}`} sub={`今日 $${(today.cost_usd || 0).toFixed(4)}`} hint={summary.has_estimated ? '含估算' : null} />
         <StatCard icon={<Cpu size={18} />} label="输入 token" value={formatNum(summary.input_tokens || 0)} sub={`今日 ${formatNum(today.input_tokens || 0)}`} />
         <StatCard icon={<Cpu size={18} />} label="输出 token" value={formatNum(summary.output_tokens || 0)} sub={`今日 ${formatNum(today.output_tokens || 0)}`} />
         <StatCard icon={<BarChart3 size={18} />} label="请求数" value={summary.requests || 0} sub={`今日 ${today.requests || 0}`} />
@@ -259,7 +259,7 @@ export function UsagePage() {
                     <td className="font-mono text-xs">{r.model || '—'}</td>
                     <td className="text-right">{formatNum(r.input_tokens)}</td>
                     <td className="text-right">{formatNum(r.output_tokens)}</td>
-                    <td className="text-right">${(r.cost_usd || 0).toFixed(4)}</td>
+                    <td className="text-right">${(r.cost_usd || 0).toFixed(4)}{r.estimated && <span className="text-[10px] text-amber-500 ml-0.5">~</span>}</td>
                     <td className="text-right">{((r.duration_ms || 0) / 1000).toFixed(1)}s</td>
                     <td className="text-right text-xs text-[color:var(--text-faint)]">{new Date(r.created_at).toLocaleString()}</td>
                   </tr>
@@ -273,13 +273,16 @@ export function UsagePage() {
   );
 }
 
-function StatCard({ icon, label, value, sub }) {
+function StatCard({ icon, label, value, sub, hint }) {
   return (
     <Card className="flex items-center gap-3">
       <div className="w-10 h-10 rounded-lg bg-[color:var(--accent-soft)] text-[color:var(--accent)] flex items-center justify-center shrink-0">{icon}</div>
       <div className="min-w-0">
         <div className="text-xs text-[color:var(--text-faint)]">{label}</div>
-        <div className="text-lg font-semibold leading-tight truncate">{value}</div>
+        <div className="text-lg font-semibold leading-tight truncate flex items-center gap-1.5">
+          {value}
+          {hint && <span className="text-[10px] font-normal text-amber-500/80">{hint}</span>}
+        </div>
         {sub && <div className="text-xs text-[color:var(--text-faint)]">{sub}</div>}
       </div>
     </Card>

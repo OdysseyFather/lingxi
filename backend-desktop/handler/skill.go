@@ -46,7 +46,7 @@ func claudeSkillsDir() string {
 // ListSkills GET /api/skills
 func ListSkills(c *gin.Context) {
 	rows, err := db.DB.Query(`
-		SELECT id, name, description, file_path, installed, created_at, updated_at
+		SELECT id, name, description, file_path, installed, source, marketplace_id, marketplace_version, author, created_at, updated_at
 		FROM skills ORDER BY created_at DESC
 	`)
 	if err != nil {
@@ -58,7 +58,7 @@ func ListSkills(c *gin.Context) {
 	skills := make([]model.Skill, 0)
 	for rows.Next() {
 		var s model.Skill
-		if err := rows.Scan(&s.ID, &s.Name, &s.Description, &s.FilePath, &s.Installed, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Name, &s.Description, &s.FilePath, &s.Installed, &s.Source, &s.MarketplaceID, &s.MarketplaceVersion, &s.Author, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			continue
 		}
 		skills = append(skills, s)
@@ -485,6 +485,155 @@ func ConfirmGeneratedSkill(c *gin.Context) {
 		Scan(&skill.ID, &skill.Name, &skill.Description, &skill.FilePath, &skill.Installed, &skill.CreatedAt, &skill.UpdatedAt)
 
 	c.JSON(http.StatusOK, skill)
+}
+
+// GetSkillContent GET /api/skills/:id/content — 读取已安装 skill 的文件列表及内容
+func GetSkillContent(c *gin.Context) {
+	id := c.Param("id")
+	var skill model.Skill
+	err := db.DB.QueryRow(`SELECT id, name, file_path, installed FROM skills WHERE id=?`, id).
+		Scan(&skill.ID, &skill.Name, &skill.FilePath, &skill.Installed)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "skill 不存在"})
+		return
+	}
+	// 优先读已安装目录，否则从 zip 读
+	skillDir := filepath.Join(claudeSkillsDir(), skill.Name)
+	if info, e := os.Stat(skillDir); e == nil && info.IsDir() {
+		files, _ := readDirFiles(skillDir)
+		c.JSON(http.StatusOK, gin.H{"skillName": skill.Name, "source": "installed", "files": files})
+		return
+	}
+	// 从 zip 包读
+	if skill.FilePath != "" {
+		data, e := os.ReadFile(skill.FilePath)
+		if e == nil {
+			files, e2 := readZipFiles(data)
+			if e2 == nil {
+				c.JSON(http.StatusOK, gin.H{"skillName": skill.Name, "source": "zip", "files": files})
+				return
+			}
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"skillName": skill.Name, "source": "none", "files": []SkillFile{}})
+}
+
+// UpdateSkillContent PUT /api/skills/:id/content — 保存编辑后的文件内容
+func UpdateSkillContent(c *gin.Context) {
+	id := c.Param("id")
+	var skill model.Skill
+	err := db.DB.QueryRow(`SELECT id, name, file_path, installed FROM skills WHERE id=?`, id).
+		Scan(&skill.ID, &skill.Name, &skill.FilePath, &skill.Installed)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "skill 不存在"})
+		return
+	}
+	var body struct {
+		Files map[string]string `json:"files"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || len(body.Files) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请提供 files"})
+		return
+	}
+
+	// 写入临时目录 → 重新打 zip → 更新存储
+	tmpDir, err := os.MkdirTemp("", "skill-edit-*")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建临时目录失败"})
+		return
+	}
+	defer os.RemoveAll(tmpDir)
+
+	for relPath, content := range body.Files {
+		cleanPath := filepath.Clean(relPath)
+		if strings.HasPrefix(cleanPath, "..") {
+			continue
+		}
+		fullPath := filepath.Join(tmpDir, skill.Name, cleanPath)
+		os.MkdirAll(filepath.Dir(fullPath), 0755)
+		os.WriteFile(fullPath, []byte(content), 0644)
+	}
+
+	zipData, err := zipDir(tmpDir, skill.Name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "打包失败: " + err.Error()})
+		return
+	}
+
+	storageDir := skillsStorageDir()
+	filePath := filepath.Join(storageDir, skill.Name+".zip")
+	if err := os.WriteFile(filePath, zipData, 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "保存文件失败"})
+		return
+	}
+
+	// 更新描述
+	skillMDContent, _ := body.Files[skill.Name+"/SKILL.md"]
+	if skillMDContent == "" {
+		skillMDContent, _ = body.Files["SKILL.md"]
+	}
+	if skillMDContent != "" {
+		desc := parseSkillMDDescription(skillMDContent)
+		if desc != "" {
+			db.DB.Exec(`UPDATE skills SET description=?, file_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, desc, filePath, skill.ID)
+		}
+	} else {
+		db.DB.Exec(`UPDATE skills SET file_path=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`, filePath, skill.ID)
+	}
+
+	// 如果已安装，重新部署
+	if skill.Installed {
+		if err := deploySkillFromFile(skill.Name, filePath); err != nil {
+			log.Printf("[skill] redeploy after edit error: %v", err)
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "保存成功"})
+}
+
+// ExportSkill GET /api/skills/:id/export — 下载 skill 的 zip 包
+func ExportSkill(c *gin.Context) {
+	id := c.Param("id")
+	var skill model.Skill
+	err := db.DB.QueryRow(`SELECT id, name, file_path FROM skills WHERE id=?`, id).
+		Scan(&skill.ID, &skill.Name, &skill.FilePath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "skill 不存在"})
+		return
+	}
+	if skill.FilePath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "没有可导出的文件"})
+		return
+	}
+	data, err := os.ReadFile(skill.FilePath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取文件失败"})
+		return
+	}
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.zip"`, skill.Name))
+	c.Data(http.StatusOK, "application/zip", data)
+}
+
+// readZipFiles 从 zip 字节读取文件列表
+func readZipFiles(data []byte) ([]SkillFile, error) {
+	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return nil, err
+	}
+	var files []SkillFile
+	for _, f := range r.File {
+		if f.FileInfo().IsDir() {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			continue
+		}
+		content, _ := io.ReadAll(rc)
+		rc.Close()
+		files = append(files, SkillFile{Path: filepath.ToSlash(f.Name), Content: string(content)})
+	}
+	return files, nil
 }
 
 // ─── 工具函数 ────────────────────────────────────────────────────

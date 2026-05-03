@@ -7,9 +7,18 @@ FRONTEND_DIR="$ROOT_DIR/frontend-desktop"
 ELECTRON_DIR="$ROOT_DIR/electron"
 RESOURCES_DIR="$ELECTRON_DIR/resources"
 
+# ── 解析目标平台 ───────────────────────────────────────────────
+TARGET="${1:-mac}"  # mac | win | all
+case "$TARGET" in
+  mac|darwin)  BUILD_TARGETS="mac" ;;
+  win|windows) BUILD_TARGETS="win" ;;
+  all)         BUILD_TARGETS="mac win" ;;
+  *)           echo "用法: $0 [mac|win|all]"; exit 1 ;;
+esac
+
 echo "========================================"
 echo "  灵犀 桌面客户端构建脚本 (Go + AI Engine + Bridge Router)"
-echo "  目标平台: macOS arm64 (Apple Silicon)"
+echo "  目标平台: $BUILD_TARGETS"
 echo "========================================"
 
 # ── 1. 编译 Go 后端 ───────────────────────────────────────────────
@@ -21,9 +30,18 @@ if [ -z "$GO_BIN" ] || [ ! -x "$GO_BIN" ]; then
   echo "  ✗ 未找到可用的 go 工具链，请先安装 Go" >&2
   exit 1
 fi
-GOOS=darwin GOARCH=arm64 "$GO_BIN" build -o smart-agent .
-chmod +x smart-agent
-echo "  ✓ Go 后端编译完成: $(du -sh "$BACKEND_DIR/smart-agent" | cut -f1)"
+
+for bt in $BUILD_TARGETS; do
+  if [ "$bt" = "mac" ]; then
+    GOOS=darwin GOARCH=arm64 "$GO_BIN" build -o smart-agent .
+    chmod +x smart-agent
+    echo "  ✓ Go 后端 (macOS arm64) 编译完成: $(du -sh "$BACKEND_DIR/smart-agent" | cut -f1)"
+  fi
+  if [ "$bt" = "win" ]; then
+    GOOS=windows GOARCH=amd64 "$GO_BIN" build -o smart-agent.exe .
+    echo "  ✓ Go 后端 (Windows amd64) 编译完成: $(du -sh "$BACKEND_DIR/smart-agent.exe" | cut -f1)"
+  fi
+done
 
 # ── 2. 构建前端 ──────────────────────────────────────────────────
 echo ""
@@ -202,7 +220,29 @@ echo ""
 echo "▶ [5/5] 安装 Electron 依赖并打包..."
 cd "$ELECTRON_DIR"
 npm install --silent
-npm run dist:mac
+
+for bt in $BUILD_TARGETS; do
+  if [ "$bt" = "mac" ]; then
+    echo "  ▸ 打包 macOS..."
+    npm run dist:mac
+  fi
+  if [ "$bt" = "win" ]; then
+    echo "  ▸ 打包 Windows..."
+    # 为 Windows 创建 lingxi.cmd 包装脚本
+    CLAUDE_CODE_DIR="$RESOURCES_DIR/ai-engine"
+    if [ ! -f "$CLAUDE_CODE_DIR/lingxi.cmd" ] && [ -f "$CLAUDE_CODE_DIR/cli.js" ]; then
+      cat > "$CLAUDE_CODE_DIR/lingxi.cmd" << 'WIN_WRAPPER_EOF'
+@echo off
+set SCRIPT_DIR=%~dp0
+set NODE_BIN=%SCRIPT_DIR%..\node-bin\node.exe
+set CLI_JS=%SCRIPT_DIR%cli.js
+"%NODE_BIN%" "%CLI_JS%" %*
+WIN_WRAPPER_EOF
+      echo "  ✓ 创建了 Windows 包装脚本 lingxi.cmd"
+    fi
+    npm run dist:win
+  fi
+done
 
 echo ""
 echo "========================================"

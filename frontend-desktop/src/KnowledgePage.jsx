@@ -4,9 +4,9 @@ import remarkGfm from 'remark-gfm';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   BookOpen, Upload, Trash2, Eye, Loader2, CheckCircle2, AlertCircle,
-  FileText, MessageCircle, BarChart3, X, FolderUp,
+  FileText, MessageCircle, BarChart3, X, FolderUp, Pencil,
 } from 'lucide-react';
-import { Button, Card, Badge, Modal, Input, Select } from './ui/primitives';
+import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, SkeletonCard } from './ui/primitives';
 import { cn } from './ui/cn';
 
 const CATEGORY_MAP = {
@@ -37,6 +37,7 @@ export default function KnowledgePage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('list');
   const [previewItem, setPreviewItem] = useState(null);
+  const [editItem, setEditItem] = useState(null);
 
   const [dragging, setDragging] = useState(false);
   const [uploadCategory, setUploadCategory] = useState('docs');
@@ -151,16 +152,16 @@ export default function KnowledgePage() {
       {activeTab === 'list' && (
         <div>
           {loading ? (
-            <div className="py-20 text-center text-[color:var(--text-faint)]">
-              <Loader2 size={24} className="animate-spin mx-auto mb-3" />加载中...
+            <div className="space-y-3 py-4">
+              {[1, 2, 3].map(i => <SkeletonCard key={i} />)}
             </div>
           ) : items.length === 0 ? (
-            <div className="py-20 text-center">
-              <BookOpen size={40} className="mx-auto mb-3 text-[color:var(--accent)] opacity-50" />
-              <p className="text-[color:var(--text-soft)]">知识库为空</p>
-              <p className="text-xs text-[color:var(--text-faint)] mt-1">上传 .md .txt .csv .pdf .docx 等文件，灵犀会在回答时自动参考</p>
-              <Button className="mt-4" onClick={() => setActiveTab('upload')}><Upload size={14} /> 上传文件</Button>
-            </div>
+            <EmptyState
+              icon={BookOpen}
+              title="知识库为空"
+              description="上传 .md .txt .csv .pdf .docx 等文件，灵犀会在回答时自动参考"
+              action={<Button onClick={() => setActiveTab('upload')}><Upload size={14} /> 上传文件</Button>}
+            />
           ) : (
             <div className="space-y-6">
               {Object.entries(grouped).map(([cat, catItems]) => {
@@ -177,7 +178,7 @@ export default function KnowledgePage() {
                       <AnimatePresence>
                         {catItems.map(item => (
                           <motion.div key={item.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}>
-                            <KnowledgeCard item={item} onDelete={handleDelete} onPreview={setPreviewItem} />
+                            <KnowledgeCard item={item} onDelete={handleDelete} onPreview={setPreviewItem} onEdit={setEditItem} />
                           </motion.div>
                         ))}
                       </AnimatePresence>
@@ -273,11 +274,12 @@ export default function KnowledgePage() {
       )}
 
       <PreviewModal item={previewItem} onClose={() => setPreviewItem(null)} />
+      <EditKnowledgeModal item={editItem} onClose={() => setEditItem(null)} onSaved={() => { setEditItem(null); fetchItems(); }} />
     </div>
   );
 }
 
-function KnowledgeCard({ item, onDelete, onPreview }) {
+function KnowledgeCard({ item, onDelete, onPreview, onEdit }) {
   const tags = parseTags(item.tags);
   const cfg = CATEGORY_MAP[item.category] || CATEGORY_MAP.docs;
   return (
@@ -296,6 +298,7 @@ function KnowledgeCard({ item, onDelete, onPreview }) {
         </div>
         <div className="flex gap-1.5 shrink-0 opacity-0 group-hover:opacity-100 transition">
           <Button size="sm" variant="ghost" onClick={() => onPreview(item)}><Eye size={14} /></Button>
+          <Button size="sm" variant="ghost" onClick={() => onEdit?.(item)}><Pencil size={14} /></Button>
           <Button size="sm" variant="ghost" onClick={() => onDelete(item)}><Trash2 size={14} /></Button>
         </div>
       </div>
@@ -331,6 +334,74 @@ function PreviewModal({ item, onClose }) {
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
         </div>
       )}
+    </Modal>
+  );
+}
+
+function EditKnowledgeModal({ item, onClose, onSaved }) {
+  const [title, setTitle] = useState('');
+  const [category, setCategory] = useState('docs');
+  const [tags, setTags] = useState('');
+  const [summary, setSummary] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!item) return;
+    setTitle(item.title || '');
+    setCategory(item.category || 'docs');
+    setSummary(item.summary || '');
+    try {
+      const arr = JSON.parse(item.tags || '[]');
+      setTags(Array.isArray(arr) ? arr.join(', ') : '');
+    } catch { setTags(''); }
+  }, [item]);
+
+  const handleSave = async () => {
+    if (!item) return;
+    setSaving(true);
+    const tagsArr = tags.split(/[,，]/).map(t => t.trim()).filter(Boolean);
+    try {
+      const res = await fetch(`/api/knowledge/${item.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ title, category, tags: JSON.stringify(tagsArr), summary }),
+      });
+      if (res.ok) onSaved?.();
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal open={!!item} onClose={onClose} title="编辑知识条目" width={500}>
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-medium text-[color:var(--text-soft)] mb-1">标题</label>
+          <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="知识条目标题" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-[color:var(--text-soft)] mb-1">分类</label>
+          <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+            <option value="docs">文档</option>
+            <option value="qa">问答</option>
+            <option value="data">数据</option>
+          </Select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-[color:var(--text-soft)] mb-1">标签（逗号分隔）</label>
+          <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="标签1, 标签2" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-[color:var(--text-soft)] mb-1">摘要</label>
+          <Textarea value={summary} onChange={(e) => setSummary(e.target.value)} rows={3} placeholder="知识条目摘要" />
+        </div>
+        <div className="flex justify-end gap-2 pt-2">
+          <Button variant="outline" onClick={onClose}>取消</Button>
+          <Button onClick={handleSave} disabled={saving || !title.trim()}>
+            {saving ? <Loader2 size={14} className="animate-spin" /> : null}
+            保存
+          </Button>
+        </div>
+      </div>
     </Modal>
   );
 }

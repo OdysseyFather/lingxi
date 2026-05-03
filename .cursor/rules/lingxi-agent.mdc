@@ -147,7 +147,8 @@ src/
 ├── SkillsPage.jsx        # 技能管理
 ├── KnowledgePage.jsx     # 知识库管理
 ├── MCPPage.jsx           # MCP 管理
-└── IMConnectorPage.jsx   # IM 连接器管理
+├── IMConnectorPage.jsx   # IM 连接器管理
+└── ScheduledTasksPage.jsx # 定时任务管理
 ```
 
 ---
@@ -186,12 +187,14 @@ backend-desktop/
 │   ├── skill.go         # 技能管理
 │   ├── usage.go         # 用量统计
 │   ├── im_connector.go  # IM 连接器
+│   ├── scheduled.go     # 定时任务 CRUD
 │   ├── router_status.go # 路由状态
 │   ├── tasks.go         # 任务管理
 │   └── ws_hub.go        # WebSocket Hub
 ├── connector/           # IM 连接器实现
 ├── model/model.go       # 数据模型
 ├── router/              # AI 引擎路由
+├── scheduler/           # 定时任务调度器
 └── usage/               # 用量计算 + 定价
 ```
 
@@ -281,13 +284,38 @@ NPM_CONFIG_CACHE=/tmp/npm-lingxi-cache npm install [package] --force
 - [x] 对话导出为 Markdown
 - [x] 斜杠命令快捷输入（/ 唤起）
 - [x] 智能体模板市场（4 类 17 个模板）
+- [x] 统一 Agent 模式（移除 Chat/Plan/Agent 切换）
+- [x] 交互式信息收集块（选择块 + 输入块）
+- [x] 对话头像（用户 + 智能体）
+- [x] 四步引导式智能体创建向导（身份/角色/能力/预览）
+- [x] 图片粘贴（Cmd+V）+ 聊天中图片展示
+- [x] 定时任务管理页面（创建/编辑/删除/开关/执行记录）
+- [x] 交互式向导流（多选择题逐一展示 + 前后翻页 + 汇总确认）
+- [x] 两阶段规划模式（用户选择是否进入 → 沉浸式多维度选择面板 → 确认后执行）
+- [x] UI 精致化（气泡微交互/超薄滚动条/波浪连接动画/增强空状态）
+- [x] 消息编辑/重发（hover 编辑按钮 + textarea 内联编辑 + 保存并重发）
+- [x] 消息反馈（thumbs up/down，持久化到 SQLite，选中高亮）
+- [x] 知识库检索可视化（RAG Citation：内联 [N] 上角标 + hover 弹出引用卡片 + 底部引用列表）
 
 ### 后端
 - [x] 知识库支持 PDF/DOCX 格式
 - [x] 消息全文搜索 API
 - [x] 预算预警功能
+- [x] 费用估算兜底（非官方 API 用本地定价表估算）
+- [x] 技能在线编辑/导出 API
+- [x] Smithery.ai 市场代理 API
+- [x] 智能体 temperature / max_tokens 参数
+- [x] OpenAI reasoning token 透传（bridge 层拦截并生成 Anthropic thinking 事件）
+- [x] 定时任务调度器（scheduled_tasks + scheduled_task_runs 表，后台 goroutine 定期检查）
+- [x] 定时任务 CRUD + 手动触发 + 桌面通知（WS desktop_notify 事件）
+- [x] 防死循环保护（禁止 Cursor 专有工具 + isNonExistentTool 检测）
+- [x] OpenAI 兼容模型技能识别增强（buildSkillInventory 注入已安装技能清单）
+- [x] 消息编辑接口（PUT /api/messages/:id + 删除后续消息）
+- [x] 消息反馈接口（POST /api/messages/:id/feedback，feedback 列迁移）
+- [x] 知识库引用标注指令（system prompt 追加 KB_CITATIONS 格式指令）
 
 ### 平台
 - [x] IM 集成（企业微信/钉钉/飞书）
 - [x] MCP 工具管理
-- [x] 技能管理（AI 生成/ZIP 导入）
+- [x] 技能管理（AI 生成/ZIP 导入/在线编辑/导出/市场安装）
+- [x] Windows 构建支持（NSIS + Portable）

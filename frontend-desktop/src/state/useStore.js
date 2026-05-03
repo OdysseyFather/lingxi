@@ -16,6 +16,8 @@ export const useStore = create((set, get) => ({
   setView: (v) => set({ view: v }),
   settingsTab: 'profiles', // profiles | usage | appearance
   setSettingsTab: (t) => set({ settingsTab: t }),
+  sidebarCollapsed: false,
+  toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
 
   // ─── 会话 ────────────────────────────────────────────────────
   sessions: [],
@@ -54,6 +56,10 @@ export const useStore = create((set, get) => ({
   },
   renameSession: async (id, title) => {
     await api.renameSession(id, title);
+    await get().refreshSessions();
+  },
+  pinSession: async (id, pinned) => {
+    await api.pinSession(id, pinned);
     await get().refreshSessions();
   },
 
@@ -182,12 +188,12 @@ export const useStore = create((set, get) => ({
         break;
       }
       case 'tool_end': {
+        if (payload?.hidden) break;
         const blocks = [...state.liveBlocks];
         for (let i = blocks.length - 1; i >= 0; i--) {
           if (blocks[i].type === 'tool' && !blocks[i].done) {
             blocks[i].done = true;
             blocks[i].endedAt = Date.now();
-            // 富 payload：input/label/ms/status
             if (payload && typeof payload === 'object') {
               if (payload.input != null) blocks[i].input = payload.input;
               if (payload.label) blocks[i].label = payload.label;
@@ -264,6 +270,20 @@ export const useStore = create((set, get) => ({
         if (payload) state.pushNotification(payload);
         break;
       }
+      case 'desktop_notify': {
+        const info = typeof payload === 'object' ? payload : {};
+        const title = info.title || '灵犀 — 定时任务';
+        const body = info.body || '任务已完成';
+        state.pushNotification({ title, body });
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          new Notification(title, { body });
+        } else if (typeof Notification !== 'undefined' && Notification.permission !== 'denied') {
+          Notification.requestPermission().then(perm => {
+            if (perm === 'granted') new Notification(title, { body });
+          });
+        }
+        break;
+      }
       default: break;
     }
   },
@@ -311,6 +331,85 @@ export const useStore = create((set, get) => ({
     if (!sid) return;
     await api.abortChat(sid).catch(() => {});
     set({ isStreaming: false, agentState: 'IDLE' });
+  },
+
+  editAndResend: async (messageId, newContent) => {
+    const { messages, activeSessionId, isStreaming } = get();
+    if (isStreaming || !activeSessionId) return;
+    const idx = messages.findIndex((m) => m.id === messageId);
+    if (idx < 0) return;
+    try {
+      await api.updateMessage(messageId, newContent);
+    } catch (e) {
+      get().pushNotification({ title: '编辑失败', body: e.message });
+      return;
+    }
+    const updated = { ...messages[idx], content: newContent };
+    set({
+      messages: [...messages.slice(0, idx), updated],
+      liveBlocks: [],
+      isStreaming: true,
+      startedAt: Date.now(),
+      agentState: 'THINKING',
+    });
+    try {
+      await api.sendChat({ message: newContent, sessionId: String(activeSessionId) });
+    } catch (e) {
+      set({ isStreaming: false, agentState: 'IDLE' });
+      get().pushNotification({ title: '重新生成失败', body: e.message });
+    }
+  },
+
+  setFeedback: async (messageId, feedback) => {
+    try {
+      await api.setMessageFeedback(messageId, feedback);
+    } catch (e) {
+      get().pushNotification({ title: '反馈失败', body: e.message });
+      return;
+    }
+    set({
+      messages: get().messages.map((m) =>
+        m.id === messageId ? { ...m, feedback } : m
+      ),
+    });
+  },
+
+  regenerate: async (messageId) => {
+    const { messages, activeSessionId, isStreaming } = get();
+    if (isStreaming || !activeSessionId) return;
+    const idx = messages.findIndex((m) => m.id === messageId);
+    if (idx < 0) return;
+    let userMsg = null;
+    for (let i = idx - 1; i >= 0; i--) {
+      if (messages[i].role === 'user') { userMsg = messages[i]; break; }
+    }
+    if (!userMsg) return;
+    let text = userMsg.content || '';
+    let images = [];
+    try {
+      const obj = JSON.parse(text);
+      if (obj?.text != null) {
+        text = obj.text;
+        images = (obj.images || []).filter(src => src.startsWith('data:')).map((src) => {
+          const [header, b64] = src.split(',');
+          const mt = (header.match(/data:(.*?);/) || [])[1] || 'image/png';
+          return { mediaType: mt, data: b64 || '' };
+        });
+      }
+    } catch {}
+    set({
+      messages: messages.slice(0, idx),
+      liveBlocks: [],
+      isStreaming: true,
+      startedAt: Date.now(),
+      agentState: 'THINKING',
+    });
+    try {
+      await api.sendChat({ message: text, sessionId: String(activeSessionId), images });
+    } catch (e) {
+      set({ isStreaming: false, agentState: 'IDLE' });
+      get().pushNotification({ title: '重新生成失败', body: e.message });
+    }
   },
 }));
 

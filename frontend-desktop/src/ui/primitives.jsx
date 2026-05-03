@@ -3,7 +3,9 @@ import { cn } from './cn';
 
 export function Button({ className, variant = 'default', size = 'md', children, ...rest }) {
   const variants = {
-    default: 'bg-gradient-to-r from-[color:var(--accent)] to-[#5e8bff] text-white hover:shadow-[0_8px_24px_var(--accent-glow)] hover:-translate-y-px active:translate-y-0 shadow-soft',
+    default: `bg-gradient-to-r from-[color:var(--accent)] via-[#6d6fff] to-[#5e8bff] bg-[length:200%_100%] bg-left text-white
+      shadow-[inset_0_1px_0_rgba(255,255,255,0.2),0_2px_8px_rgba(124,92,255,0.2)]
+      hover:bg-right hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_8px_24px_var(--accent-glow)] hover:-translate-y-px active:translate-y-0`,
     ghost:   'bg-transparent text-[color:var(--text)] hover:bg-[color:var(--bg-soft)]',
     outline: 'border border-[color:var(--line)] hover:border-[color:var(--accent)]/60 hover:bg-[color:var(--bg-soft)] text-[color:var(--text)]',
     danger:  'bg-danger text-white hover:opacity-90',
@@ -84,7 +86,7 @@ export function Badge({ className, tone = 'default', children }) {
 }
 
 export const Card = forwardRef(function Card({ className, children }, ref) {
-  return <div ref={ref} className={cn('surface p-4', className)}>{children}</div>;
+  return <div ref={ref} className={cn('surface p-4 shadow-[0_1px_2px_rgba(0,0,0,.03),0_8px_24px_-4px_rgba(0,0,0,.06)]', className)}>{children}</div>;
 });
 
 // Modal/Dialog 简单实现
@@ -111,14 +113,18 @@ export function Modal({ open, onClose, title, footer, children, width = 520 }) {
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-md"
+      style={{ animation: 'modalBackdropIn .25s ease forwards' }}
+      onClick={onClose}
+    >
       <div
         ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={title ? titleId : undefined}
-        className="surface w-full mx-4 animate-rise"
-        style={{ maxWidth: width }}
+        className="surface w-full mx-4"
+        style={{ maxWidth: width, animation: 'modalContentIn .3s cubic-bezier(.22,1,.36,1) forwards' }}
         onClick={(e) => e.stopPropagation()}
       >
         {title && (
@@ -161,5 +167,51 @@ export function Tooltip({ children, label }) {
         {label}
       </span>
     </span>
+  );
+}
+
+export function Skeleton({ className, lines = 1, circle = false }) {
+  if (circle) {
+    return <div className={cn('rounded-full bg-[color:var(--bg-soft)] animate-pulse', className)} />;
+  }
+  return (
+    <div className={cn('space-y-2', className)}>
+      {Array.from({ length: lines }, (_, i) => (
+        <div
+          key={i}
+          className={cn(
+            'h-3 rounded-md bg-[color:var(--bg-soft)] animate-pulse',
+            i === lines - 1 && lines > 1 ? 'w-3/5' : 'w-full',
+          )}
+        />
+      ))}
+    </div>
+  );
+}
+
+export function SkeletonCard({ className }) {
+  return (
+    <div className={cn('surface p-4 space-y-3', className)}>
+      <div className="flex items-center gap-3">
+        <Skeleton circle className="w-10 h-10" />
+        <Skeleton lines={2} className="flex-1" />
+      </div>
+      <Skeleton lines={2} />
+    </div>
+  );
+}
+
+export function EmptyState({ icon: Icon, title, description, action, className }) {
+  return (
+    <div className={cn('flex flex-col items-center justify-center py-16 px-6 text-center', className)}>
+      {Icon && (
+        <div className="w-16 h-16 rounded-2xl bg-[color:var(--accent-soft)] text-[color:var(--accent)] flex items-center justify-center mb-4 pulse-ring">
+          <Icon size={28} />
+        </div>
+      )}
+      <h3 className="text-base font-semibold text-gradient mb-1">{title}</h3>
+      {description && <p className="text-sm text-[color:var(--text-soft)] max-w-xs mb-4">{description}</p>}
+      {action}
+    </div>
   );
 }

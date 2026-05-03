@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Sparkles, Plus, Trash2, Edit3, Bot, Brain, BookOpen, Plug,
-  ArrowLeft, Wand2, Check, X, Shield, LayoutGrid,
+  ArrowLeft, Wand2, Check, X, Shield, LayoutGrid, Download, Upload,
 } from 'lucide-react';
 import { cn } from './ui/cn';
 import { api } from './api/client';
@@ -59,7 +59,7 @@ const TEMPLATE_MARKET = [
   },
 ];
 
-const EMOJIS = ['✦', '🤖', '🎯', '🧠', '💼', '🚀', '🎨', '📊', '🔬', '⚡', '🌟', '🦾'];
+const EMOJIS = ['✦', '🤖', '🎯', '🧠', '💼', '🚀', '🎨', '📊', '🔬', '⚡', '🌟', '🦾', '🔥', '💡', '🎓', '🛡️', '🗃️', '🌐', '✍️', '📋', '💪', '💰', '✈️', '⚖️', '🤝', '📝'];
 
 const EMPTY = {
   id: 0,
@@ -72,6 +72,8 @@ const EMPTY = {
   mcp_server_ids: '[]',
   knowledge_ids: '[]',
   allow_all: true,
+  temperature: 0,
+  max_tokens: 0,
 };
 
 export default function AgentFactoryPage({ onBack }) {
@@ -109,6 +111,55 @@ export default function AgentFactoryPage({ onBack }) {
     });
   };
 
+  const exportAgent = (agent) => {
+    const exportData = {
+      _type: 'lingxi-agent-export',
+      _version: 1,
+      name: agent.name,
+      avatar: agent.avatar,
+      description: agent.description,
+      system_prompt: agent.system_prompt,
+      allow_all: agent.allow_all,
+      skill_ids: agent.skill_ids,
+      mcp_server_ids: agent.mcp_server_ids,
+      knowledge_ids: agent.knowledge_ids,
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${agent.name.replace(/[/\\?%*:|"<>]/g, '-')}.agent.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importAgent = async () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        if (data._type !== 'lingxi-agent-export') { alert('文件格式不正确'); return; }
+        setEditing({
+          ...EMPTY,
+          name: data.name || '',
+          avatar: data.avatar || '✦',
+          description: data.description || '',
+          system_prompt: data.system_prompt || '',
+          allow_all: data.allow_all ?? true,
+          skill_ids: data.skill_ids || '[]',
+          mcp_server_ids: data.mcp_server_ids || '[]',
+          knowledge_ids: data.knowledge_ids || '[]',
+        });
+      } catch { alert('文件解析失败'); }
+    };
+    input.click();
+  };
+
   return (
     <div className="max-w-6xl mx-auto">
       <div className="relative overflow-hidden rounded-2xl mb-6 p-6 surface-grad">
@@ -127,6 +178,7 @@ export default function AgentFactoryPage({ onBack }) {
             </div>
           </div>
           <Button variant="outline" onClick={() => setShowTemplates(true)}><LayoutGrid size={14} /> 模板市场</Button>
+          <Button variant="outline" onClick={importAgent}><Upload size={14} /> 导入</Button>
           <Button onClick={() => setEditing({ ...EMPTY })}><Plus size={16} />新建智能体</Button>
         </div>
       </div>
@@ -167,6 +219,9 @@ export default function AgentFactoryPage({ onBack }) {
                 <Button size="sm" variant="ghost" onClick={() => setEditing({ ...a })}>
                   <Edit3 size={14} />编辑
                 </Button>
+                <Button size="sm" variant="ghost" onClick={() => exportAgent(a)} title="导出配置">
+                  <Download size={14} />
+                </Button>
                 {!a.builtin && (
                   <Button size="sm" variant="ghost" onClick={() => onDelete(a)}>
                     <Trash2 size={14} />
@@ -194,7 +249,7 @@ function parseList(s) {
 
 function AgentEditor({ open, value, onClose, onSave }) {
   const [form, setForm] = useState(value || EMPTY);
-  const [tab, setTab] = useState('basic');
+  const [step, setStep] = useState(0);
   const [profiles, setProfiles] = useState([]);
   const [skills, setSkills] = useState([]);
   const [mcps, setMcps] = useState([]);
@@ -203,7 +258,7 @@ function AgentEditor({ open, value, onClose, onSave }) {
   useEffect(() => {
     if (value) {
       setForm({ ...EMPTY, ...value });
-      setTab('basic');
+      setStep(0);
     }
   }, [value]);
 
@@ -237,75 +292,114 @@ function AgentEditor({ open, value, onClose, onSave }) {
     set(key, JSON.stringify(arr));
   };
 
-  const TABS = [
-    { id: 'basic', label: '基本信息' },
-    { id: 'role', label: '角色设定' },
-    { id: 'model', label: '模型' },
-    { id: 'skills', label: `技能 (${skillIds.length})` },
-    { id: 'mcp', label: `MCP (${mcpIds.length})` },
-    { id: 'knowledge', label: `知识库 (${kbIds.length})` },
+  const STEPS = [
+    { label: '身份', icon: Bot },
+    { label: '角色', icon: Brain },
+    { label: '能力', icon: Plug },
+    { label: '预览', icon: Check },
   ];
+
+  const canNext = step === 0 ? form.name.trim() : true;
+  const isLast = step === STEPS.length - 1;
 
   return (
     <Modal
       open={open}
       onClose={onClose}
-      title={form.id ? `编辑 - ${form.name || '智能体'}` : '新建智能体'}
-      width={780}
+      title={form.id ? `编辑智能体` : '创建智能体'}
+      width={820}
       footer={
-        <>
-          <Button variant="ghost" onClick={onClose}><X size={14} />取消</Button>
-          <Button onClick={() => onSave(form)} disabled={!form.name}>
-            <Check size={14} />保存
-          </Button>
-        </>
+        <div className="flex items-center justify-between w-full">
+          <Button variant="ghost" onClick={onClose}><X size={14} /> 取消</Button>
+          <div className="flex gap-2">
+            {step > 0 && <Button variant="outline" onClick={() => setStep(step - 1)}><ArrowLeft size={14} /> 上一步</Button>}
+            {isLast ? (
+              <Button onClick={() => onSave(form)} disabled={!form.name}><Check size={14} /> 保存</Button>
+            ) : (
+              <Button onClick={() => setStep(step + 1)} disabled={!canNext}>下一步</Button>
+            )}
+          </div>
+        </div>
       }
     >
-      <div className="flex gap-1 mb-4 p-1 bg-[color:var(--bg-soft)] rounded-lg overflow-x-auto">
-        {TABS.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            className={`px-3 py-1.5 text-sm rounded-md whitespace-nowrap transition ${
-              tab === t.id
-                ? 'bg-[color:var(--bg-elev)] shadow-soft text-[color:var(--accent)]'
-                : 'text-[color:var(--text-soft)] hover:text-[color:var(--text)]'
-            }`}
-          >{t.label}</button>
-        ))}
+      {/* 步骤条 */}
+      <div className="flex items-center gap-1 mb-6 px-2">
+        {STEPS.map((s, i) => {
+          const Icon = s.icon;
+          const active = i === step;
+          const done = i < step;
+          return (
+            <div key={i} className="flex items-center flex-1">
+              <button onClick={() => setStep(i)} className={cn(
+                'flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all w-full',
+                active ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)] font-medium shadow-soft' :
+                done ? 'text-[color:var(--accent)] opacity-70' : 'text-[color:var(--text-faint)]'
+              )}>
+                <div className={cn(
+                  'w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-xs transition',
+                  active ? 'bg-[color:var(--accent)] text-white' :
+                  done ? 'bg-[color:var(--accent)]/20 text-[color:var(--accent)]' : 'bg-[color:var(--bg-soft)]'
+                )}>
+                  {done ? <Check size={12} /> : <Icon size={14} />}
+                </div>
+                <span className="hidden sm:inline">{s.label}</span>
+              </button>
+              {i < STEPS.length - 1 && <div className={cn('h-px flex-1 mx-1', done ? 'bg-[color:var(--accent)]/40' : 'bg-[color:var(--line)]')} />}
+            </div>
+          );
+        })}
       </div>
 
-      <div className="min-h-[320px]">
-        {tab === 'basic' && (
-          <div className="space-y-3">
-            <Field label="头像">
-              <div className="flex flex-wrap gap-2">
-                {EMOJIS.map((e) => (
-                  <button
-                    key={e}
-                    onClick={() => set('avatar', e)}
-                    className={`w-10 h-10 rounded-xl text-lg flex items-center justify-center transition ${
-                      form.avatar === e
-                        ? 'bg-[color:var(--accent-soft)] ring-2 ring-[color:var(--accent)]'
-                        : 'bg-[color:var(--bg-soft)] hover:bg-[color:var(--bg-elev)]'
-                    }`}
-                  >{e}</button>
-                ))}
+      <div className="min-h-[380px]">
+        {/* Step 0: 身份 */}
+        {step === 0 && (
+          <div className="grid grid-cols-[1fr_220px] gap-6">
+            <div className="space-y-4">
+              <Field label="头像">
+                <div className="flex flex-wrap gap-1.5">
+                  {EMOJIS.map((e) => (
+                    <button key={e} onClick={() => set('avatar', e)} className={cn(
+                      'w-9 h-9 rounded-xl text-base flex items-center justify-center transition',
+                      form.avatar === e ? 'bg-[color:var(--accent-soft)] ring-2 ring-[color:var(--accent)] scale-110' : 'bg-[color:var(--bg-soft)] hover:bg-[color:var(--bg-elev)]'
+                    )}>{e}</button>
+                  ))}
+                </div>
+              </Field>
+              <Field label="名称 *">
+                <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="例如：产品经理小灵" />
+                <div className="text-[11px] text-[color:var(--text-faint)] mt-1 text-right">{form.name.length}/30</div>
+              </Field>
+              <Field label="简介">
+                <Textarea value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="一句话介绍能力与定位" className="min-h-[80px]" />
+              </Field>
+            </div>
+            {/* 实时预览卡片 */}
+            <div>
+              <div className="text-xs text-[color:var(--text-faint)] mb-2">预览</div>
+              <div className="surface p-4 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-[color:var(--accent-soft)] to-transparent text-[color:var(--accent)] flex items-center justify-center text-xl ring-1 ring-[color:var(--accent-soft)]">
+                    {form.avatar || '✦'}
+                  </div>
+                  <div>
+                    <div className="font-semibold text-sm">{form.name || '未命名'}</div>
+                    <div className="text-xs text-[color:var(--text-faint)] line-clamp-2">{form.description || '暂无简介'}</div>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-1 text-[10px]">
+                  <Badge tone="accent"><Brain size={9} /> 技能 {form.allow_all ? '全部' : skillIds.length}</Badge>
+                  <Badge tone="success"><Plug size={9} /> MCP {form.allow_all ? '全部' : mcpIds.length}</Badge>
+                </div>
               </div>
-            </Field>
-            <Field label="名称">
-              <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="例如：产品经理小灵 / 代码审查员" />
-            </Field>
-            <Field label="简介">
-              <Textarea value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="一句话介绍这个智能体的能力与定位" />
-            </Field>
+            </div>
           </div>
         )}
 
-        {tab === 'role' && (
-          <div className="space-y-3">
-            <div className="flex flex-wrap gap-2 mb-2">
-              <span className="text-xs text-[color:var(--text-soft)] mr-2 mt-1">模板：</span>
+        {/* Step 1: 角色 */}
+        {step === 1 && (
+          <div className="space-y-4">
+            <div className="flex flex-wrap gap-2 mb-1">
+              <span className="text-xs text-[color:var(--text-soft)] mr-2 mt-1">快速填入模板：</span>
               {PROMPT_TEMPLATES.map((t) => (
                 <Button key={t.name} size="sm" variant="outline" onClick={() => set('system_prompt', t.prompt)}>
                   <Wand2 size={12} />{t.name}
@@ -313,116 +407,124 @@ function AgentEditor({ open, value, onClose, onSave }) {
               ))}
             </div>
             <Textarea
-              className="min-h-[260px] font-mono text-[13px]"
+              className="min-h-[200px] font-mono text-[13px]"
               value={form.system_prompt}
               onChange={(e) => set('system_prompt', e.target.value)}
-              placeholder="详细描述这个智能体的角色、性格、专业领域、回答风格、约束规则……"
+              placeholder="详细描述角色、性格、专业领域、回答风格、约束规则…"
             />
-            <div className="text-xs text-[color:var(--text-faint)]">
-              该角色设定会以"附加身份"形式注入对话，不影响"灵犀"基础人格与安全规则。
+            <div className="grid grid-cols-2 gap-4">
+              <Field label={`温度 (Temperature): ${form.temperature || '默认'}`}>
+                <input type="range" min="0" max="1" step="0.05" value={form.temperature || 0}
+                  onChange={(e) => set('temperature', parseFloat(e.target.value))}
+                  className="w-full accent-[color:var(--accent)]" />
+                <div className="flex justify-between text-[10px] text-[color:var(--text-faint)]">
+                  <span>精确</span><span>创意</span>
+                </div>
+              </Field>
+              <Field label={`最大输出 Token: ${form.max_tokens || '默认'}`}>
+                <input type="range" min="0" max="128000" step="1000" value={form.max_tokens || 0}
+                  onChange={(e) => set('max_tokens', parseInt(e.target.value))}
+                  className="w-full accent-[color:var(--accent)]" />
+                <div className="flex justify-between text-[10px] text-[color:var(--text-faint)]">
+                  <span>默认</span><span>128K</span>
+                </div>
+              </Field>
             </div>
           </div>
         )}
 
-        {tab === 'model' && (
-          <Field label="使用的接入点（不选则跟随全局激活档案）">
-            <Select value={form.profile_id} onChange={(e) => set('profile_id', Number(e.target.value))}>
-              <option value={0}>跟随全局激活档案</option>
-              {profiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} · {p.model} ({p.provider_protocol})
-                </option>
-              ))}
-            </Select>
-          </Field>
+        {/* Step 2: 能力 */}
+        {step === 2 && (
+          <div className="space-y-4">
+            <Field label="接入点（不选则跟随全局）">
+              <Select value={form.profile_id} onChange={(e) => set('profile_id', Number(e.target.value))}>
+                <option value={0}>跟随全局激活档案</option>
+                {profiles.map((p) => (
+                  <option key={p.id} value={p.id}>{p.name} · {p.model} ({p.provider_protocol})</option>
+                ))}
+              </Select>
+            </Field>
+            <label className="flex items-center gap-2 text-sm p-3 rounded-lg bg-[color:var(--bg-soft)]">
+              <input type="checkbox" checked={!!form.allow_all} onChange={(e) => set('allow_all', e.target.checked)} />
+              <span>允许使用全部技能 / MCP / 知识库</span>
+            </label>
+            {!form.allow_all && (
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <div className="text-xs font-medium text-[color:var(--text-soft)] mb-2">技能 ({skillIds.length})</div>
+                  <div className="space-y-1 max-h-[200px] overflow-auto pr-1">
+                    {skills.map((s) => (
+                      <label key={s.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-[color:var(--bg-soft)] text-sm cursor-pointer">
+                        <input type="checkbox" checked={skillIds.includes(s.id)} onChange={() => toggleId('skill_ids', form.skill_ids, s.id)} />
+                        <span className="truncate">{s.name}</span>
+                      </label>
+                    ))}
+                    {skills.length === 0 && <div className="text-xs text-[color:var(--text-faint)] py-4 text-center">暂无</div>}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-[color:var(--text-soft)] mb-2">MCP ({mcpIds.length})</div>
+                  <div className="space-y-1 max-h-[200px] overflow-auto pr-1">
+                    {mcps.map((m) => (
+                      <label key={m.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-[color:var(--bg-soft)] text-sm cursor-pointer">
+                        <input type="checkbox" checked={mcpIds.includes(m.id)} onChange={() => toggleId('mcp_server_ids', form.mcp_server_ids, m.id)} />
+                        <span className="truncate">{m.name}</span>
+                      </label>
+                    ))}
+                    {mcps.length === 0 && <div className="text-xs text-[color:var(--text-faint)] py-4 text-center">暂无</div>}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs font-medium text-[color:var(--text-soft)] mb-2">知识库 ({kbIds.length})</div>
+                  <div className="space-y-1 max-h-[200px] overflow-auto pr-1">
+                    {knowledge.map((k) => (
+                      <label key={k.id} className="flex items-center gap-2 px-2 py-1.5 rounded-md hover:bg-[color:var(--bg-soft)] text-sm cursor-pointer">
+                        <input type="checkbox" checked={kbIds.includes(k.id)} onChange={() => toggleId('knowledge_ids', form.knowledge_ids, k.id)} />
+                        <span className="truncate">{k.title || k.file_path?.split('/').pop()}</span>
+                      </label>
+                    ))}
+                    {knowledge.length === 0 && <div className="text-xs text-[color:var(--text-faint)] py-4 text-center">暂无</div>}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         )}
 
-        {tab === 'skills' && (
-          <ScopeSelector
-            allowAll={form.allow_all}
-            onAllowAll={(v) => set('allow_all', v)}
-            items={skills}
-            selectedIds={skillIds}
-            onToggle={(id) => toggleId('skill_ids', form.skill_ids, id)}
-            renderItem={(s) => <>
-              <div className="font-medium">{s.name}</div>
-              <div className="text-xs text-[color:var(--text-faint)] line-clamp-1">{s.description}</div>
-            </>}
-            empty="暂无技能。请到「技能」页面安装或导入。"
-          />
-        )}
-
-        {tab === 'mcp' && (
-          <ScopeSelector
-            allowAll={form.allow_all}
-            onAllowAll={(v) => set('allow_all', v)}
-            items={mcps}
-            selectedIds={mcpIds}
-            onToggle={(id) => toggleId('mcp_server_ids', form.mcp_server_ids, id)}
-            renderItem={(m) => <>
-              <div className="font-medium">{m.name} <Badge tone="info">{m.transport}</Badge></div>
-              <div className="text-xs text-[color:var(--text-faint)] line-clamp-1">{m.description || m.url || m.command}</div>
-            </>}
-            empty="暂无 MCP 服务器。请到「MCP」页面添加。"
-          />
-        )}
-
-        {tab === 'knowledge' && (
-          <ScopeSelector
-            allowAll={form.allow_all}
-            onAllowAll={(v) => set('allow_all', v)}
-            items={knowledge}
-            selectedIds={kbIds}
-            onToggle={(id) => toggleId('knowledge_ids', form.knowledge_ids, id)}
-            renderItem={(k) => <>
-              <div className="font-medium">{k.title || k.file_path?.split('/').pop()}</div>
-              <div className="text-xs text-[color:var(--text-faint)] line-clamp-1">{k.summary || k.category}</div>
-            </>}
-            empty="暂无知识库文档。请到「知识库」页面添加。"
-          />
+        {/* Step 3: 预览 */}
+        {step === 3 && (
+          <div className="space-y-4">
+            <div className="surface p-5 flex items-start gap-4">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[color:var(--accent-soft)] to-transparent text-[color:var(--accent)] flex items-center justify-center text-2xl ring-1 ring-[color:var(--accent-soft)] shrink-0">
+                {form.avatar || '✦'}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-lg font-semibold">{form.name || '未命名'}</div>
+                <div className="text-sm text-[color:var(--text-soft)] mt-1">{form.description || '暂无简介'}</div>
+                <div className="flex flex-wrap gap-1.5 mt-3">
+                  <Badge tone="accent"><Brain size={10} /> 技能 {form.allow_all ? '全部' : skillIds.length}</Badge>
+                  <Badge tone="success"><Plug size={10} /> MCP {form.allow_all ? '全部' : mcpIds.length}</Badge>
+                  <Badge tone="warn"><BookOpen size={10} /> 知识 {form.allow_all ? '全部' : kbIds.length}</Badge>
+                  {form.temperature > 0 && <Badge tone="default">温度 {form.temperature}</Badge>}
+                  {form.max_tokens > 0 && <Badge tone="default">最大 {(form.max_tokens / 1000).toFixed(0)}K</Badge>}
+                </div>
+              </div>
+            </div>
+            {form.system_prompt && (
+              <div>
+                <div className="text-xs font-medium text-[color:var(--text-soft)] mb-2">角色设定预览</div>
+                <div className="surface p-4 text-sm text-[color:var(--text-soft)] max-h-[200px] overflow-y-auto scrollable whitespace-pre-wrap font-mono text-xs leading-relaxed">
+                  {form.system_prompt}
+                </div>
+              </div>
+            )}
+            <div className="text-center text-xs text-[color:var(--text-faint)] py-2">
+              确认无误后点击「保存」完成{form.id ? '编辑' : '创建'}
+            </div>
+          </div>
         )}
       </div>
     </Modal>
-  );
-}
-
-function ScopeSelector({ allowAll, onAllowAll, items, selectedIds, onToggle, renderItem, empty }) {
-  return (
-    <div>
-      <label className="flex items-center gap-2 text-sm mb-3 p-3 rounded-lg bg-[color:var(--bg-soft)]">
-        <input type="checkbox" checked={!!allowAll} onChange={(e) => onAllowAll(e.target.checked)} />
-        <span>允许使用全部（推荐：开启时不做白名单限制）</span>
-      </label>
-      {!allowAll && (
-        items.length === 0 ? (
-          <div className="text-center text-sm text-[color:var(--text-soft)] py-8">{empty}</div>
-        ) : (
-          <div className="space-y-1.5 max-h-[280px] overflow-auto pr-1">
-            {items.map((it) => {
-              const sel = selectedIds.includes(it.id);
-              return (
-                <button
-                  key={it.id}
-                  onClick={() => onToggle(it.id)}
-                  className={`w-full text-left px-3 py-2 rounded-lg border transition flex items-center gap-3 ${
-                    sel
-                      ? 'bg-[color:var(--accent-soft)] border-[color:var(--accent)]/40'
-                      : 'bg-[color:var(--bg-elev)] border-[color:var(--line)] hover:border-[color:var(--accent)]/40'
-                  }`}
-                >
-                  <div className={`w-5 h-5 rounded-md border flex items-center justify-center shrink-0 ${
-                    sel ? 'bg-[color:var(--accent)] border-[color:var(--accent)] text-white' : 'border-[color:var(--line)]'
-                  }`}>
-                    {sel && <Check size={12} />}
-                  </div>
-                  <div className="flex-1 min-w-0">{renderItem(it)}</div>
-                </button>
-              );
-            })}
-          </div>
-        )
-      )}
-    </div>
   );
 }
 

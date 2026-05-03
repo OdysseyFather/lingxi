@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plug, Plus, Trash2, Edit3, Globe, Terminal, Shield, ArrowLeft } from 'lucide-react';
 import { api } from './api/client';
-import { Button, Input, Textarea, Select, Badge, Card, Modal } from './ui/primitives';
+import { Button, Input, Textarea, Select, Badge, Card, Modal, EmptyState, SkeletonCard } from './ui/primitives';
 
 const TRANSPORTS = [
   { value: 'stdio', label: 'STDIO（本地子进程）', icon: Terminal },
@@ -77,12 +77,15 @@ export default function MCPPage({ onBack }) {
       </div>
 
       {loading ? (
-        <div className="text-center py-12 text-[color:var(--text-faint)]">加载中…</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-4">
+          {[1, 2].map(i => <SkeletonCard key={i} />)}
+        </div>
       ) : list.length === 0 ? (
-        <Card className="text-center py-12 text-[color:var(--text-soft)]">
-          <Plug size={32} className="mx-auto mb-3 opacity-50" />
-          暂无 MCP 服务器，点击右上角「新增」创建。
-        </Card>
+        <EmptyState
+          icon={Plug}
+          title="暂无 MCP 服务器"
+          description="点击右上角「新增」创建 MCP 服务器"
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <AnimatePresence>

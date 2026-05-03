@@ -5,9 +5,11 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   Sparkles, Upload, Wand2, Download, Trash2, ChevronDown, ChevronRight,
   Loader2, CheckCircle2, AlertCircle, FileText, FolderOpen, Code2,
+  Eye, Edit3, Save, X, Store, Search, Star, Users, ExternalLink, ShieldCheck,
 } from 'lucide-react';
-import { Button, Card, Badge, Modal } from './ui/primitives';
+import { Button, Card, Badge, Modal, EmptyState, SkeletonCard } from './ui/primitives';
 import { cn } from './ui/cn';
+import { api } from './api/client';
 
 function getFileIcon(path) {
   if (path.endsWith('.md')) return FileText;
@@ -32,8 +34,16 @@ export default function SkillsPage() {
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [uploadResults, setUploadResults] = useState([]);
+  const [viewSkill, setViewSkill] = useState(null);
+  const [viewEditable, setViewEditable] = useState(false);
   const fileInputRef = useRef(null);
   const logRef = useRef(null);
+
+  const [mpQuery, setMpQuery] = useState('');
+  const [mpResults, setMpResults] = useState([]);
+  const [mpPagination, setMpPagination] = useState(null);
+  const [mpPage, setMpPage] = useState(1);
+  const mpLoaded = useRef(false);
 
   useEffect(() => { fetchSkills(); }, []);
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [genLogs]);
@@ -155,6 +165,7 @@ export default function SkillsPage() {
 
   const TABS = [
     { id: 'list', label: '已有技能', icon: Sparkles },
+    { id: 'marketplace', label: '技能市场', icon: Store },
     { id: 'generate', label: 'AI 生成', icon: Wand2 },
     { id: 'upload', label: '上传压缩包', icon: Upload },
   ];
@@ -191,20 +202,21 @@ export default function SkillsPage() {
       {activeTab === 'list' && (
         <div>
           {loading ? (
-            <div className="py-20 text-center text-[color:var(--text-faint)]">
-              <Loader2 size={24} className="animate-spin mx-auto mb-3" />加载中...
+            <div className="space-y-3 py-4">
+              {[1, 2, 3].map(i => <SkeletonCard key={i} />)}
             </div>
           ) : skills.length === 0 ? (
-            <div className="py-20 text-center">
-              <Sparkles size={40} className="mx-auto mb-3 text-[color:var(--accent)] opacity-50" />
-              <p className="text-[color:var(--text-soft)]">还没有技能，去 AI 生成或上传一个吧</p>
-            </div>
+            <EmptyState
+              icon={Sparkles}
+              title="还没有技能"
+              description="去 AI 生成或上传一个技能吧"
+            />
           ) : (
             <div className="space-y-3">
               <AnimatePresence>
                 {skills.map(skill => (
                   <motion.div key={skill.id} layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95 }}>
-                    <SkillCard skill={skill} onInstall={handleInstall} onUninstall={handleUninstall} onDelete={handleDelete} />
+                    <SkillCard skill={skill} onInstall={handleInstall} onUninstall={handleUninstall} onDelete={handleDelete} onView={(s, ed) => { setViewSkill(s); setViewEditable(ed); }} />
                   </motion.div>
                 ))}
               </AnimatePresence>
@@ -293,6 +305,25 @@ export default function SkillsPage() {
         </div>
       )}
 
+      {activeTab === 'marketplace' && (
+        <MarketplaceTab
+          skills={skills}
+          onInstalled={() => fetchSkills()}
+          query={mpQuery} setQuery={setMpQuery}
+          results={mpResults} setResults={setMpResults}
+          pagination={mpPagination} setPagination={setMpPagination}
+          page={mpPage} setPage={setMpPage}
+          mpLoaded={mpLoaded}
+        />
+      )}
+
+      <SkillDetailModal
+        open={!!viewSkill}
+        skill={viewSkill}
+        editable={viewEditable}
+        onClose={(refresh) => { setViewSkill(null); if (refresh) fetchSkills(); }}
+      />
+
       {activeTab === 'upload' && (
         <div className="max-w-xl">
           <Card className="mb-5">
@@ -360,8 +391,7 @@ export default function SkillsPage() {
   );
 }
 
-function SkillCard({ skill, onInstall, onUninstall, onDelete }) {
-  const [expanded, setExpanded] = useState(false);
+function SkillCard({ skill, onInstall, onUninstall, onDelete, onView }) {
   return (
     <Card className={cn('transition-all hover:shadow-glow hover:-translate-y-0.5 group', skill.installed && 'border-emerald-500/30')}>
       <div className="flex items-start gap-3">
@@ -369,6 +399,7 @@ function SkillCard({ skill, onInstall, onUninstall, onDelete }) {
           <div className="flex items-center gap-2 mb-1">
             <code className="text-sm font-semibold text-[color:var(--accent)]">{skill.name}</code>
             {skill.installed && <Badge tone="success">已安装</Badge>}
+            {skill.source === 'marketplace' && <Badge tone="info">市场</Badge>}
           </div>
           <div className="text-sm text-[color:var(--text-soft)] line-clamp-2">{skill.description || '暂无描述'}</div>
         </div>
@@ -387,21 +418,270 @@ function SkillCard({ skill, onInstall, onUninstall, onDelete }) {
         </div>
       </div>
       <div className="flex items-center gap-2 mt-3 text-xs text-[color:var(--text-faint)]">
-        <span>创建者: {skill.created_by || '-'}</span>
-        <span>·</span>
         <span>{new Date(skill.created_at).toLocaleDateString('zh-CN')}</span>
-        <button onClick={() => setExpanded(o => !o)} className="ml-auto flex items-center gap-1 hover:text-[color:var(--text-soft)] transition">
-          {expanded ? <><ChevronDown size={12} />收起</> : <><ChevronRight size={12} />详情</>}
-        </button>
+        <div className="ml-auto flex items-center gap-1">
+          <button onClick={() => onView(skill, false)} className="flex items-center gap-1 px-2 py-1 rounded hover:bg-[color:var(--bg-soft)] text-[color:var(--text-soft)] transition">
+            <Eye size={12} /> 查看
+          </button>
+          <button onClick={() => onView(skill, true)} className="flex items-center gap-1 px-2 py-1 rounded hover:bg-[color:var(--bg-soft)] text-[color:var(--text-soft)] transition">
+            <Edit3 size={12} /> 编辑
+          </button>
+          <a href={api.exportSkillUrl(skill.id)} download className="flex items-center gap-1 px-2 py-1 rounded hover:bg-[color:var(--bg-soft)] text-[color:var(--text-soft)] transition">
+            <Download size={12} /> 导出
+          </a>
+        </div>
       </div>
-      {expanded && (
-        <div className="mt-3 pt-3 border-t border-[color:var(--line)]">
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-[color:var(--text-faint)]">OSS 路径</span>
-            <code className="text-[color:var(--text-soft)] bg-[color:var(--bg-soft)] px-1.5 py-0.5 rounded text-[11px]">{skill.oss_key}</code>
+    </Card>
+  );
+}
+
+function SkillDetailModal({ open, onClose, skill, editable: initialEditable }) {
+  const [files, setFiles] = useState({});
+  const [fileList, setFileList] = useState([]);
+  const [activeFile, setActiveFile] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editable, setEditable] = useState(initialEditable);
+
+  useEffect(() => {
+    if (!open || !skill) return;
+    setEditable(initialEditable);
+    setLoading(true);
+    api.getSkillContent(skill.id).then(data => {
+      const fl = data.files || [];
+      setFileList(fl);
+      const map = {};
+      fl.forEach(f => { map[f.path] = f.content; });
+      setFiles(map);
+      if (fl.length > 0) setActiveFile(fl[0].path);
+    }).catch(() => {
+      setFileList([]);
+      setFiles({});
+    }).finally(() => setLoading(false));
+  }, [open, skill?.id]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.updateSkillContent(skill.id, files);
+      onClose(true);
+    } catch (e) {
+      alert('保存失败: ' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!open || !skill) return null;
+
+  return (
+    <Modal open={open} onClose={() => onClose(false)} title={editable ? `编辑技能: ${skill.name}` : `查看技能: ${skill.name}`} width={860}
+      footer={editable ? <>
+        <Button variant="ghost" onClick={() => onClose(false)}><X size={14} /> 取消</Button>
+        <Button onClick={handleSave} disabled={saving}>{saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} 保存</Button>
+      </> : <Button variant="ghost" onClick={() => onClose(false)}>关闭</Button>}
+    >
+      {loading ? (
+        <div className="py-12 text-center text-sm text-[color:var(--text-faint)]"><Loader2 size={20} className="animate-spin mx-auto mb-2" /> 加载中…</div>
+      ) : fileList.length === 0 ? (
+        <div className="py-12 text-center text-sm text-[color:var(--text-faint)]">暂无文件内容。请先安装该技能后再查看。</div>
+      ) : (
+        <div className="flex gap-0 h-[calc(100vh-300px)] min-h-[400px] border border-[color:var(--line)] rounded-lg overflow-hidden">
+          <div className="w-[200px] shrink-0 border-r border-[color:var(--line)] py-3 overflow-y-auto scrollable bg-[color:var(--bg-soft)]">
+            <div className="text-[10px] uppercase tracking-wide text-[color:var(--text-faint)] px-3 pb-2 font-medium">文件</div>
+            {fileList.map(f => {
+              const Icon = getFileIcon(f.path);
+              return (
+                <button key={f.path} onClick={() => setActiveFile(f.path)} className={cn(
+                  'w-full flex items-center gap-2 px-3 py-1.5 text-xs transition text-left',
+                  activeFile === f.path ? 'bg-[color:var(--accent-soft)] text-[color:var(--accent)]' : 'text-[color:var(--text-soft)] hover:bg-[color:var(--bg-elev)]'
+                )}>
+                  <Icon size={12} /> <span className="truncate">{f.path}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {activeFile && (
+              <>
+                <div className="px-3 py-2 text-xs text-[color:var(--text-faint)] border-b border-[color:var(--line)] bg-[color:var(--bg-soft)] font-mono flex items-center justify-between">
+                  <span>{activeFile}</span>
+                  {!editable && <button onClick={() => setEditable(true)} className="text-[color:var(--accent)] hover:underline">切换编辑</button>}
+                </div>
+                {activeFile.endsWith('.md') && !editable ? (
+                  <div className="flex-1 p-4 overflow-y-auto scrollable text-sm text-[color:var(--text-soft)] md-block">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{files[activeFile] || ''}</ReactMarkdown>
+                  </div>
+                ) : (
+                  <textarea
+                    className="flex-1 bg-transparent text-sm font-mono p-3 resize-none outline-none text-[color:var(--text)]"
+                    value={files[activeFile] || ''}
+                    readOnly={!editable}
+                    onChange={e => editable && setFiles(prev => ({ ...prev, [activeFile]: e.target.value }))}
+                  />
+                )}
+              </>
+            )}
           </div>
         </div>
       )}
-    </Card>
+    </Modal>
+  );
+}
+
+function MarketplaceTab({ skills, onInstalled, query, setQuery, results, setResults, pagination, setPagination, page, setPage, mpLoaded }) {
+  const [loading, setLoading] = useState(false);
+  const [installing, setInstalling] = useState({});
+  const [detail, setDetail] = useState(null);
+
+  const installedNames = new Set((skills || []).map(s => s.name));
+
+  const doSearch = useCallback(async (p = 1) => {
+    setLoading(true);
+    try {
+      const data = await api.searchMarketplace({ q: query, page: p, pageSize: 20 });
+      setResults(data.skills || []);
+      setPagination(data.pagination || null);
+      setPage(p);
+    } catch { setResults([]); }
+    finally { setLoading(false); }
+  }, [query]);
+
+  useEffect(() => {
+    if (!mpLoaded.current) {
+      mpLoaded.current = true;
+      doSearch(1);
+    }
+  }, []);
+
+  const handleInstall = async (skill) => {
+    setInstalling(prev => ({ ...prev, [skill.id]: true }));
+    try {
+      await api.installMarketplaceSkill({
+        namespace: skill.namespace,
+        slug: skill.slug,
+        displayName: skill.displayName,
+        description: skill.description,
+        prompt: skill.prompt || '',
+        gitUrl: skill.gitUrl || '',
+        author: skill.namespace,
+        skillId: skill.id,
+      });
+      onInstalled?.();
+    } catch (e) { alert('安装失败: ' + e.message); }
+    finally { setInstalling(prev => ({ ...prev, [skill.id]: false })); }
+  };
+
+  const localName = (skill) => {
+    let n = skill.slug;
+    if (skill.namespace) n = skill.namespace + '-' + skill.slug;
+    return n.replace(/\//g, '-');
+  };
+
+  return (
+    <div className="max-w-4xl">
+      <div className="flex gap-2 mb-4">
+        <div className="flex-1 relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--text-faint)]" />
+          <input
+            className="w-full pl-9 pr-3 py-2.5 rounded-lg bg-[color:var(--bg-elev)] border border-[color:var(--line)] text-sm text-[color:var(--text)] placeholder:text-[color:var(--text-faint)] focus:outline-none focus:ring-2 focus:ring-[color:var(--accent)]/30"
+            placeholder="搜索 Smithery 技能市场..."
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && doSearch(1)}
+          />
+        </div>
+        <Button onClick={() => doSearch(1)} disabled={loading}>
+          {loading ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />} 搜索
+        </Button>
+      </div>
+
+      {loading && results.length === 0 ? (
+        <div className="space-y-3 py-4">{[1, 2, 3].map(i => <SkeletonCard key={i} />)}</div>
+      ) : results.length === 0 ? (
+        <EmptyState icon={Store} title="未找到技能" description="试试其他关键词搜索 Smithery 市场" />
+      ) : (
+        <div className="space-y-3">
+          {results.map(skill => {
+            const isInstalled = installedNames.has(localName(skill));
+            return (
+              <Card key={skill.id} className="hover:shadow-glow hover:-translate-y-0.5 transition-all">
+                <div className="flex items-start gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className="text-sm font-semibold text-[color:var(--accent)]">{skill.displayName || skill.slug}</span>
+                      {skill.verified && <Badge tone="info"><ShieldCheck size={10} /> 已验证</Badge>}
+                      {isInstalled && <Badge tone="success">已安装</Badge>}
+                    </div>
+                    <div className="text-sm text-[color:var(--text-soft)] line-clamp-2">{skill.description || '暂无描述'}</div>
+                    <div className="flex items-center gap-3 mt-2 text-xs text-[color:var(--text-faint)]">
+                      <span className="flex items-center gap-1"><Users size={11} /> {skill.namespace}</span>
+                      {skill.externalStars > 0 && <span className="flex items-center gap-1"><Star size={11} /> {skill.externalStars}</span>}
+                      {skill.totalActivations > 0 && <span>{skill.totalActivations} 次安装</span>}
+                      {skill.categories?.length > 0 && skill.categories.map(c => <Badge key={c} tone="default">{c}</Badge>)}
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5 shrink-0">
+                    <Button size="sm" variant="ghost" onClick={() => setDetail(skill)}>
+                      <Eye size={12} /> 详情
+                    </Button>
+                    {isInstalled ? (
+                      <Button size="sm" variant="outline" disabled>已安装</Button>
+                    ) : (
+                      <Button size="sm" onClick={() => handleInstall(skill)} disabled={installing[skill.id]}>
+                        {installing[skill.id] ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                        安装
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+
+          {pagination && pagination.totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 py-4">
+              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => doSearch(page - 1)}>上一页</Button>
+              <span className="text-sm text-[color:var(--text-soft)]">{page} / {pagination.totalPages}</span>
+              <Button size="sm" variant="outline" disabled={page >= pagination.totalPages} onClick={() => doSearch(page + 1)}>下一页</Button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {detail && (
+        <Modal open={!!detail} onClose={() => setDetail(null)} title={detail.displayName || detail.slug} width={680}>
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 flex-wrap text-sm">
+              <span className="text-[color:var(--text-faint)]">作者: <strong className="text-[color:var(--text)]">{detail.namespace}</strong></span>
+              {detail.externalStars > 0 && <span className="flex items-center gap-1 text-[color:var(--text-faint)]"><Star size={12} className="text-amber-500" /> {detail.externalStars}</span>}
+              {detail.verified && <Badge tone="info"><ShieldCheck size={10} /> 已验证</Badge>}
+              {detail.gitUrl && (
+                <a href={detail.gitUrl} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-[color:var(--accent)] hover:underline text-xs">
+                  <ExternalLink size={11} /> GitHub
+                </a>
+              )}
+            </div>
+            <div className="text-sm text-[color:var(--text-soft)]">{detail.description}</div>
+            {detail.prompt && (
+              <Card className="!p-0">
+                <div className="px-3 py-2 text-xs font-medium text-[color:var(--text-faint)] bg-[color:var(--bg-soft)] border-b border-[color:var(--line)]">技能提示词</div>
+                <div className="p-3 text-sm text-[color:var(--text-soft)] max-h-[300px] overflow-y-auto scrollable md-block">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.prompt}</ReactMarkdown>
+                </div>
+              </Card>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" onClick={() => setDetail(null)}>关闭</Button>
+              {!installedNames.has(localName(detail)) && (
+                <Button onClick={() => { handleInstall(detail); setDetail(null); }}>
+                  <Download size={14} /> 安装到本地
+                </Button>
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
+    </div>
   );
 }
