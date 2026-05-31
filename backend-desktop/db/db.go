@@ -560,6 +560,12 @@ func migrate() {
 		DB.Exec(`CREATE INDEX IF NOT EXISTS idx_distill_records_updated ON agent_distill_records(updated_at DESC)`)
 		recordMigration(5, "agent distill records – standalone storage for personality distillation")
 	}
+	if v < 6 {
+		if err := InitCheckpointsTable(); err != nil {
+			slog.Warn("migrate v6: InitCheckpointsTable", "err", err)
+		}
+		recordMigration(6, "coding checkpoints – atomic rollback with file+message+todo snapshots")
+	}
 }
 
 // seedBuiltinAgent 插入内置「通用助理」agent（id=1）

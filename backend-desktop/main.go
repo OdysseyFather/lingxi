@@ -343,6 +343,9 @@ func main() {
 	api.GET("/coding/branch", handler.GetGitBranch)
 	api.POST("/coding/chat", handler.CodingChat)
 	api.POST("/coding/chat/answer-batch", handler.CodingChatAnswerBatch)
+	api.POST("/coding/checkpoint", handler.CreateCheckpoint)
+	api.POST("/coding/rollback/:id", handler.RollbackCheckpoint)
+	api.GET("/coding/checkpoints/:sessionId", handler.ListCheckpoints)
 
 	// Electron 启动时下发激活档案明文 token
 	api.POST("/runtime/active-secret", handler.SetActiveSecret)

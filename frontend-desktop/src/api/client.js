@@ -60,6 +60,11 @@ export const api = {
   sendCodingChat: (payload) => req('POST', '/api/coding/chat', payload),
   submitCodingAnswerBatch: (payload) => req('POST', '/api/coding/chat/answer-batch', payload),
 
+  // coding checkpoints
+  createCheckpoint: (sessionId, messageId) => req('POST', '/api/coding/checkpoint', { sessionId: String(sessionId), messageId }),
+  rollbackCheckpoint: (checkpointId) => req('POST', `/api/coding/rollback/${checkpointId}`),
+  listCheckpoints: (sessionId) => req('GET', `/api/coding/checkpoints/${sessionId}`),
+
   // providers + profiles
   listProviders: () => req('GET', '/api/providers'),
   listProfiles: (includeCipher) => req('GET', `/api/api-profiles${includeCipher ? '?include_cipher=1' : ''}`),

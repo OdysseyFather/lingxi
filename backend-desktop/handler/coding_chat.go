@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -609,8 +610,78 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 		hub.Send(sessionID, "message_usage", string(evt))
 	}
 
+	// 如果本轮有文件修改操作，自动创建 Checkpoint
+	if savedMsgID > 0 && hasFileModifyInBlocks(blocks) {
+		go createAutoCheckpoint(sessionID, savedMsgID, workingDir, hub)
+	}
+
 	tryPostChatEvolution(agentID, sessionID, blocks)
 	hub.Send(sessionID, "done", "[DONE]")
+}
+
+func hasFileModifyInBlocks(blocks []msgBlock) bool {
+	for _, b := range blocks {
+		if b.Type == "tool" && isFileModifyTool(b.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+func createAutoCheckpoint(sessionID, messageID int64, workingDir string, hub *Hub) {
+	// 从 blocks 中提取被修改的文件路径（简化：只记录 workingDir 下最近 git 变更）
+	var files []db.FileSnapshot
+	if workingDir != "" {
+		// 尝试读取 git 跟踪的变更文件
+		changedPaths := getGitChangedFiles(workingDir)
+		for _, p := range changedPaths {
+			content, err := os.ReadFile(p)
+			if err != nil {
+				continue
+			}
+			files = append(files, db.FileSnapshot{Path: p, Content: string(content)})
+			if len(files) >= 50 {
+				break
+			}
+		}
+	}
+
+	cpID, err := db.CreateCheckpoint(sessionID, messageID, files, nil)
+	if err != nil {
+		slog.Warn("auto checkpoint creation failed", "err", err, "session", sessionID)
+		return
+	}
+
+	cpPayload, _ := json.Marshal(map[string]any{
+		"id":             cpID,
+		"session_id":     sessionID,
+		"message_id":     messageID,
+		"created_at":     time.Now().UTC().Format(time.RFC3339),
+		"files_count":    len(files),
+		"messages_count": 0,
+	})
+	hub.Send(sessionID, "checkpoint_created", string(cpPayload))
+}
+
+func getGitChangedFiles(dir string) []string {
+	cmd := exec.Command("git", "diff", "--name-only", "HEAD")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+	var result []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		full := filepath.Join(dir, line)
+		if info, err := os.Stat(full); err == nil && !info.IsDir() {
+			result = append(result, full)
+		}
+	}
+	return result
 }
 
 // ─── Coding 专属辅助函数 ────────────────────────────────────────────

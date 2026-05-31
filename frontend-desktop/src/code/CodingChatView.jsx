@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo, useTransition } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Highlight, themes } from 'prism-react-renderer';
 import {
   Brain, Loader2, FolderOpen, ChevronDown, ChevronRight, ChevronUp,
   Copy, Check, CheckCircle2, Clock, Zap, Pencil, RotateCcw, FilePlus, FileEdit, X,
+  History,
 } from 'lucide-react';
 import { cn } from '../ui/cn';
 import { useStore } from '../state/useStore';
@@ -18,9 +19,9 @@ import { PermissionBlock } from './PermissionBlock';
 import { AskQuestionWizard } from './AskQuestionWizard';
 import { AgentsWindow } from './AgentsWindow';
 import { StickyTaskBar, TaskTodoList } from './TaskTodoList';
+import { ThemedBox, ThemedButton } from './themed-containers';
 
 export function CodingChatView({ projectPath, onChangeProject }) {
-  // 使用 Coding 独立状态（不再共享 chatSlice）
   const messages = useStore((s) => s.codingMessages);
   const liveBlocks = useStore((s) => s.codingLiveBlocks);
   const isStreaming = useStore((s) => s.codingIsStreaming);
@@ -32,13 +33,13 @@ export function CodingChatView({ projectPath, onChangeProject }) {
   const pendingQuestions = useStore((s) => s.codingPendingQuestions);
   const subAgents = useStore((s) => s.subAgents);
   const loadCodingMessages = useStore((s) => s.loadCodingMessages);
+  const checkpoints = useStore((s) => s.codingCheckpoints) || [];
 
   const bottomRef = useRef(null);
   const scrollRef = useRef(null);
   const [stickToBottom, setStickToBottom] = useState(true);
   const composerRef = useRef(null);
 
-  // 加载会话消息（使用 Coding 独立方法）
   useEffect(() => {
     if (activeSessionId) {
       loadCodingMessages(activeSessionId);
@@ -80,13 +81,11 @@ export function CodingChatView({ projectPath, onChangeProject }) {
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
-      {/* 吸顶任务进度栏 */}
+    <div className="flex-1 flex flex-col min-h-0 relative">
       {codingTasks.length > 0 && (
         <StickyTaskBar tasks={codingTasks} />
       )}
 
-      {/* 实时文件修改 diff 预览面板 */}
       {liveDiffs.length > 0 && (
         <LiveDiffPanel diffs={liveDiffs} />
       )}
@@ -104,7 +103,7 @@ export function CodingChatView({ projectPath, onChangeProject }) {
           )}
 
           {messages.map((msg) => (
-            <MessageBlock key={msg.id} msg={msg} />
+            <MessageBlock key={msg.id} msg={msg} checkpoints={checkpoints} />
           ))}
 
           {liveBlocks.length > 0 && (
@@ -115,19 +114,12 @@ export function CodingChatView({ projectPath, onChangeProject }) {
             </div>
           )}
 
-          {/* 实时任务列表（流式期间在聊天中内联显示） */}
           {codingTasks.length > 0 && (
             <TaskTodoList tasks={codingTasks} title="任务列表" collapsed={false} />
           )}
 
-          {/* Agents Window: Sub-agent 监控面板 */}
           {subAgents.length > 0 && (
             <AgentsWindow />
-          )}
-
-          {/* 渐进式 AskQuestion 向导（批量问题） */}
-          {pendingQuestions.length > 0 && (
-            <AskQuestionWizard />
           )}
 
           {isStreaming && agentState === 'THINKING' && liveBlocks.length === 0 && (
@@ -138,15 +130,34 @@ export function CodingChatView({ projectPath, onChangeProject }) {
         </div>
       </div>
 
+      {/* AskQuestion wizard: non-blocking, above composer */}
+      {pendingQuestions.length > 0 && (
+        <div className="shrink-0 border-t border-[var(--coding-border)] bg-[var(--coding-surface)] backdrop-blur-md">
+          <AskQuestionWizard />
+        </div>
+      )}
+
       <CodingComposer ref={composerRef} onSend={handleSend} disabled={isStreaming} projectPath={projectPath} />
     </div>
   );
 }
 
-function MessageBlock({ msg }) {
+function MessageBlock({ msg, checkpoints }) {
   if (msg.role === 'user') return <UserMessage msg={msg} />;
-  if (msg.role === 'assistant') return <AssistantMessage msg={msg} />;
+  if (msg.role === 'assistant') return <AssistantMessage msg={msg} checkpoints={checkpoints} />;
+  if (msg.role === 'system') return <SystemMessage msg={msg} />;
   return null;
+}
+
+function SystemMessage({ msg }) {
+  return (
+    <div className="my-4 flex justify-center">
+      <div className="px-4 py-2 rounded-lg bg-[var(--accent-soft)] text-[var(--accent)] text-[12px] font-medium flex items-center gap-2">
+        <History size={12} />
+        {msg.content}
+      </div>
+    </div>
+  );
 }
 
 function UserMessage({ msg }) {
@@ -157,7 +168,6 @@ function UserMessage({ msg }) {
   const sendMessage = useStore((s) => s.codingSendMessage);
   const activeSessionId = useStore((s) => s.activeSessionId);
   const codingProjectPath = useStore((s) => s.codingProjectPath);
-  const messages = useStore((s) => s.codingMessages);
   const [copied, setCopied] = useState(false);
 
   let text = msg.content;
@@ -230,12 +240,12 @@ function UserMessage({ msg }) {
           <textarea
             value={editText}
             onChange={(e) => setEditText(e.target.value)}
-            className="w-full px-4 py-3 rounded-2xl bg-[#f5f0eb] border-2 border-[#c4a882] text-[14px] text-[#333] leading-relaxed outline-none resize-none min-h-[60px]"
+            className="w-full px-4 py-3 rounded-2xl bg-[var(--coding-user-bubble)] border-2 border-[var(--accent)] text-[14px] text-[var(--text)] leading-relaxed outline-none resize-none min-h-[60px]"
             autoFocus
           />
           <div className="flex justify-end gap-2 mt-2">
-            <button onClick={() => setEditing(false)} className="px-3 py-1.5 rounded-lg text-[12px] text-[#999] hover:text-[#666] hover:bg-[#f5f0eb] transition">Cancel</button>
-            <button onClick={handleSaveEdit} className="px-3 py-1.5 rounded-lg text-[12px] bg-[#c4a882] text-white hover:bg-[#b09670] transition">Save & Resend</button>
+            <ThemedButton variant="ghost" onClick={() => setEditing(false)}>Cancel</ThemedButton>
+            <ThemedButton variant="primary" onClick={handleSaveEdit}>Save & Resend</ThemedButton>
           </div>
         </div>
       </div>
@@ -249,18 +259,18 @@ function UserMessage({ msg }) {
       onMouseLeave={() => setHover(false)}
     >
       {hover && (
-        <div className="absolute right-0 -top-7 flex items-center gap-0.5 bg-white rounded-lg border border-[#e8e4e0] shadow-sm px-1 py-0.5">
-          <button onClick={handleCopy} className="p-1.5 rounded text-[#bbb] hover:text-[#666] transition" title="复制">
+        <div className="absolute right-0 -top-7 flex items-center gap-0.5 bg-[var(--coding-surface-raised)] rounded-lg border border-[var(--coding-border)] shadow-sm px-1 py-0.5 backdrop-blur-sm">
+          <button onClick={handleCopy} className="p-1.5 rounded text-[var(--text-faint)] hover:text-[var(--text-soft)] transition" title="复制">
             {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
           </button>
-          <button onClick={handleEdit} className="p-1.5 rounded text-[#bbb] hover:text-[#666] transition" title="编辑">
+          <button onClick={handleEdit} className="p-1.5 rounded text-[var(--text-faint)] hover:text-[var(--text-soft)] transition" title="编辑">
             <Pencil size={12} />
           </button>
           <button
             onClick={handleRestore}
             disabled={restoring}
-            className="p-1.5 rounded text-[#bbb] hover:text-[#e67e22] transition"
-            title="回滚到此消息之前（还原代码修改）"
+            className="p-1.5 rounded text-[var(--text-faint)] hover:text-orange-500 transition"
+            title="回滚到此消息之前"
           >
             {restoring ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
           </button>
@@ -270,14 +280,14 @@ function UserMessage({ msg }) {
         {fileRefs.length > 0 && (
           <div className="flex flex-wrap gap-1.5 mb-2 justify-end">
             {fileRefs.map((f, i) => (
-              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#ede5dc] border border-[#d4cec6] text-[11px] text-[#8b5e3c]" title={f.path}>
+              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[var(--accent-soft)] border border-[var(--coding-border)] text-[11px] text-[var(--accent)]" title={f.path}>
                 {f.isDir ? <FolderOpen size={10} /> : <FileIcon size={10} />}
                 <span className="truncate max-w-[120px]">{f.name}{f.isDir ? '/' : ''}</span>
               </span>
             ))}
           </div>
         )}
-        <div className="px-4 py-3 rounded-2xl bg-[#f5f0eb] text-[14px] text-[#333] leading-relaxed whitespace-pre-wrap">
+        <div className="px-4 py-3 rounded-2xl bg-[var(--coding-user-bubble)] text-[14px] text-[var(--text)] leading-relaxed whitespace-pre-wrap">
           {text}
         </div>
       </div>
@@ -291,19 +301,21 @@ function FileIcon({ size = 14, className }) {
   </svg>;
 }
 
-function AssistantMessage({ msg }) {
+function AssistantMessage({ msg, checkpoints }) {
   const blocks = useMemo(() => parseAssistantContent(msg.content), [msg.content]);
   const sendMessage = useStore((s) => s.codingSendMessage);
   const codingProjectPath = useStore((s) => s.codingProjectPath);
   const [hover, setHover] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [rollbackOpen, setRollbackOpen] = useState(false);
+  const activeSessionId = useStore((s) => s.activeSessionId);
+
+  const checkpoint = checkpoints.find(cp => cp.message_id === msg.id);
 
   const HIDDEN_TOOLS = ['TodoWrite', 'TodoRead', 'todo_write', 'todo_read'];
   const toolBlocks = blocks.filter(b => b.type === 'tool' && !HIDDEN_TOOLS.includes(b.name));
-  // 将 TodoWrite/TodoRead 的工具块提取出 tasks 数据供内联渲染
   const todoToolBlocks = blocks.filter(b => b.type === 'tool' && HIDDEN_TOOLS.includes(b.name));
   const inlineTasks = useMemo(() => {
-    // 尝试从 TodoWrite 工具块的 input 中解析任务列表
     for (const b of todoToolBlocks) {
       try {
         const inp = typeof b.input === 'string' ? JSON.parse(b.input) : b.input;
@@ -326,23 +338,63 @@ function AssistantMessage({ msg }) {
     }
   }, [plainText]);
 
+  const handleRollback = useCallback(async () => {
+    if (!checkpoint || !activeSessionId) return;
+    try {
+      await api.rollbackCheckpoint(checkpoint.id);
+      const remaining = await api.listMessages(activeSessionId);
+      useStore.setState({
+        codingMessages: remaining || [],
+        codingLiveBlocks: [],
+        codingTasks: checkpoint.todo_snapshot ? JSON.parse(checkpoint.todo_snapshot) : [],
+        liveDiffs: [],
+        codingIsStreaming: false,
+        codingAgentState: 'IDLE',
+      });
+      useStore.getState().pushNotification({ title: '回滚成功', body: `已恢复到 ${new Date(checkpoint.created_at).toLocaleTimeString()} 的状态` });
+    } catch (e) {
+      useStore.getState().pushNotification({ title: '回滚失败', body: e.message });
+    }
+    setRollbackOpen(false);
+  }, [checkpoint, activeSessionId]);
+
   return (
     <div
       className="mt-4 mb-2 group relative"
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      {hover && plainText && (
-        <div className="absolute right-0 -top-3 flex items-center gap-0.5 bg-white rounded-lg border border-[#e8e4e0] shadow-sm px-1 py-0.5 z-10">
-          <button onClick={handleCopy} className="p-1.5 rounded text-[#bbb] hover:text-[#666] transition" title="复制">
-            {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
-          </button>
+      {hover && (
+        <div className="absolute right-0 -top-3 flex items-center gap-0.5 bg-[var(--coding-surface-raised)] rounded-lg border border-[var(--coding-border)] shadow-sm px-1 py-0.5 z-10 backdrop-blur-sm">
+          {plainText && (
+            <button onClick={handleCopy} className="p-1.5 rounded text-[var(--text-faint)] hover:text-[var(--text-soft)] transition" title="复制">
+              {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
+            </button>
+          )}
+          {checkpoint && (
+            <button
+              onClick={() => setRollbackOpen(true)}
+              className="p-1.5 rounded text-[var(--text-faint)] hover:text-orange-500 transition"
+              title="回滚到此步"
+            >
+              <RotateCcw size={12} />
+            </button>
+          )}
         </div>
       )}
+
+      {/* Rollback confirmation modal */}
+      {rollbackOpen && checkpoint && (
+        <RollbackModal
+          checkpoint={checkpoint}
+          onConfirm={handleRollback}
+          onCancel={() => setRollbackOpen(false)}
+        />
+      )}
+
       {toolBlocks.length > 0 && (
         <ToolGroupCard tools={toolBlocks} />
       )}
-      {/* 内联任务列表（来自 TodoWrite 工具块） */}
       {inlineTasks && inlineTasks.length > 0 && (
         <TaskTodoList tasks={inlineTasks} title="任务列表" collapsed={false} />
       )}
@@ -350,11 +402,8 @@ function AssistantMessage({ msg }) {
         if (block.type === 'thinking') return <ThinkingBlock key={i} text={block.text} />;
         if (block.type === 'text' && block.text) return <TextBlock key={i} text={block.text} />;
         if (block.type === 'task_list') {
-          // task_list 块内联渲染
           const tasks = block.tasks || block.todos || [];
-          if (tasks.length > 0) {
-            return <TaskTodoList key={i} tasks={tasks} title={block.title || '任务列表'} collapsed={false} />;
-          }
+          if (tasks.length > 0) return <TaskTodoList key={i} tasks={tasks} title={block.title || '任务列表'} collapsed={false} />;
           return null;
         }
         if (block.type === 'ask_question') {
@@ -370,18 +419,51 @@ function AssistantMessage({ msg }) {
           );
         }
         if (block.type === 'permission') {
-          return (
-            <PermissionBlock
-              key={i}
-              toolName={block.toolName}
-              input={block.input}
-              resolved={block.resolved}
-            />
-          );
+          return <PermissionBlock key={i} toolName={block.toolName} input={block.input} resolved={block.resolved} />;
         }
         return null;
       })}
       {msg.usage && <UsageInfo usage={msg.usage} />}
+    </div>
+  );
+}
+
+function RollbackModal({ checkpoint, onConfirm, onCancel }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onCancel}>
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" />
+      <div
+        className="relative w-[400px] rounded-2xl bg-[var(--coding-surface-raised)] border border-[var(--coding-border)] shadow-2xl p-6 backdrop-blur-md"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl bg-orange-500/10 flex items-center justify-center">
+            <RotateCcw size={18} className="text-orange-500" />
+          </div>
+          <div>
+            <h3 className="text-[15px] font-bold text-[var(--text)]">回滚到此检查点</h3>
+            <p className="text-[12px] text-[var(--text-faint)]">
+              {new Date(checkpoint.created_at).toLocaleString()}
+            </p>
+          </div>
+        </div>
+        <div className="space-y-2 mb-5 text-[13px] text-[var(--text-soft)]">
+          <p>此操作将：</p>
+          <ul className="list-disc list-inside space-y-1 text-[12px]">
+            <li>恢复 {checkpoint.files_count || '?'} 个文件到检查点状态</li>
+            <li>移除此消息之后的所有对话</li>
+            <li>重置任务列表到检查点快照</li>
+          </ul>
+          <p className="text-[12px] text-orange-500 font-medium">此操作不可撤销。</p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <ThemedButton variant="ghost" onClick={onCancel}>取消</ThemedButton>
+          <ThemedButton variant="danger" onClick={onConfirm}>
+            <RotateCcw size={12} className="mr-1.5" />
+            确认回滚
+          </ThemedButton>
+        </div>
+      </div>
     </div>
   );
 }
@@ -400,30 +482,30 @@ function ToolGroupCard({ tools }) {
     : '';
 
   return (
-    <div className="my-3 rounded-xl border border-[#e8e4e0] bg-[#faf8f6] overflow-hidden">
+    <div className="my-3 rounded-xl border border-[var(--coding-border)] bg-[var(--coding-surface)] overflow-hidden">
       <button
         onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left text-[13px] hover:bg-[#f5f0eb] transition"
+        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left text-[13px] hover:bg-[var(--accent-soft)] transition"
       >
-        {open ? <ChevronUp size={14} className="text-[#999]" /> : <ChevronDown size={14} className="text-[#999]" />}
-        <Zap size={13} className="text-[#c4a882] shrink-0" />
-        <span className="font-medium text-[#555]">{label}</span>
+        {open ? <ChevronUp size={14} className="text-[var(--text-faint)]" /> : <ChevronDown size={14} className="text-[var(--text-faint)]" />}
+        <Zap size={13} className="text-[var(--accent)] shrink-0" />
+        <span className="font-medium text-[var(--text-soft)]">{label}</span>
         {toolNames && !open && (
-          <span className="text-[11px] text-[#bbb] truncate max-w-[200px]">{toolNames}</span>
+          <span className="text-[11px] text-[var(--text-faint)] truncate max-w-[200px]">{toolNames}</span>
         )}
         <span className="flex-1" />
         {allDone && totalMs > 0 && (
-          <span className="text-[11px] text-[#bbb] flex items-center gap-1 mr-2">
+          <span className="text-[11px] text-[var(--text-faint)] flex items-center gap-1 mr-2">
             <Clock size={10} />
             {totalMs > 1000 ? `${(totalMs / 1000).toFixed(1)}s` : `${totalMs}ms`}
           </span>
         )}
         {allDone && allSuccess && <CheckCircle2 size={16} className="text-green-500" />}
         {allDone && !allSuccess && <span className="text-red-400 text-[12px]">有失败</span>}
-        {!allDone && <Loader2 size={14} className="text-[#c4a882] animate-spin" />}
+        {!allDone && <Loader2 size={14} className="text-[var(--accent)] animate-spin" />}
       </button>
       {open && (
-        <div className="border-t border-[#e8e4e0]">
+        <div className="border-t border-[var(--coding-border)]">
           {tools.map((tool, i) => (
             <CodingToolCard key={i} name={tool.name} label={tool.label} done={tool.done !== false} input={tool.input} status={tool.status} ms={tool.ms} />
           ))}
@@ -439,7 +521,7 @@ function TextBlock({ text, isLive }) {
   const parts = useMemo(() => splitInteractiveBlocks(text, isLive), [text, isLive]);
 
   return (
-    <div className="prose-coding text-[14px] leading-relaxed text-[#333] my-2">
+    <div className="prose-coding text-[14px] leading-relaxed text-[var(--text)] my-2">
       {parts.map((part, i) => {
         if (part.type === 'md') {
           return (
@@ -466,12 +548,10 @@ function TextBlock({ text, isLive }) {
             />
           );
         }
-        if (part.type === 'task_plan' || part.type === 'questions_batch') {
-          return null;
-        }
+        if (part.type === 'task_plan' || part.type === 'questions_batch') return null;
         if (part.type === 'pending') {
           return (
-            <div key={i} className="my-3 flex items-center gap-2 text-[13px] text-[#c4a882]">
+            <div key={i} className="my-3 flex items-center gap-2 text-[13px] text-[var(--accent)]">
               <Loader2 size={14} className="animate-spin" />
               <span>Generating interactive options...</span>
             </div>
@@ -490,7 +570,6 @@ function tryParseInteractiveJSON(str) {
     const obj = JSON.parse(str.trim());
     if (obj && typeof obj === 'object') {
       if (INTERACTIVE_TYPES.includes(obj.type)) return obj;
-      // 兼容无 type 字段但有 questions 数组的 questions_batch
       if (Array.isArray(obj.questions)) return { ...obj, type: 'questions_batch' };
     }
   } catch {}
@@ -503,7 +582,6 @@ function splitInteractiveBlocks(text, live = false) {
   const parts = [];
   let last = 0;
 
-  // 1) 匹配 ```json ... ``` 包裹的交互 JSON
   const fencedRe = /```json\s*\n([\s\S]*?)\n```/g;
   let m;
   while ((m = fencedRe.exec(text)) !== null) {
@@ -515,7 +593,6 @@ function splitInteractiveBlocks(text, live = false) {
     }
   }
 
-  // 2) 匹配裸 JSON 对象（AI 未包在代码围栏里的情况）——通过花括号配对
   if (parts.length === 0) {
     last = 0;
     for (let i = 0; i < text.length; i++) {
@@ -576,14 +653,13 @@ function InteractiveChoiceBlock({ data, onSubmit }) {
     if (submitted || !selected) return;
     setSubmitted(true);
     const opt = (data.options || []).find(o => o.id === selected);
-    const label = opt?.label || selected;
-    onSubmit?.(label);
+    onSubmit?.(opt?.label || selected);
   }, [submitted, selected, data, onSubmit]);
 
   return (
-    <div className="my-4 rounded-xl border border-[#e8e4e0] bg-white overflow-hidden">
+    <ThemedBox variant="raised" className="my-4 overflow-hidden">
       <div className="px-5 py-4">
-        <h3 className="text-[15px] font-bold text-[#1a1a1a] mb-4">{data.title}</h3>
+        <h3 className="text-[15px] font-bold text-[var(--text)] mb-4">{data.title}</h3>
         <div className="space-y-2">
           {(data.options || []).map((opt) => {
             const isSelected = selected === opt.id;
@@ -594,17 +670,17 @@ function InteractiveChoiceBlock({ data, onSubmit }) {
                 disabled={submitted}
                 className={cn(
                   'w-full text-left px-4 py-3 rounded-xl border-2 transition-all',
-                  isSelected ? 'border-[#c4a882] bg-[#faf5ef]' : 'border-[#e8e4e0] hover:border-[#d4cec6] bg-white',
+                  isSelected ? 'border-[var(--coding-border-active)] bg-[var(--accent-soft)]' : 'border-[var(--coding-border)] hover:border-[var(--text-faint)] bg-[var(--coding-surface-raised)]',
                   submitted && 'opacity-70 cursor-default'
                 )}
               >
                 <div className="flex items-start gap-3">
                   <span className="mt-0.5 shrink-0">
-                    {isSelected ? <CheckCircle2 size={18} className="text-[#c4a882]" /> : <Circle size={18} className="text-[#ddd]" />}
+                    {isSelected ? <CheckCircle2 size={18} className="text-[var(--accent)]" /> : <Circle size={18} className="text-[var(--text-faint)]" />}
                   </span>
                   <div>
-                    <div className="text-[14px] font-medium text-[#333]">{opt.label}</div>
-                    {opt.desc && <div className="text-[12px] text-[#999] mt-0.5">{opt.desc}</div>}
+                    <div className="text-[14px] font-medium text-[var(--text)]">{opt.label}</div>
+                    {opt.desc && <div className="text-[12px] text-[var(--text-faint)] mt-0.5">{opt.desc}</div>}
                   </div>
                 </div>
               </button>
@@ -614,17 +690,10 @@ function InteractiveChoiceBlock({ data, onSubmit }) {
       </div>
       {!submitted && (
         <div className="px-5 pb-4">
-          <button
-            onClick={handleSubmit}
-            disabled={!selected}
-            className={cn(
-              'flex items-center gap-2 px-5 py-2 rounded-lg text-[13px] font-medium transition',
-              selected ? 'bg-[#c4a882] text-white hover:bg-[#b09670]' : 'bg-[#f0ebe6] text-[#ccc] cursor-default'
-            )}
-          >
-            <ArrowRightIcon size={13} />
+          <ThemedButton variant="primary" disabled={!selected} onClick={handleSubmit}>
+            <ArrowRightIcon size={13} className="mr-1.5" />
             Submit
-          </button>
+          </ThemedButton>
         </div>
       )}
       {submitted && (
@@ -633,7 +702,7 @@ function InteractiveChoiceBlock({ data, onSubmit }) {
           <span>Submitted</span>
         </div>
       )}
-    </div>
+    </ThemedBox>
   );
 }
 
@@ -649,19 +718,19 @@ function InteractiveInputBlock({ data, onSubmit }) {
   }, [submitted, data, values, onSubmit]);
 
   return (
-    <div className="my-4 rounded-xl border border-[#e8e4e0] bg-white overflow-hidden">
+    <ThemedBox variant="raised" className="my-4 overflow-hidden">
       <div className="px-5 py-4">
-        <h3 className="text-[15px] font-bold text-[#1a1a1a] mb-4">{data.title}</h3>
+        <h3 className="text-[15px] font-bold text-[var(--text)] mb-4">{data.title}</h3>
         {(data.fields || []).map((field) => (
           <div key={field.id} className="mb-3">
-            <label className="text-[12px] text-[#999] mb-1 block">{field.label}</label>
+            <label className="text-[12px] text-[var(--text-faint)] mb-1 block">{field.label}</label>
             {field.multiline ? (
               <textarea
                 value={values[field.id] || ''}
                 onChange={(e) => setValues(prev => ({ ...prev, [field.id]: e.target.value }))}
                 placeholder={field.placeholder || ''}
                 disabled={submitted}
-                className="w-full px-4 py-2.5 rounded-xl border border-[#e8e4e0] text-[14px] text-[#333] placeholder-[#ccc] outline-none focus:border-[#c4a882] transition disabled:opacity-70 resize-none min-h-[80px]"
+                className="w-full px-4 py-2.5 rounded-xl border border-[var(--coding-border)] bg-[var(--coding-surface)] text-[14px] text-[var(--text)] placeholder-[var(--text-faint)] outline-none focus:border-[var(--accent)] transition disabled:opacity-70 resize-none min-h-[80px]"
               />
             ) : (
               <input
@@ -670,7 +739,7 @@ function InteractiveInputBlock({ data, onSubmit }) {
                 onChange={(e) => setValues(prev => ({ ...prev, [field.id]: e.target.value }))}
                 placeholder={field.placeholder || ''}
                 disabled={submitted}
-                className="w-full px-4 py-2.5 rounded-xl border border-[#e8e4e0] text-[14px] text-[#333] placeholder-[#ccc] outline-none focus:border-[#c4a882] transition disabled:opacity-70"
+                className="w-full px-4 py-2.5 rounded-xl border border-[var(--coding-border)] bg-[var(--coding-surface)] text-[14px] text-[var(--text)] placeholder-[var(--text-faint)] outline-none focus:border-[var(--accent)] transition disabled:opacity-70"
               />
             )}
           </div>
@@ -678,10 +747,10 @@ function InteractiveInputBlock({ data, onSubmit }) {
       </div>
       {!submitted && (
         <div className="px-5 pb-4">
-          <button onClick={handleSubmit} className="flex items-center gap-2 px-5 py-2 rounded-lg bg-[#c4a882] text-white text-[13px] font-medium hover:bg-[#b09670] transition">
-            <ArrowRightIcon size={13} />
+          <ThemedButton variant="primary" onClick={handleSubmit}>
+            <ArrowRightIcon size={13} className="mr-1.5" />
             Submit
-          </button>
+          </ThemedButton>
         </div>
       )}
       {submitted && (
@@ -690,12 +759,12 @@ function InteractiveInputBlock({ data, onSubmit }) {
           <span>Submitted</span>
         </div>
       )}
-    </div>
+    </ThemedBox>
   );
 }
 
-function ArrowRightIcon({ size = 14 }) {
-  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>;
+function ArrowRightIcon({ size = 14, className }) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>;
 }
 
 function Circle({ size = 14, className }) {
@@ -710,14 +779,14 @@ function ThinkingBlock({ text }) {
     <div className="my-2">
       <button
         onClick={() => setOpen(v => !v)}
-        className="flex items-center gap-2 text-[12px] text-[#999] hover:text-[#666] transition"
+        className="flex items-center gap-2 text-[12px] text-[var(--text-faint)] hover:text-[var(--text-soft)] transition"
       >
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
         <span className="italic">Thinking</span>
-        {!open && <span className="text-[#bbb] truncate max-w-[400px]">{preview}</span>}
+        {!open && <span className="text-[var(--text-faint)] truncate max-w-[400px]">{preview}</span>}
       </button>
       {open && (
-        <div className="mt-1 pl-5 text-[12px] text-[#999] whitespace-pre-wrap font-mono max-h-60 overflow-y-auto scrollable border-l-2 border-[#e8e4e0]">
+        <div className="mt-1 pl-5 text-[12px] text-[var(--text-faint)] whitespace-pre-wrap font-mono max-h-60 overflow-y-auto scrollable border-l-2 border-[var(--coding-border)]">
           {text}
         </div>
       )}
@@ -735,7 +804,7 @@ function UsageInfo({ usage }) {
   const output = data.output_tokens || 0;
   if (!input && !output) return null;
   return (
-    <div className="text-[11px] text-[#bbb] mt-1 flex items-center gap-2">
+    <div className="text-[11px] text-[var(--text-faint)] mt-1 flex items-center gap-2">
       <span>{(input + output).toLocaleString()} tokens</span>
     </div>
   );
@@ -747,11 +816,11 @@ function LiveBlock({ block }) {
 
   if (block.type === 'thinking') {
     return (
-      <div className="my-2 flex items-center gap-2 text-[12px] text-[#c4a882]">
+      <div className="my-2 flex items-center gap-2 text-[12px] text-[var(--accent)]">
         <Brain size={13} className="animate-pulse" />
         <span className="italic">Thinking...</span>
         {block.text && (
-          <span className="text-[#ccc] truncate max-w-[300px] text-[11px]">
+          <span className="text-[var(--text-faint)] truncate max-w-[300px] text-[11px]">
             {block.text.slice(-80)}
           </span>
         )}
@@ -768,9 +837,7 @@ function LiveBlock({ block }) {
   }
   if (block.type === 'task_list') {
     const tasks = block.tasks || block.todos || [];
-    if (tasks.length > 0) {
-      return <TaskTodoList tasks={tasks} title={block.title || '任务列表'} collapsed={false} />;
-    }
+    if (tasks.length > 0) return <TaskTodoList tasks={tasks} title={block.title || '任务列表'} collapsed={false} />;
     return null;
   }
   if (block.type === 'ask_question') {
@@ -784,12 +851,7 @@ function LiveBlock({ block }) {
     );
   }
   if (block.type === 'permission') {
-    return (
-      <PermissionBlock
-        toolName={block.toolName}
-        input={block.input}
-      />
-    );
+    return <PermissionBlock toolName={block.toolName} input={block.input} />;
   }
   return null;
 }
@@ -816,19 +878,12 @@ function ThinkingIndicator() {
     DONE: 'Done',
   }[agentState] || 'Thinking';
 
-  const stateIcon = {
-    CHECKING: '📖',
-    EXECUTING: '⚡',
-    WAITING_FOR_USER: '💬',
-    WAITING_FOR_INPUT: '💬',
-  }[agentState];
-
   return (
-    <div className="flex items-center gap-2.5 text-[13px] text-[#c4a882] py-4">
+    <div className="flex items-center gap-2.5 text-[13px] text-[var(--accent)] py-4">
       <Loader2 size={14} className="animate-spin" />
-      <span className="font-medium">{stateIcon ? `${stateIcon} ` : ''}{stateLabel}...</span>
+      <span className="font-medium">{stateLabel}...</span>
       {elapsed > 0 && (
-        <span className="text-[11px] text-[#bbb] flex items-center gap-1">
+        <span className="text-[11px] text-[var(--text-faint)] flex items-center gap-1">
           <Clock size={10} />
           {elapsed}s
         </span>
@@ -844,7 +899,6 @@ function LiveDiffPanel({ diffs }) {
   if (!diffs || diffs.length === 0) return null;
 
   const active = diffs[Math.min(activeIdx, diffs.length - 1)];
-  const fileName = active?.file?.split('/').pop() || '';
   const filePath = active?.file || '';
 
   const diffLines = useMemo(() => {
@@ -856,9 +910,8 @@ function LiveDiffPanel({ diffs }) {
   }, [active?.diff]);
 
   return (
-    <div className="border-b border-[#e8e4e0] bg-white">
-      {/* 文件标签栏 */}
-      <div className="flex items-center border-b border-[#f0ebe6] bg-[#faf8f6]">
+    <div className="border-b border-[var(--coding-border)] bg-[var(--coding-surface-raised)]">
+      <div className="flex items-center border-b border-[var(--coding-border)] bg-[var(--coding-surface)]">
         <div className="flex-1 flex items-center gap-0.5 px-2 overflow-x-auto scrollable">
           {diffs.map((d, i) => {
             const name = d.file?.split('/').pop() || '';
@@ -870,8 +923,8 @@ function LiveDiffPanel({ diffs }) {
                 className={cn(
                   'flex items-center gap-1.5 px-3 py-1.5 text-[12px] rounded-t-lg transition shrink-0',
                   isActive
-                    ? 'bg-white border border-b-0 border-[#e8e4e0] text-[#333] font-medium -mb-px'
-                    : 'text-[#999] hover:text-[#666] hover:bg-[#f5f0eb]'
+                    ? 'bg-[var(--coding-surface-raised)] border border-b-0 border-[var(--coding-border)] text-[var(--text)] font-medium -mb-px'
+                    : 'text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)]'
                 )}
               >
                 {d.isNew ? <FilePlus size={12} className="text-green-500" /> : <FileEdit size={12} className="text-blue-500" />}
@@ -886,40 +939,30 @@ function LiveDiffPanel({ diffs }) {
         </div>
         <button
           onClick={() => setCollapsed(v => !v)}
-          className="p-1.5 mr-1 text-[#bbb] hover:text-[#666] transition"
+          className="p-1.5 mr-1 text-[var(--text-faint)] hover:text-[var(--text-soft)] transition"
         >
           {collapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
         </button>
       </div>
 
-      {/* Diff 内容 */}
       {!collapsed && (
         <div className="max-h-[240px] overflow-y-auto scrollable">
-          {/* 文件路径标题 */}
-          <div className="flex items-center gap-2 px-4 py-1.5 bg-[#faf8f6] text-[12px] text-[#999] border-b border-[#f0ebe6]">
+          <div className="flex items-center gap-2 px-4 py-1.5 bg-[var(--coding-surface)] text-[12px] text-[var(--text-faint)] border-b border-[var(--coding-border)]">
             {active?.isNew ? (
-              <span className="px-1.5 py-0.5 rounded bg-green-50 text-green-700 text-[10px] font-medium">NEW</span>
+              <span className="px-1.5 py-0.5 rounded bg-green-500/10 text-green-600 text-[10px] font-medium">NEW</span>
             ) : (
-              <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-medium">MODIFIED</span>
+              <span className="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 text-[10px] font-medium">MODIFIED</span>
             )}
             <span className="font-mono truncate">{filePath}</span>
           </div>
 
-          {/* Diff 行 */}
           <div className="font-mono text-[12px] leading-[1.6]">
             {diffLines.map((line, i) => {
               let bg = '';
-              let color = '#555';
-              if (line.startsWith('@@')) {
-                bg = 'bg-blue-50';
-                color = '#3b82f6';
-              } else if (line.startsWith('+')) {
-                bg = 'bg-green-50';
-                color = '#16a34a';
-              } else if (line.startsWith('-')) {
-                bg = 'bg-red-50';
-                color = '#dc2626';
-              }
+              let color = 'var(--text-soft)';
+              if (line.startsWith('@@')) { bg = 'bg-blue-500/5'; color = '#3b82f6'; }
+              else if (line.startsWith('+')) { bg = 'bg-green-500/10'; color = '#16a34a'; }
+              else if (line.startsWith('-')) { bg = 'bg-red-500/10'; color = '#dc2626'; }
 
               return (
                 <div key={i} className={cn('px-4 whitespace-pre', bg)} style={{ color }}>
@@ -937,24 +980,24 @@ function LiveDiffPanel({ diffs }) {
 function WelcomeScreen({ projectPath, onChangeProject }) {
   return (
     <div className="flex flex-col items-center justify-center py-20 text-center">
-      <div className="w-16 h-16 rounded-2xl bg-[#f5f0eb] flex items-center justify-center mb-6">
-        <span className="text-3xl text-[#c4a882] font-mono font-bold">&gt;<span className="text-[#d4a574]">;</span>]</span>
+      <div className="w-16 h-16 rounded-2xl bg-[var(--accent-soft)] flex items-center justify-center mb-6">
+        <span className="text-3xl text-[var(--accent)] font-mono font-bold">&gt;<span className="opacity-60">;</span>]</span>
       </div>
-      <h2 className="text-xl font-bold text-[#1a1a1a] mb-2">New session</h2>
-      <p className="text-sm text-[#999] max-w-md leading-relaxed mb-4">
+      <h2 className="text-xl font-bold text-[var(--text)] mb-2">New session</h2>
+      <p className="text-sm text-[var(--text-faint)] max-w-md leading-relaxed mb-4">
         Start a fresh coding session. AI is ready to help you build, debug, and architect your project.
       </p>
       {!projectPath && onChangeProject && (
         <button
           onClick={onChangeProject}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#f5f0eb] border border-[#e0dbd5] text-[13px] text-[#8b5e3c] font-medium hover:bg-[#ede5dc] transition"
+          className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--accent-soft)] border border-[var(--coding-border)] text-[13px] text-[var(--accent)] font-medium hover:bg-[var(--accent-soft)] transition"
         >
           <FolderOpen size={15} />
           选择工作目录
         </button>
       )}
       {projectPath && (
-        <div className="text-[12px] text-[#bbb] flex items-center gap-1.5">
+        <div className="text-[12px] text-[var(--text-faint)] flex items-center gap-1.5">
           <FolderOpen size={12} />
           <span>{projectPath.split('/').pop()}</span>
         </div>
@@ -972,22 +1015,19 @@ function CodeBlock({ code, language }) {
   }, [code]);
 
   return (
-    <div className="relative group my-3 rounded-xl border border-[#e8e4e0] overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-1.5 bg-[#faf8f6] border-b border-[#e8e4e0]">
-        <span className="text-[11px] text-[#999] font-mono">{language}</span>
-        <button
-          onClick={handleCopy}
-          className="p-1 rounded text-[#bbb] hover:text-[#666] transition"
-        >
+    <div className="relative group my-3 rounded-xl border border-[var(--coding-border)] overflow-hidden">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--coding-surface)] border-b border-[var(--coding-border)]">
+        <span className="text-[11px] text-[var(--text-faint)] font-mono">{language}</span>
+        <button onClick={handleCopy} className="p-1 rounded text-[var(--text-faint)] hover:text-[var(--text-soft)] transition">
           {copied ? <Check size={12} className="text-green-500" /> : <Copy size={12} />}
         </button>
       </div>
       <Highlight theme={themes.github} code={code} language={language || 'text'}>
         {({ tokens, getLineProps, getTokenProps }) => (
-          <pre className="p-3 text-[13px] leading-5 font-mono overflow-x-auto bg-white">
+          <pre className="p-3 text-[13px] leading-5 font-mono overflow-x-auto bg-[var(--coding-surface-raised)]">
             {tokens.map((line, i) => (
               <div key={i} {...getLineProps({ line })}>
-                <span className="inline-block w-8 text-right mr-3 text-[#ccc] select-none text-[11px]">{i + 1}</span>
+                <span className="inline-block w-8 text-right mr-3 text-[var(--text-faint)] select-none text-[11px]">{i + 1}</span>
                 {line.map((token, key) => <span key={key} {...getTokenProps({ token })} />)}
               </div>
             ))}
@@ -1004,18 +1044,18 @@ const MD_COMPONENTS = {
     if (!inline && match) {
       return <CodeBlock code={String(children).replace(/\n$/, '')} language={match[1]} />;
     }
-    return <code className="px-1.5 py-0.5 rounded-md bg-[#f5f0eb] text-[#8b5e3c] text-[13px] font-mono" {...props}>{children}</code>;
+    return <code className="px-1.5 py-0.5 rounded-md bg-[var(--accent-soft)] text-[var(--accent)] text-[13px] font-mono" {...props}>{children}</code>;
   },
-  p({ children }) { return <p className="my-2 text-[#333]">{children}</p>; },
-  h1({ children }) { return <h1 className="text-lg font-bold text-[#1a1a1a] mt-5 mb-2">{children}</h1>; },
-  h2({ children }) { return <h2 className="text-base font-bold text-[#1a1a1a] mt-4 mb-2">{children}</h2>; },
-  h3({ children }) { return <h3 className="text-sm font-bold text-[#333] mt-3 mb-1.5">{children}</h3>; },
-  ul({ children }) { return <ul className="list-disc list-inside my-2 text-[#555] space-y-1">{children}</ul>; },
-  ol({ children }) { return <ol className="list-decimal list-inside my-2 text-[#555] space-y-1">{children}</ol>; },
-  li({ children }) { return <li className="text-[#555]">{children}</li>; },
-  a({ href, children }) { return <a href={href} className="text-[#8b5e3c] underline hover:text-[#6b4530]" target="_blank" rel="noopener noreferrer">{children}</a>; },
-  blockquote({ children }) { return <blockquote className="border-l-3 border-[#e0dbd5] pl-4 my-3 text-[#888] italic">{children}</blockquote>; },
-  table({ children }) { return <table className="my-3 border-collapse w-full text-[13px] rounded-lg overflow-hidden border border-[#e8e4e0]">{children}</table>; },
-  th({ children }) { return <th className="border border-[#e8e4e0] px-3 py-2 text-left text-[#666] bg-[#faf8f6] font-medium text-[12px]">{children}</th>; },
-  td({ children }) { return <td className="border border-[#e8e4e0] px-3 py-2 text-[#555]">{children}</td>; },
+  p({ children }) { return <p className="my-2 text-[var(--text)]">{children}</p>; },
+  h1({ children }) { return <h1 className="text-lg font-bold text-[var(--text)] mt-5 mb-2">{children}</h1>; },
+  h2({ children }) { return <h2 className="text-base font-bold text-[var(--text)] mt-4 mb-2">{children}</h2>; },
+  h3({ children }) { return <h3 className="text-sm font-bold text-[var(--text)] mt-3 mb-1.5">{children}</h3>; },
+  ul({ children }) { return <ul className="list-disc list-inside my-2 text-[var(--text-soft)] space-y-1">{children}</ul>; },
+  ol({ children }) { return <ol className="list-decimal list-inside my-2 text-[var(--text-soft)] space-y-1">{children}</ol>; },
+  li({ children }) { return <li className="text-[var(--text-soft)]">{children}</li>; },
+  a({ href, children }) { return <a href={href} className="text-[var(--accent)] underline hover:opacity-80" target="_blank" rel="noopener noreferrer">{children}</a>; },
+  blockquote({ children }) { return <blockquote className="border-l-3 border-[var(--coding-border)] pl-4 my-3 text-[var(--text-faint)] italic">{children}</blockquote>; },
+  table({ children }) { return <table className="my-3 border-collapse w-full text-[13px] rounded-lg overflow-hidden border border-[var(--coding-border)]">{children}</table>; },
+  th({ children }) { return <th className="border border-[var(--coding-border)] px-3 py-2 text-left text-[var(--text-soft)] bg-[var(--coding-surface)] font-medium text-[12px]">{children}</th>; },
+  td({ children }) { return <td className="border border-[var(--coding-border)] px-3 py-2 text-[var(--text-soft)]">{children}</td>; },
 };

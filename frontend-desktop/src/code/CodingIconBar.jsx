@@ -1,6 +1,6 @@
 import { cn } from '../ui/cn';
 import { useStore } from '../state/useStore';
-import { Plus, Clock, Settings, MessageSquare, ArrowLeftRight, FileEdit, FolderTree } from 'lucide-react';
+import { Plus, Clock, Settings, ArrowLeftRight, FileEdit, FolderTree } from 'lucide-react';
 
 export function CodingIconBar() {
   const codingView = useStore((s) => s.codingView);
@@ -16,7 +16,7 @@ export function CodingIconBar() {
     {
       id: 'logo',
       icon: () => (
-        <span className="text-[#c4a882] font-bold text-base font-mono leading-none flex items-center">&gt;<span className="text-[#d4a574]">;</span>]</span>
+        <span className="text-[var(--accent)] font-bold text-base font-mono leading-none flex items-center">&gt;<span className="opacity-60">;</span>]</span>
       ),
       action: () => setCodingView('chat'),
       title: '对话',
@@ -27,7 +27,7 @@ export function CodingIconBar() {
   ];
 
   return (
-    <div className="w-10 bg-[#faf8f6] border-r border-[#e8e4e0] flex flex-col items-center py-2 gap-1 shrink-0">
+    <div className="w-10 bg-[var(--coding-surface)] border-r border-[var(--coding-border)] flex flex-col items-center py-2 gap-1 shrink-0">
       {topBtns.map((btn) => {
         const Icon = btn.icon;
         return (
@@ -38,8 +38,8 @@ export function CodingIconBar() {
             className={cn(
               'w-8 h-8 flex items-center justify-center rounded-lg transition-all',
               btn.active
-                ? 'bg-[#ede5dc] text-[#7a5c3a]'
-                : 'text-[#999] hover:text-[#666] hover:bg-[#f0ebe6]'
+                ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+                : 'text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)]'
             )}
           >
             <Icon size={16} />
@@ -55,8 +55,8 @@ export function CodingIconBar() {
         className={cn(
           'w-8 h-8 flex items-center justify-center rounded-lg transition-all',
           codingFileTreeOpen
-            ? 'bg-[#ede5dc] text-[#7a5c3a]'
-            : 'text-[#999] hover:text-[#666] hover:bg-[#f0ebe6]'
+            ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+            : 'text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)]'
         )}
       >
         <FolderTree size={15} />
@@ -67,8 +67,8 @@ export function CodingIconBar() {
         className={cn(
           'w-8 h-8 flex items-center justify-center rounded-lg transition-all',
           codingChangesOpen
-            ? 'bg-[#ede5dc] text-[#7a5c3a]'
-            : 'text-[#999] hover:text-[#666] hover:bg-[#f0ebe6]'
+            ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+            : 'text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)]'
         )}
       >
         <FileEdit size={15} />
@@ -79,8 +79,8 @@ export function CodingIconBar() {
         className={cn(
           'w-8 h-8 flex items-center justify-center rounded-lg transition-all',
           codingView === 'settings'
-            ? 'bg-[#ede5dc] text-[#7a5c3a]'
-            : 'text-[#999] hover:text-[#666] hover:bg-[#f0ebe6]'
+            ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+            : 'text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)]'
         )}
       >
         <Settings size={15} />
@@ -88,7 +88,7 @@ export function CodingIconBar() {
       <button
         onClick={() => setAppMode('main')}
         title="切换到灵犀主模式"
-        className="w-8 h-8 flex items-center justify-center rounded-lg text-[#999] hover:text-[#666] hover:bg-[#f0ebe6] transition-all"
+        className="w-8 h-8 flex items-center justify-center rounded-lg text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)] transition-all"
       >
         <ArrowLeftRight size={14} />
       </button>

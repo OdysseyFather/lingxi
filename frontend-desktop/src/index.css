@@ -113,6 +113,48 @@
   --aurora-3: radial-gradient(900px 700px at 50% 110%, rgba(192,132,252,0.10), transparent 60%);
 }
 
+/* ── Coding View 补充变量（仅覆盖全局变量无法满足的 Coding 特殊层级） ─── */
+:root {
+  --coding-surface: #faf8f6;
+  --coding-surface-raised: #ffffff;
+  --coding-border: #e8e4e0;
+  --coding-border-active: var(--accent);
+  --coding-progress: var(--accent);
+  --coding-user-bubble: #f5f0eb;
+}
+[data-theme="dark"], [data-theme="midnight"] {
+  --coding-surface: var(--bg-soft);
+  --coding-surface-raised: var(--bg-elev);
+  --coding-border: var(--line-strong);
+  --coding-border-active: var(--accent);
+  --coding-progress: var(--accent);
+  --coding-user-bubble: var(--bg-soft);
+}
+[data-theme="cyber"] {
+  --coding-surface: var(--bg-soft);
+  --coding-surface-raised: var(--bg-elev);
+  --coding-border: var(--line-strong);
+  --coding-border-active: var(--accent);
+  --coding-progress: var(--accent);
+  --coding-user-bubble: var(--bg-soft);
+}
+[data-theme="aurora"] {
+  --coding-surface: var(--bg-soft);
+  --coding-surface-raised: var(--bg-elev);
+  --coding-border: var(--line-strong);
+  --coding-border-active: var(--accent);
+  --coding-progress: var(--accent);
+  --coding-user-bubble: var(--bg-soft);
+}
+[data-theme="cosmos"] {
+  --coding-surface: var(--bg-soft);
+  --coding-surface-raised: var(--bg-elev);
+  --coding-border: var(--line-strong);
+  --coding-border-active: var(--accent);
+  --coding-progress: var(--accent);
+  --coding-user-bubble: var(--bg-soft);
+}
+
 html, body, #root { height: 100%; }
 body {
   margin: 0;

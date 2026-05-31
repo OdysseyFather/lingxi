@@ -50,36 +50,28 @@ export function CodingToolCard({ name, label, done, input, status, ms }) {
         onClick={() => showDetail && setOpen(v => !v)}
         className={cn(
           'w-full flex items-center gap-2.5 px-4 py-2.5 text-left text-[13px]',
-          showDetail && 'hover:bg-[#faf8f6] cursor-pointer transition',
+          showDetail && 'hover:bg-[var(--accent-soft)] cursor-pointer transition',
         )}
       >
-        <span className="shrink-0 text-[#999]">
+        <span className="shrink-0 text-[var(--text-faint)]">
           {!done && !failed ? (
-            <Loader2 size={14} className="animate-spin text-[#c4a882]" />
+            <Loader2 size={14} className="animate-spin text-[var(--accent)]" />
           ) : (
             <Icon size={14} />
           )}
         </span>
 
-        <span className="font-medium text-[#555]">{meta.label}</span>
+        <span className="font-medium text-[var(--text-soft)]">{meta.label}</span>
 
         {shortFilePath && (
-          <span className="text-[#999] font-mono text-[12px] truncate">{shortFilePath}</span>
+          <span className="text-[var(--text-faint)] font-mono text-[12px] truncate">{shortFilePath}</span>
         )}
 
         {summary && !shortFilePath && (
-          <span className="text-[#999] truncate text-[12px] flex-1">{summary}</span>
+          <span className="text-[var(--text-faint)] truncate text-[12px] flex-1">{summary}</span>
         )}
 
         <span className="flex items-center gap-1.5 shrink-0 ml-auto text-[12px]">
-          {filePath && (
-            <span
-              className="text-[#bbb] hover:text-[#666] font-mono truncate max-w-[200px] hidden group-hover:inline"
-              title={filePath}
-            >
-              {filePath.replace(/^\/Users\/[^/]+/, '~')}
-            </span>
-          )}
           {failed ? (
             <span className="text-red-400 flex items-center gap-1">
               <AlertCircle size={13} /> 失败
@@ -87,21 +79,21 @@ export function CodingToolCard({ name, label, done, input, status, ms }) {
           ) : done ? (
             <CheckCircle2 size={14} className="text-green-500" />
           ) : (
-            <span className="text-[#bbb]">执行中</span>
+            <span className="text-[var(--text-faint)]">执行中</span>
           )}
           {showDetail && (
-            open ? <ChevronDown size={13} className="text-[#bbb]" />
-                 : <ChevronRight size={13} className="text-[#bbb]" />
+            open ? <ChevronDown size={13} className="text-[var(--text-faint)]" />
+                 : <ChevronRight size={13} className="text-[var(--text-faint)]" />
           )}
         </span>
       </button>
 
       {open && showDetail && (
-        <div className="mx-4 mb-3 rounded-xl border border-[#e8e4e0] overflow-hidden">
+        <div className="mx-4 mb-3 rounded-xl border border-[var(--coding-border)] overflow-hidden">
           {filePath && (
-            <div className="flex items-center justify-between px-3 py-1.5 bg-[#faf8f6] border-b border-[#e8e4e0]">
-              <span className="text-[11px] text-[#999] font-mono truncate">{filePath}</span>
-              <button onClick={handleCopyPath} className="p-1 rounded text-[#bbb] hover:text-[#666] transition" title="Copy path">
+            <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--coding-surface)] border-b border-[var(--coding-border)]">
+              <span className="text-[11px] text-[var(--text-faint)] font-mono truncate">{filePath}</span>
+              <button onClick={handleCopyPath} className="p-1 rounded text-[var(--text-faint)] hover:text-[var(--text-soft)] transition" title="Copy path">
                 {copied ? <Check size={11} className="text-green-500" /> : <Copy size={11} />}
               </button>
             </div>
@@ -109,7 +101,7 @@ export function CodingToolCard({ name, label, done, input, status, ms }) {
           {(name === 'Edit' || name === 'MultiEdit' || name === 'Write') && (
             <DiffStats input={input} />
           )}
-          <div className="text-[12px] font-mono whitespace-pre-wrap break-all max-h-[400px] overflow-y-auto scrollable bg-white">
+          <div className="text-[12px] font-mono whitespace-pre-wrap break-all max-h-[400px] overflow-y-auto scrollable bg-[var(--coding-surface-raised)]">
             {renderDetail(name, input)}
           </div>
         </div>
@@ -128,7 +120,7 @@ function DiffStats({ input }) {
   }
   if (!added && !removed) return null;
   return (
-    <div className="flex items-center gap-3 px-3 py-1.5 bg-[#faf8f6] border-b border-[#e8e4e0] text-[11px]">
+    <div className="flex items-center gap-3 px-3 py-1.5 bg-[var(--coding-surface)] border-b border-[var(--coding-border)] text-[11px]">
       <span className="text-green-600 font-mono">+{added}</span>
       <span className="text-red-500 font-mono">-{removed}</span>
       <div className="flex items-center gap-0.5 ml-1">
@@ -176,7 +168,7 @@ function renderDetail(name, input) {
   if (name === 'Bash') {
     return <BashPreview input={input} />;
   }
-  return <div className="p-3 text-[#777]">{input}</div>;
+  return <div className="p-3 text-[var(--text-soft)]">{input}</div>;
 }
 
 function DiffPreview({ input }) {
@@ -185,21 +177,21 @@ function DiffPreview({ input }) {
     <div>
       {lines.map((line, i) => {
         const trimmed = line.trimStart();
-        let cls = 'text-[#555] bg-white';
+        let cls = 'text-[var(--text-soft)] bg-[var(--coding-surface-raised)]';
         let lineNum = i + 1;
         let marker = ' ';
         if (trimmed.startsWith('+') && !trimmed.startsWith('+++')) {
-          cls = 'text-green-700 bg-green-50';
+          cls = 'text-green-700 bg-green-50 dark:bg-green-900/20 dark:text-green-400';
           marker = '+';
         } else if (trimmed.startsWith('-') && !trimmed.startsWith('---')) {
-          cls = 'text-red-600 bg-red-50';
+          cls = 'text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400';
           marker = '-';
         } else if (trimmed.startsWith('@@')) {
-          cls = 'text-blue-500 bg-blue-50';
+          cls = 'text-blue-500 bg-blue-50 dark:bg-blue-900/20';
         }
         return (
           <div key={i} className={cn('flex leading-5 px-1', cls)}>
-            <span className="inline-block w-10 text-right mr-1 text-[#ccc] select-none text-[11px] shrink-0">{lineNum}</span>
+            <span className="inline-block w-10 text-right mr-1 text-[var(--text-faint)] select-none text-[11px] shrink-0">{lineNum}</span>
             <span className="inline-block w-4 text-center text-[11px] shrink-0 select-none">{marker}</span>
             <span className="flex-1">{line}</span>
           </div>
@@ -214,8 +206,8 @@ function BashPreview({ input }) {
   const cmd = match ? match[1] : input;
   return (
     <div className="p-3">
-      <div className="text-[#333]">
-        <span className="text-[#c4a882]">$</span> {cmd}
+      <div className="text-[var(--text)]">
+        <span className="text-[var(--accent)]">$</span> {cmd}
       </div>
     </div>
   );

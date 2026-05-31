@@ -20,24 +20,24 @@ export function WorkspaceChanges({ changes, onClose, onSelectFile, onRefresh }) 
   });
 
   return (
-    <div className="h-full bg-white flex flex-col border-r border-[#e8e4e0] shadow-xl">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-[#e8e4e0]">
+    <div className="h-full bg-[var(--coding-surface-raised)] flex flex-col border-r border-[var(--coding-border)] shadow-xl">
+      <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--coding-border)]">
         <div className="flex items-center gap-2">
-          <span className="text-[13px] font-bold text-[#333]">已更改文件</span>
+          <span className="text-[13px] font-bold text-[var(--text)]">已更改文件</span>
           <button
             onClick={() => {}}
-            className="text-[12px] text-[#999] hover:text-[#666] transition flex items-center gap-1"
+            className="text-[12px] text-[var(--text-faint)] hover:text-[var(--text-soft)] transition flex items-center gap-1"
           >
             <ChevronDown size={11} />
           </button>
         </div>
         <div className="flex items-center gap-1">
           {onRefresh && (
-            <button onClick={onRefresh} className="p-1.5 rounded text-[#bbb] hover:text-[#666] transition" title="刷新">
+            <button onClick={onRefresh} className="p-1.5 rounded text-[var(--text-faint)] hover:text-[var(--text-soft)] transition" title="刷新">
               <RefreshCw size={13} />
             </button>
           )}
-          <button onClick={onClose} className="p-1.5 rounded text-[#bbb] hover:text-[#666] transition" title="关闭">
+          <button onClick={onClose} className="p-1.5 rounded text-[var(--text-faint)] hover:text-[var(--text-soft)] transition" title="关闭">
             <X size={13} />
           </button>
         </div>
@@ -45,20 +45,20 @@ export function WorkspaceChanges({ changes, onClose, onSelectFile, onRefresh }) 
 
       <div className="px-3 py-2">
         <div className="relative">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[#bbb]" />
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-faint)]" />
           <input
             type="text"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="搜选文件..."
-            className="w-full h-8 pl-8 pr-3 rounded-lg bg-[#faf8f6] border border-[#e8e4e0] text-[12px] text-[#333] placeholder-[#bbb] outline-none focus:border-[#c4a882] transition"
+            className="w-full h-8 pl-8 pr-3 rounded-lg bg-[var(--coding-surface)] border border-[var(--coding-border)] text-[12px] text-[var(--text)] placeholder-[var(--text-faint)] outline-none focus:border-[var(--accent)] transition"
           />
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto scrollable">
         {filtered.length === 0 && (
-          <div className="text-center text-[12px] text-[#bbb] py-8">暂无文件变更</div>
+          <div className="text-center text-[12px] text-[var(--text-faint)] py-8">暂无文件变更</div>
         )}
         {filtered.map((change) => {
           const statusInfo = STATUS_COLORS[change.status] || STATUS_COLORS.M;
@@ -66,12 +66,12 @@ export function WorkspaceChanges({ changes, onClose, onSelectFile, onRefresh }) 
             <button
               key={change.path}
               onClick={() => onSelectFile?.(change)}
-              className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-[#faf8f6] transition border-b border-[#f5f0eb] last:border-0"
+              className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-[var(--coding-surface)] transition border-b border-[var(--coding-border)] last:border-0"
             >
               <span className={cn('w-5 h-5 rounded flex items-center justify-center text-[10px] font-bold shrink-0', statusInfo.bg, statusInfo.text)}>
                 {statusInfo.label}
               </span>
-              <span className="flex-1 text-[13px] text-[#333] truncate font-mono">
+              <span className="flex-1 text-[13px] text-[var(--text)] truncate font-mono">
                 {change.path}
               </span>
               <div className="flex items-center gap-1 shrink-0 text-[11px] font-mono">

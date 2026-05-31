@@ -150,12 +150,12 @@ export function CodingShell() {
 
   if (!authChecked) {
     return (
-      <div className="h-screen flex items-center justify-center bg-[#faf8f6]">
+      <div className="h-screen flex items-center justify-center bg-[var(--bg)]">
         <div className="text-center space-y-3">
-          <div className="w-12 h-12 rounded-xl bg-[#ede5dc] flex items-center justify-center mx-auto">
-            <span className="text-[#c4a882] font-bold text-lg font-mono">&gt;;</span>
+          <div className="w-12 h-12 rounded-xl bg-[var(--accent-soft)] flex items-center justify-center mx-auto">
+            <span className="text-[var(--accent)] font-bold text-lg font-mono">&gt;;</span>
           </div>
-          <p className="text-sm text-[#999]">加载中…</p>
+          <p className="text-sm text-[var(--text-faint)]">加载中…</p>
         </div>
       </div>
     );
@@ -172,7 +172,7 @@ export function CodingShell() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-white" data-theme="light">
+    <div className="h-screen flex flex-col bg-[var(--bg)]">
       {/* 移动端顶部栏 */}
       {isMobile && (
         <MobileHeader
@@ -230,7 +230,7 @@ export function CodingShell() {
         </AnimatePresence>
 
         {/* 主区域 */}
-        <main className="flex-1 flex min-h-0 bg-white">
+        <main className="flex-1 flex min-h-0 bg-[var(--bg)]">
           {/* 聊天/设置区域 */}
           <div className="flex-1 flex flex-col min-h-0">
             <Suspense fallback={<PageFallback />}>
@@ -262,7 +262,7 @@ export function CodingShell() {
                 {codingView === 'scheduled' && (
                   <motion.div
                     key="coding-scheduled"
-                    className="flex-1 overflow-auto scrollable bg-white p-4"
+                    className="flex-1 overflow-auto scrollable bg-[var(--bg)] p-4"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -279,7 +279,7 @@ export function CodingShell() {
           {previewFile && codingView === 'chat' && !isMobile && (
             <>
               <div
-                className="w-1 cursor-col-resize bg-[#e8e4e0] hover:bg-[#c4a882] transition shrink-0"
+                className="w-1 cursor-col-resize bg-[var(--coding-border)] hover:bg-[var(--accent)] transition shrink-0"
                 onMouseDown={handleResizeStart}
               />
               <div style={{ width: previewWidth }} className="shrink-0 flex flex-col min-h-0">
@@ -340,13 +340,13 @@ function CodingSearchModal({ onClose, onSelect }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center pt-[15vh]" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/20" />
+      <div className="absolute inset-0 bg-black/20 backdrop-blur-sm" />
       <div
-        className="relative w-[560px] max-h-[60vh] rounded-2xl bg-white shadow-2xl border border-[#e8e4e0] flex flex-col overflow-hidden"
+        className="relative w-[560px] max-h-[60vh] rounded-2xl bg-[var(--coding-surface-raised)] shadow-2xl border border-[var(--coding-border)] flex flex-col overflow-hidden backdrop-blur-md"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-[#e8e4e0]">
-          <Search size={16} className="text-[#c4a882] shrink-0" />
+        <div className="flex items-center gap-3 px-5 py-4 border-b border-[var(--coding-border)]">
+          <Search size={16} className="text-[var(--accent)] shrink-0" />
           <input
             ref={inputRef}
             value={query}
@@ -357,37 +357,37 @@ function CodingSearchModal({ onClose, onSelect }) {
             }}
             onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}
             placeholder="搜索消息..."
-            className="flex-1 text-[15px] text-[#333] placeholder-[#bbb] outline-none bg-transparent"
+            className="flex-1 text-[15px] text-[var(--text)] placeholder-[var(--text-faint)] outline-none bg-transparent"
           />
-          <kbd className="px-2 py-0.5 rounded-md bg-[#f5f0eb] border border-[#e0dbd5] text-[10px] text-[#999]">ESC</kbd>
+          <kbd className="px-2 py-0.5 rounded-md bg-[var(--coding-surface)] border border-[var(--coding-border)] text-[10px] text-[var(--text-faint)]">ESC</kbd>
         </div>
         <div className="flex-1 overflow-y-auto scrollable">
           {loading && (
             <div className="flex items-center justify-center py-8">
-              <div className="w-4 h-4 border-2 border-[#e0dbd5] border-t-[#c4a882] rounded-full animate-spin" />
+              <div className="w-4 h-4 border-2 border-[var(--coding-border)] border-t-[var(--accent)] rounded-full animate-spin" />
             </div>
           )}
           {!loading && results.length === 0 && query.trim() && (
-            <div className="text-center text-[13px] text-[#bbb] py-8">未找到匹配消息</div>
+            <div className="text-center text-[13px] text-[var(--text-faint)] py-8">未找到匹配消息</div>
           )}
           {results.map((r, i) => (
             <button
               key={i}
               onClick={() => onSelect(r)}
-              className="w-full text-left px-5 py-3 hover:bg-[#faf8f6] transition border-b border-[#f0ebe6] last:border-0"
+              className="w-full text-left px-5 py-3 hover:bg-[var(--coding-surface)] transition border-b border-[var(--coding-border)] last:border-0"
             >
               <div className="flex items-center gap-2 mb-1">
                 <span className={cn(
                   'text-[10px] font-medium px-1.5 py-0.5 rounded',
-                  r.role === 'user' ? 'bg-[#f5f0eb] text-[#8b5e3c]' : 'bg-[#ede5dc] text-[#7a5c3a]'
+                  r.role === 'user' ? 'bg-[var(--accent-soft)] text-[var(--accent)]' : 'bg-[var(--coding-surface)] text-[var(--text-soft)]'
                 )}>
                   {r.role === 'user' ? 'User' : 'Assistant'}
                 </span>
                 {r.session_title && (
-                  <span className="text-[11px] text-[#bbb] truncate">{r.session_title}</span>
+                  <span className="text-[11px] text-[var(--text-faint)] truncate">{r.session_title}</span>
                 )}
               </div>
-              <div className="text-[13px] text-[#555] line-clamp-2">{r.content?.slice(0, 200)}</div>
+              <div className="text-[13px] text-[var(--text-soft)] line-clamp-2">{r.content?.slice(0, 200)}</div>
             </button>
           ))}
         </div>
@@ -400,21 +400,21 @@ function MobileHeader({ projectPath, onSwitchMode }) {
   const createSession = useStore((s) => s.createSession);
   const shortProject = projectPath ? projectPath.split('/').pop() : 'Coding Agent';
   return (
-    <div className="h-12 flex items-center justify-between px-4 bg-white border-b border-[#e8e4e0] shrink-0">
+    <div className="h-12 flex items-center justify-between px-4 bg-[var(--bg-elev)] border-b border-[var(--coding-border)] shrink-0">
       <div className="flex items-center gap-3">
-        <span className="text-[#c4a882] font-bold text-base font-mono">&gt;;</span>
-        <span className="text-[14px] font-bold text-[#333]">{shortProject}</span>
+        <span className="text-[var(--accent)] font-bold text-base font-mono">&gt;;</span>
+        <span className="text-[14px] font-bold text-[var(--text)]">{shortProject}</span>
       </div>
       <div className="flex items-center gap-2">
         <button
           onClick={() => createSession('编程会话')}
-          className="p-2 rounded-lg text-[#999] hover:text-[#666] hover:bg-[#f5f0eb] transition"
+          className="p-2 rounded-lg text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)] transition"
         >
           <Plus size={18} />
         </button>
         <button
           onClick={onSwitchMode}
-          className="p-2 rounded-lg text-[#999] hover:text-[#666] hover:bg-[#f5f0eb] transition"
+          className="p-2 rounded-lg text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)] transition"
           title="切换到灵犀模式"
         >
           <ArrowLeftRight size={16} />

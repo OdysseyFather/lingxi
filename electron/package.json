@@ -1,6 +1,6 @@
 {
   "name": "lingxi-agent",
-  "version": "1.0.154",
+  "version": "1.0.155",
   "description": "灵犀 AI 助手",
   "main": "main.js",
   "private": true,

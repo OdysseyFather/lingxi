@@ -52,6 +52,9 @@ export const createCodingChatSlice = (set, get) => ({
   // ─── Sub-agent 状态 ─────────────────────────────────────────
   subAgents: [],
 
+  // ─── Checkpoint 状态 ────────────────────────────────────────
+  codingCheckpoints: [],
+
   // ─── Coding WS 事件处理（独立于 chatSlice） ─────────────────
   codingHandleWSEvent: (msg) => {
     const { event, data, sessionId } = msg;
@@ -199,12 +202,28 @@ export const createCodingChatSlice = (set, get) => ({
         set({ codingLiveBlocks: blocks });
         break;
       }
+      case 'checkpoint_created': {
+        const cps = [...get().codingCheckpoints];
+        cps.push({
+          id: payload?.id,
+          session_id: payload?.session_id,
+          message_id: payload?.message_id,
+          created_at: payload?.created_at || new Date().toISOString(),
+          files_count: payload?.files_count || 0,
+          messages_count: payload?.messages_count || 0,
+          todo_snapshot: payload?.todo_snapshot || null,
+        });
+        set({ codingCheckpoints: cps });
+        break;
+      }
       case 'subagent_start': {
         const agents = [...get().subAgents];
         agents.push({
           id: payload?.id || `sa_${Date.now()}`,
           description: payload?.description || '',
           status: 'working',
+          parent_id: payload?.parent_id || null,
+          message_id: payload?.message_id || null,
         });
         set({ subAgents: agents });
         break;
@@ -382,6 +401,7 @@ export const createCodingChatSlice = (set, get) => ({
       codingTasks: [],
       liveDiffs: [],
       subAgents: [],
+      codingCheckpoints: [],
     });
   },
 

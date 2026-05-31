@@ -26,28 +26,28 @@ export function SessionHeader({ projectPath }) {
 
   return (
     <div className="px-6 pt-6 pb-2">
-      <h1 className="text-xl font-bold text-[#1a1a1a]">{session.title || 'Untitled Session'}</h1>
-      <div className="flex items-center gap-2 mt-1 text-[12px] text-[#aaa] flex-wrap">
+      <h1 className="text-xl font-bold text-[var(--text)]">{session.title || 'Untitled Session'}</h1>
+      <div className="flex items-center gap-2 mt-1 text-[12px] text-[var(--text-faint)] flex-wrap">
         {isStreaming && (
           <span className="flex items-center gap-1">
             <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
             <span className="text-green-600 font-medium">{stateLabel || 'active'}</span>
           </span>
         )}
-        {isStreaming && <span className="text-[#ddd]">·</span>}
+        {isStreaming && <span className="text-[var(--coding-border)]">·</span>}
         {projectPath && (
           <>
-            <span className="flex items-center gap-1 text-[#bbb]">
+            <span className="flex items-center gap-1 text-[var(--text-faint)]">
               <FolderOpen size={10} />
               <span className="truncate max-w-[200px]">{projectPath.split('/').pop()}</span>
             </span>
-            <span className="text-[#ddd]">·</span>
+            <span className="text-[var(--coding-border)]">·</span>
           </>
         )}
         {timeAgo && <span>last updated {timeAgo}</span>}
         {msgCount > 0 && (
           <>
-            <span className="text-[#ddd]">·</span>
+            <span className="text-[var(--coding-border)]">·</span>
             <span>{msgCount} messages</span>
           </>
         )}
