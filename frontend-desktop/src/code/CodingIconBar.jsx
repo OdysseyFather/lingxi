@@ -1,6 +1,6 @@
 import { cn } from '../ui/cn';
 import { useStore } from '../state/useStore';
-import { Plus, Clock, Settings, ArrowLeftRight, FileEdit, FolderTree } from 'lucide-react';
+import { Plus, Clock, Settings, ArrowLeftRight, FileEdit, FolderTree, Terminal } from 'lucide-react';
 
 export function CodingIconBar() {
   const codingView = useStore((s) => s.codingView);
@@ -11,6 +11,8 @@ export function CodingIconBar() {
   const toggleCodingChanges = useStore((s) => s.toggleCodingChanges);
   const codingFileTreeOpen = useStore((s) => s.codingFileTreeOpen);
   const toggleCodingFileTree = useStore((s) => s.toggleCodingFileTree);
+  const codingTerminalOpen = useStore((s) => s.codingTerminalOpen);
+  const toggleCodingTerminal = useStore((s) => s.toggleCodingTerminal);
 
   const topBtns = [
     {
@@ -60,6 +62,18 @@ export function CodingIconBar() {
         )}
       >
         <FolderTree size={15} />
+      </button>
+      <button
+        onClick={toggleCodingTerminal}
+        title="终端"
+        className={cn(
+          'w-8 h-8 flex items-center justify-center rounded-lg transition-all',
+          codingTerminalOpen
+            ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
+            : 'text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)]'
+        )}
+      >
+        <Terminal size={15} />
       </button>
       <button
         onClick={toggleCodingChanges}

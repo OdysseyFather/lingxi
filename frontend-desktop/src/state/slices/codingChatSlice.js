@@ -93,15 +93,16 @@ export const createCodingChatSlice = (set, get) => ({
         const newTasks = Array.isArray(payload?.todos) ? payload.todos : [];
         if (newTasks.length > 0) {
           const existing = get().codingTasks;
-          let merged;
-          if (existing.length > 0) {
-            const map = new Map(existing.map(t => [t.id, t]));
-            for (const t of newTasks) map.set(t.id, t);
-            merged = Array.from(map.values());
-          } else {
-            merged = newTasks;
+          const map = new Map(existing.map(t => [t.id, { ...t }]));
+          for (const t of newTasks) {
+            if (map.has(t.id)) {
+              const old = map.get(t.id);
+              map.set(t.id, { ...old, ...t });
+            } else {
+              map.set(t.id, t);
+            }
           }
-          set({ codingTasks: merged });
+          set({ codingTasks: Array.from(map.values()) });
           flushCodingNow(set, get);
         }
         break;
@@ -150,23 +151,24 @@ export const createCodingChatSlice = (set, get) => ({
         break;
       }
       case 'file_diff': {
-        const diffs = get().liveDiffs || [];
-        const existing = diffs.findIndex(d => d.file === payload?.file);
-        const entry = {
-          file: payload?.file || '',
-          diff: payload?.diff || '',
-          tool: payload?.tool || '',
-          isNew: payload?.is_new || false,
-          added: payload?.added || 0,
-          removed: payload?.removed || 0,
-          ts: Date.now(),
-        };
-        if (existing >= 0) {
-          diffs[existing] = entry;
-          set({ liveDiffs: [...diffs] });
-        } else {
-          set({ liveDiffs: [...diffs, entry] });
+        flushCodingNow(set, get);
+        const blocks = [...get().codingLiveBlocks];
+        for (let i = blocks.length - 1; i >= 0; i--) {
+          if (blocks[i].type === 'tool' && blocks[i].done) {
+            blocks[i] = {
+              ...blocks[i],
+              fileDiff: {
+                file: payload?.file || '',
+                diff: payload?.diff || '',
+                isNew: payload?.is_new || false,
+                added: payload?.added || 0,
+                removed: payload?.removed || 0,
+              },
+            };
+            break;
+          }
         }
+        set({ codingLiveBlocks: blocks });
         break;
       }
       case 'tool_start': {
@@ -192,6 +194,7 @@ export const createCodingChatSlice = (set, get) => ({
             blocks[i].endedAt = Date.now();
             if (payload && typeof payload === 'object') {
               if (payload.input != null) blocks[i].input = payload.input;
+              if (payload.fullInput != null) blocks[i].fullInput = payload.fullInput;
               if (payload.label) blocks[i].label = payload.label;
               if (payload.ms != null) blocks[i].ms = payload.ms;
               if (payload.status) blocks[i].status = payload.status;
@@ -292,7 +295,7 @@ export const createCodingChatSlice = (set, get) => ({
   },
 
   // ─── Coding 发送消息（调用独立 API） ───────────────────────
-  codingSendMessage: async ({ message, images = [], files = [], workingDir = '' }) => {
+  codingSendMessage: async ({ message, images = [], files = [], workingDir = '', thinking }) => {
     let sid = get().activeSessionId;
     if (!sid) {
       sid = await get().createSession();
@@ -320,7 +323,6 @@ export const createCodingChatSlice = (set, get) => ({
     set({
       codingMessages: [...get().codingMessages, localUserMsg],
       codingLiveBlocks: [],
-      codingTasks: [],
       liveDiffs: [],
       codingIsStreaming: true,
       codingStartedAt: Date.now(),
@@ -334,6 +336,7 @@ export const createCodingChatSlice = (set, get) => ({
     try {
       const payload = { message, sessionId: String(sid), images, files };
       if (workingDir) payload.workingDir = workingDir;
+      if (thinking !== undefined) payload.thinking = thinking;
       await api.sendCodingChat(payload);
     } catch (e) {
       set({ codingIsStreaming: false, codingAgentState: 'IDLE' });

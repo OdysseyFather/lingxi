@@ -29,7 +29,8 @@ export const createSessionSlice = (set, get) => ({
     const agentId = get().activeAgentId;
     const appMode = get().appMode;
     const mode = appMode === 'coding' ? 'coding' : undefined;
-    const sessions = await api.listSessions(agentId, mode).catch(() => []);
+    const projectPath = appMode === 'coding' ? get().codingProjectPath : undefined;
+    const sessions = await api.listSessions(agentId, mode, projectPath || undefined).catch(() => []);
     set({ sessions });
     return sessions;
   },
@@ -37,9 +38,10 @@ export const createSessionSlice = (set, get) => ({
     const activeAgentId = get().activeAgentId || 0;
     const appMode = get().appMode;
     const mode = appMode === 'coding' ? 'coding' : '';
+    const projectPath = appMode === 'coding' ? (get().codingProjectPath || '') : '';
     const payload = typeof titleOrPayload === 'string'
-      ? { title: titleOrPayload || '新对话', agent_id: activeAgentId, mode }
-      : { title: '新对话', agent_id: activeAgentId, mode, ...(titleOrPayload || {}) };
+      ? { title: titleOrPayload || '新对话', agent_id: activeAgentId, mode, project_path: projectPath }
+      : { title: '新对话', agent_id: activeAgentId, mode, project_path: projectPath, ...(titleOrPayload || {}) };
     const r = await api.createSession(payload);
     await get().refreshSessions();
     await get().setActiveSession(r.id);

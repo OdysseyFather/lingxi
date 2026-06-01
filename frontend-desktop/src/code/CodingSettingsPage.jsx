@@ -386,7 +386,7 @@ function CodingProfileEditor({ providers, profile, onClose, onSaved, notify }) {
       const r = await api.fetchModels({ base_url: url, token: effectiveToken, protocol: selectedProvider?.protocol || 'openai' });
       if (r.ok && r.models?.length > 0) {
         setRemoteModels(r.models);
-        notify(`发现 ${r.models.length} 个模型`, '请从列表中选择');
+        notify(`发现 ${r.models.length} 个模型`, '部分模型可能需要开通后才可使用，请从列表中选择');
       } else {
         notify('获取模型列表失败', r.error || '供应商可能不支持 /models 端点，请手动选择');
       }

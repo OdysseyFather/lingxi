@@ -462,7 +462,7 @@ function ProfileEditor({ providers, profile, onClose, onSaved }) {
       });
       if (r.ok && r.models?.length > 0) {
         setRemoteModels(r.models);
-        pushNotification({ title: `发现 ${r.models.length} 个模型`, body: '请从列表中选择' });
+        pushNotification({ title: `发现 ${r.models.length} 个模型`, body: '部分模型可能需要开通后才可使用，请从列表中选择' });
       } else {
         pushNotification({ title: '获取模型列表失败', body: r.error || '供应商可能不支持 /models 端点，请手动选择' });
       }
@@ -693,7 +693,7 @@ function ModelComboBox({ value, onChange, providerCode, remoteModels, placeholde
 
   const hasRemote = remoteModels && remoteModels.length > 0;
   const allGroups = hasRemote
-    ? [{ group: '可用模型（来自 API）', models: remoteModels }, ...presetGroups.map(g => ({ ...g, group: `预设 · ${g.group}` }))]
+    ? [{ group: '供应商模型列表', models: remoteModels, hint: '部分模型可能需要单独开通后才可使用' }, ...presetGroups.map(g => ({ ...g, group: `预设 · ${g.group}` }))]
     : presetGroups;
 
   const filtered = allGroups.map(g => ({
@@ -721,8 +721,11 @@ function ModelComboBox({ value, onChange, providerCode, remoteModels, placeholde
             <div key={g.group}>
               <div className={cn(
                 'px-3 py-1 text-[10px] font-semibold uppercase tracking-wider bg-[color:var(--bg-soft)]',
-                g.group.includes('API') ? 'text-emerald-600' : 'text-[color:var(--text-faint)]'
+                g.hint ? 'text-emerald-600' : 'text-[color:var(--text-faint)]'
               )}>{g.group}</div>
+              {g.hint && (
+                <div className="px-3 py-0.5 text-[10px] text-amber-600 bg-amber-50/50">{g.hint}</div>
+              )}
               {g.models.map(m => (
                 <button key={m} type="button"
                   onMouseDown={(e) => { e.preventDefault(); onChange(m); setOpen(false); }}

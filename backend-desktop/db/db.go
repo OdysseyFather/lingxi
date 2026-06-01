@@ -334,6 +334,8 @@ func migrate() {
 	addColumnIfMissing("sessions", "permission_mode", "TEXT NOT NULL DEFAULT 'trust'")
 	// 列级迁移：sessions.mode（会话模式：''=通用, 'coding'=编程模式）
 	addColumnIfMissing("sessions", "mode", "TEXT NOT NULL DEFAULT ''")
+	// 列级迁移：sessions.project_path（Coding 模式关联的项目目录）
+	addColumnIfMissing("sessions", "project_path", "TEXT NOT NULL DEFAULT ''")
 	// 列级迁移：im_connectors 多实例支持
 	addColumnIfMissing("im_connectors", "name", "TEXT NOT NULL DEFAULT ''")
 	addColumnIfMissing("im_connectors", "agent_id", "INTEGER NOT NULL DEFAULT 0")

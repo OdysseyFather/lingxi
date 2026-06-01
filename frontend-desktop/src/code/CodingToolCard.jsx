@@ -1,37 +1,52 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import {
   FileText, Pencil, Terminal, Search, FolderOpen, Wrench, Code2,
   ChevronDown, ChevronRight, Loader2, CheckCircle2, AlertCircle, Copy, Check,
+  GitBranch, Eye, Download, Upload, Globe, BookOpen, ListTodo,
 } from 'lucide-react';
 import { cn } from '../ui/cn';
 
 const TOOL_META = {
-  Read:      { icon: FileText, color: 'blue',   label: '读取文件' },
-  Glob:      { icon: FolderOpen, color: 'blue',  label: '搜索文件' },
-  Grep:      { icon: Search, color: 'amber',     label: '搜索内容' },
-  LS:        { icon: FolderOpen, color: 'blue',  label: '列出目录' },
-  Edit:      { icon: Pencil, color: 'purple',    label: '编辑文件' },
-  MultiEdit: { icon: Pencil, color: 'purple',    label: '批量编辑' },
-  Write:     { icon: Pencil, color: 'purple',    label: '写入文件' },
-  Bash:      { icon: Terminal, color: 'emerald',  label: '执行命令' },
+  Read:       { icon: Eye,        color: 'blue',    label: 'Read' },
+  Glob:       { icon: FolderOpen, color: 'blue',    label: 'Glob' },
+  Grep:       { icon: Search,     color: 'amber',   label: 'Grep' },
+  LS:         { icon: FolderOpen, color: 'blue',    label: 'LS' },
+  Edit:       { icon: Pencil,     color: 'purple',  label: 'Edit' },
+  MultiEdit:  { icon: Pencil,     color: 'purple',  label: 'MultiEdit' },
+  Write:      { icon: Upload,     color: 'purple',  label: 'Write' },
+  Bash:       { icon: Terminal,   color: 'emerald', label: 'Bash' },
+  WebFetch:   { icon: Globe,      color: 'sky',     label: 'WebFetch' },
+  WebSearch:  { icon: Globe,      color: 'sky',     label: 'WebSearch' },
+  Task:       { icon: ListTodo,   color: 'indigo',  label: 'Task' },
+  TodoWrite:  { icon: ListTodo,   color: 'gray',    label: 'TodoWrite' },
 };
 
 function getMeta(name) {
   if (TOOL_META[name]) return TOOL_META[name];
   if (name?.startsWith('mcp__')) return { icon: Wrench, color: 'gray', label: name };
-  return { icon: Code2, color: 'gray', label: name || '工具' };
+  return { icon: Code2, color: 'gray', label: name || 'Tool' };
 }
 
-export function CodingToolCard({ name, label, done, input, status, ms }) {
-  const [open, setOpen] = useState(false);
+function parseToolJSON(raw) {
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+export function CodingToolCard({ name, label, done, input, fullInput, status, ms, fileDiff }) {
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [diffOpen, setDiffOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const meta = getMeta(name);
   const Icon = meta.icon;
   const failed = status === 'failed';
-  const showDetail = Boolean(input);
+  const hasDiff = Boolean(fileDiff?.diff);
+  const parsed = useMemo(() => parseToolJSON(fullInput || input), [fullInput, input]);
 
-  const summary = buildSummary(name, input);
-  const filePath = extractFilePath(name, input);
+  const filePath = useMemo(() => {
+    if (!parsed) return '';
+    return parsed.file_path || parsed.path || '';
+  }, [parsed]);
+
   const shortFilePath = filePath ? filePath.split('/').pop() : '';
 
   const handleCopyPath = useCallback((e) => {
@@ -44,171 +59,255 @@ export function CodingToolCard({ name, label, done, input, status, ms }) {
   }, [filePath]);
 
   return (
-    <div className="my-1 overflow-hidden">
-      <button
-        type="button"
-        onClick={() => showDetail && setOpen(v => !v)}
-        className={cn(
-          'w-full flex items-center gap-2.5 px-4 py-2.5 text-left text-[13px]',
-          showDetail && 'hover:bg-[var(--accent-soft)] cursor-pointer transition',
-        )}
-      >
+    <div className="my-0.5 overflow-hidden">
+      {/* 主行：工具名 + 文件路径 + 状态 */}
+      <div className="flex items-center gap-2 px-4 py-2 text-[13px]">
         <span className="shrink-0 text-[var(--text-faint)]">
           {!done && !failed ? (
             <Loader2 size={14} className="animate-spin text-[var(--accent)]" />
+          ) : failed ? (
+            <AlertCircle size={14} className="text-red-400" />
           ) : (
-            <Icon size={14} />
-          )}
-        </span>
-
-        <span className="font-medium text-[var(--text-soft)]">{meta.label}</span>
-
-        {shortFilePath && (
-          <span className="text-[var(--text-faint)] font-mono text-[12px] truncate">{shortFilePath}</span>
-        )}
-
-        {summary && !shortFilePath && (
-          <span className="text-[var(--text-faint)] truncate text-[12px] flex-1">{summary}</span>
-        )}
-
-        <span className="flex items-center gap-1.5 shrink-0 ml-auto text-[12px]">
-          {failed ? (
-            <span className="text-red-400 flex items-center gap-1">
-              <AlertCircle size={13} /> 失败
-            </span>
-          ) : done ? (
             <CheckCircle2 size={14} className="text-green-500" />
-          ) : (
-            <span className="text-[var(--text-faint)]">执行中</span>
-          )}
-          {showDetail && (
-            open ? <ChevronDown size={13} className="text-[var(--text-faint)]" />
-                 : <ChevronRight size={13} className="text-[var(--text-faint)]" />
           )}
         </span>
-      </button>
 
-      {open && showDetail && (
-        <div className="mx-4 mb-3 rounded-xl border border-[var(--coding-border)] overflow-hidden">
+        <span className="font-mono font-medium text-[var(--text-soft)] text-[12px]">{meta.label}</span>
+
+        {/* Bash: 直接显示命令 */}
+        {name === 'Bash' && parsed?.command && (
+          <span className="flex-1 font-mono text-[12px] text-[var(--text)] truncate">
+            <span className="text-green-600">$</span> {parsed.command.length > 120 ? parsed.command.slice(0, 120) + '…' : parsed.command}
+          </span>
+        )}
+
+        {/* 文件操作：显示文件路径 */}
+        {name !== 'Bash' && filePath && (
+          <span
+            className="font-mono text-[12px] text-[var(--accent)] truncate cursor-pointer hover:underline"
+            onClick={handleCopyPath}
+            title={filePath}
+          >
+            {filePath.length > 80 ? '…' + filePath.slice(-75) : filePath}
+          </span>
+        )}
+
+        {/* Grep/Glob: 显示 pattern */}
+        {(name === 'Grep' || name === 'Glob') && parsed?.pattern && !filePath && (
+          <span className="font-mono text-[12px] text-orange-600 truncate">
+            {parsed.pattern}
+          </span>
+        )}
+
+        {/* Web: 显示 URL/query */}
+        {(name === 'WebFetch' || name === 'WebSearch') && (
+          <span className="font-mono text-[12px] text-sky-600 truncate">
+            {parsed?.url || parsed?.query || parsed?.search_term || ''}
+          </span>
+        )}
+
+        {/* Task: 显示描述 */}
+        {name === 'Task' && parsed?.description && (
+          <span className="text-[12px] text-indigo-600 truncate">
+            {parsed.description}
+          </span>
+        )}
+
+        {/* Diff 统计 */}
+        {hasDiff && done && (
+          <span className="text-[10px] flex items-center gap-1 shrink-0">
+            {fileDiff.added > 0 && <span className="text-green-600 font-mono font-bold">+{fileDiff.added}</span>}
+            {fileDiff.removed > 0 && <span className="text-red-500 font-mono font-bold">-{fileDiff.removed}</span>}
+          </span>
+        )}
+
+        <span className="flex-shrink-0 ml-auto" />
+
+        {/* 耗时 */}
+        {done && ms > 0 && (
+          <span className="text-[11px] text-[var(--text-faint)] font-mono shrink-0">
+            {ms > 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`}
+          </span>
+        )}
+
+        {/* 展开/收起详情 */}
+        {(fullInput || hasDiff) && (
+          <button
+            onClick={() => setDetailOpen(v => !v)}
+            className="p-0.5 text-[var(--text-faint)] hover:text-[var(--text-soft)] transition"
+          >
+            {detailOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+          </button>
+        )}
+      </div>
+
+      {/* 展开的详情区 */}
+      {detailOpen && (
+        <div className="mx-4 mb-2 rounded-lg border border-[var(--coding-border)] overflow-hidden text-[12px]">
+          {/* 文件路径头 */}
           {filePath && (
-            <div className="flex items-center justify-between px-3 py-1.5 bg-[var(--coding-surface)] border-b border-[var(--coding-border)]">
+            <div className="flex items-center justify-between px-3 py-1 bg-[var(--coding-surface)] border-b border-[var(--coding-border)]">
               <span className="text-[11px] text-[var(--text-faint)] font-mono truncate">{filePath}</span>
-              <button onClick={handleCopyPath} className="p-1 rounded text-[var(--text-faint)] hover:text-[var(--text-soft)] transition" title="Copy path">
-                {copied ? <Check size={11} className="text-green-500" /> : <Copy size={11} />}
+              <button onClick={handleCopyPath} className="p-1 rounded text-[var(--text-faint)] hover:text-[var(--text-soft)] transition" title="复制路径">
+                {copied ? <Check size={10} className="text-green-500" /> : <Copy size={10} />}
               </button>
             </div>
           )}
-          {(name === 'Edit' || name === 'MultiEdit' || name === 'Write') && (
-            <DiffStats input={input} />
+
+          {/* Diff 区域 */}
+          {hasDiff && (
+            <div>
+              <button
+                onClick={(e) => { e.stopPropagation(); setDiffOpen(v => !v); }}
+                className="w-full flex items-center gap-2 px-3 py-1 bg-[var(--coding-surface)] border-b border-[var(--coding-border)] text-[11px] hover:bg-[var(--accent-soft)] transition"
+              >
+                {diffOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+                <span className="font-medium text-[var(--text-soft)]">
+                  {fileDiff.isNew ? 'NEW FILE' : 'CHANGES'}
+                </span>
+                <span className="text-green-600 font-mono font-bold">+{fileDiff.added}</span>
+                <span className="text-red-500 font-mono font-bold">-{fileDiff.removed}</span>
+                <DiffBar added={fileDiff.added} removed={fileDiff.removed} />
+              </button>
+              {diffOpen && (
+                <div className="max-h-[400px] overflow-y-auto scrollable font-mono text-[12px] leading-[1.6] bg-[var(--coding-surface-raised)]">
+                  {fileDiff.diff.split('\n')
+                    .filter(l => !l.startsWith('diff --git') && !l.startsWith('index ') && !l.startsWith('---') && !l.startsWith('+++'))
+                    .map((line, i) => {
+                      let bg = '';
+                      let color = 'var(--text-soft)';
+                      if (line.startsWith('@@')) { bg = 'bg-blue-500/5'; color = '#3b82f6'; }
+                      else if (line.startsWith('+')) { bg = 'bg-green-500/10'; color = '#16a34a'; }
+                      else if (line.startsWith('-')) { bg = 'bg-red-500/10'; color = '#dc2626'; }
+                      return (
+                        <div key={i} className={cn('px-3 whitespace-pre', bg)} style={{ color }}>
+                          {line}
+                        </div>
+                      );
+                    })
+                  }
+                </div>
+              )}
+            </div>
           )}
-          <div className="text-[12px] font-mono whitespace-pre-wrap break-all max-h-[400px] overflow-y-auto scrollable bg-[var(--coding-surface-raised)]">
-            {renderDetail(name, input)}
-          </div>
+
+          {/* Bash 命令详情 */}
+          {name === 'Bash' && parsed?.command && !hasDiff && (
+            <div className="font-mono bg-[#1e1e1e] text-[#d4d4d4] p-3 leading-relaxed">
+              <div className="text-green-400">$ {parsed.command}</div>
+              {parsed.timeout && <div className="text-[var(--text-faint)] mt-1 text-[11px]">timeout: {parsed.timeout}ms</div>}
+            </div>
+          )}
+
+          {/* Edit/Write 操作详情 */}
+          {(name === 'Edit' || name === 'MultiEdit') && parsed && !hasDiff && (
+            <EditDetail parsed={parsed} />
+          )}
+          {name === 'Write' && parsed && !hasDiff && (
+            <WriteDetail parsed={parsed} />
+          )}
+
+          {/* Read 详情 */}
+          {name === 'Read' && parsed && (
+            <div className="px-3 py-2 bg-[var(--coding-surface-raised)] text-[var(--text-soft)] font-mono">
+              {parsed.file_path || parsed.path}
+              {parsed.offset && <span className="ml-2 text-[var(--text-faint)]">offset:{parsed.offset}</span>}
+              {parsed.limit && <span className="ml-2 text-[var(--text-faint)]">limit:{parsed.limit}</span>}
+            </div>
+          )}
+
+          {/* Grep 详情 */}
+          {name === 'Grep' && parsed && (
+            <div className="px-3 py-2 bg-[var(--coding-surface-raised)] text-[var(--text-soft)] font-mono">
+              <span className="text-orange-500">pattern:</span> {parsed.pattern}
+              {parsed.path && <div className="text-[var(--text-faint)]">path: {parsed.path}</div>}
+              {parsed.glob && <div className="text-[var(--text-faint)]">glob: {parsed.glob}</div>}
+              {parsed.include && <div className="text-[var(--text-faint)]">include: {parsed.include}</div>}
+            </div>
+          )}
+
+          {/* Glob 详情 */}
+          {name === 'Glob' && parsed && (
+            <div className="px-3 py-2 bg-[var(--coding-surface-raised)] text-[var(--text-soft)] font-mono">
+              <span className="text-blue-500">pattern:</span> {parsed.pattern || parsed.glob_pattern}
+              {parsed.path && <div className="text-[var(--text-faint)]">path: {parsed.path}</div>}
+            </div>
+          )}
+
+          {/* Task 详情 */}
+          {name === 'Task' && parsed && (
+            <div className="px-3 py-2 bg-[var(--coding-surface-raised)] text-[var(--text-soft)]">
+              {parsed.description && <div className="font-medium text-indigo-600 mb-1">{parsed.description}</div>}
+              {parsed.prompt && <div className="text-[12px] whitespace-pre-wrap max-h-[200px] overflow-y-auto scrollable">{parsed.prompt.length > 500 ? parsed.prompt.slice(0, 500) + '…' : parsed.prompt}</div>}
+            </div>
+          )}
+
+          {/* 通用兜底 */}
+          {!['Bash', 'Edit', 'MultiEdit', 'Write', 'Read', 'Grep', 'Glob', 'Task'].includes(name) && fullInput && !hasDiff && (
+            <div className="px-3 py-2 bg-[var(--coding-surface-raised)] text-[var(--text-soft)] font-mono whitespace-pre-wrap break-all max-h-[300px] overflow-y-auto scrollable">
+              {fullInput.length > 1000 ? fullInput.slice(0, 1000) + '\n…(truncated)' : fullInput}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function DiffStats({ input }) {
-  const lines = (input || '').split('\n');
-  let added = 0, removed = 0;
-  for (const line of lines) {
-    const trimmed = line.trimStart();
-    if (trimmed.startsWith('+') && !trimmed.startsWith('+++')) added++;
-    else if (trimmed.startsWith('-') && !trimmed.startsWith('---')) removed++;
-  }
-  if (!added && !removed) return null;
+function DiffBar({ added, removed }) {
+  const total = added + removed;
+  if (!total) return null;
   return (
-    <div className="flex items-center gap-3 px-3 py-1.5 bg-[var(--coding-surface)] border-b border-[var(--coding-border)] text-[11px]">
-      <span className="text-green-600 font-mono">+{added}</span>
-      <span className="text-red-500 font-mono">-{removed}</span>
-      <div className="flex items-center gap-0.5 ml-1">
-        {Array.from({ length: Math.min(added, 20) }).map((_, i) => (
-          <span key={`a${i}`} className="w-1.5 h-2 bg-green-500 rounded-[1px]" />
-        ))}
-        {Array.from({ length: Math.min(removed, 20) }).map((_, i) => (
-          <span key={`r${i}`} className="w-1.5 h-2 bg-red-400 rounded-[1px]" />
-        ))}
-      </div>
+    <div className="flex items-center gap-0.5 ml-1">
+      {Array.from({ length: Math.min(added, 12) }).map((_, i) => (
+        <span key={`a${i}`} className="w-1 h-2 bg-green-500 rounded-[1px]" />
+      ))}
+      {Array.from({ length: Math.min(removed, 12) }).map((_, i) => (
+        <span key={`r${i}`} className="w-1 h-2 bg-red-400 rounded-[1px]" />
+      ))}
     </div>
   );
 }
 
-function extractFilePath(name, input) {
-  if (!input) return '';
-  if (name === 'Read' || name === 'Write' || name === 'Edit' || name === 'MultiEdit') {
-    const match = input.match(/(?:file_path|path)['":\s]+([^\s'",$}]+)/);
-    return match ? match[1] : '';
+function EditDetail({ parsed }) {
+  const oldStr = parsed.old_string || parsed.old_str || '';
+  const newStr = parsed.new_string || parsed.new_str || '';
+  if (!oldStr && !newStr) {
+    return (
+      <div className="px-3 py-2 bg-[var(--coding-surface-raised)] text-[var(--text-soft)] font-mono whitespace-pre-wrap break-all max-h-[300px] overflow-y-auto scrollable">
+        {JSON.stringify(parsed, null, 2).slice(0, 800)}
+      </div>
+    );
   }
-  return '';
-}
-
-function buildSummary(name, input) {
-  if (!input) return '';
-  if (name === 'Bash') {
-    const match = input.match(/(?:command)['":\s]+(.+?)(?:['"}]|$)/);
-    return match ? `$ ${match[1].slice(0, 80)}` : input.slice(0, 80);
-  }
-  if (name === 'Grep') {
-    const match = input.match(/(?:pattern)['":\s]+(.+?)(?:['"}]|$)/);
-    return match ? `/${match[1]}/` : input.slice(0, 60);
-  }
-  if (name === 'Glob') {
-    const match = input.match(/(?:pattern|glob)['":\s]+(.+?)(?:['"}]|$)/);
-    return match ? match[1] : input.slice(0, 60);
-  }
-  return '';
-}
-
-function renderDetail(name, input) {
-  if (name === 'Edit' || name === 'MultiEdit' || name === 'Write') {
-    return <DiffPreview input={input} />;
-  }
-  if (name === 'Bash') {
-    return <BashPreview input={input} />;
-  }
-  return <div className="p-3 text-[var(--text-soft)]">{input}</div>;
-}
-
-function DiffPreview({ input }) {
-  const lines = (input || '').split('\n');
   return (
-    <div>
-      {lines.map((line, i) => {
-        const trimmed = line.trimStart();
-        let cls = 'text-[var(--text-soft)] bg-[var(--coding-surface-raised)]';
-        let lineNum = i + 1;
-        let marker = ' ';
-        if (trimmed.startsWith('+') && !trimmed.startsWith('+++')) {
-          cls = 'text-green-700 bg-green-50 dark:bg-green-900/20 dark:text-green-400';
-          marker = '+';
-        } else if (trimmed.startsWith('-') && !trimmed.startsWith('---')) {
-          cls = 'text-red-600 bg-red-50 dark:bg-red-900/20 dark:text-red-400';
-          marker = '-';
-        } else if (trimmed.startsWith('@@')) {
-          cls = 'text-blue-500 bg-blue-50 dark:bg-blue-900/20';
-        }
-        return (
-          <div key={i} className={cn('flex leading-5 px-1', cls)}>
-            <span className="inline-block w-10 text-right mr-1 text-[var(--text-faint)] select-none text-[11px] shrink-0">{lineNum}</span>
-            <span className="inline-block w-4 text-center text-[11px] shrink-0 select-none">{marker}</span>
-            <span className="flex-1">{line}</span>
-          </div>
-        );
-      })}
+    <div className="font-mono bg-[var(--coding-surface-raised)] max-h-[400px] overflow-y-auto scrollable">
+      {oldStr && oldStr.split('\n').map((line, i) => (
+        <div key={`o${i}`} className="px-3 whitespace-pre bg-red-500/10 text-red-600 leading-5">
+          <span className="inline-block w-4 text-center select-none">-</span>{line}
+        </div>
+      ))}
+      {newStr && newStr.split('\n').map((line, i) => (
+        <div key={`n${i}`} className="px-3 whitespace-pre bg-green-500/10 text-green-700 leading-5">
+          <span className="inline-block w-4 text-center select-none">+</span>{line}
+        </div>
+      ))}
     </div>
   );
 }
 
-function BashPreview({ input }) {
-  const match = input?.match(/(?:command)['":\s]+(.+?)(?:['"}]|$)/s);
-  const cmd = match ? match[1] : input;
+function WriteDetail({ parsed }) {
+  const content = parsed.content || parsed.file_text || '';
+  if (!content) return null;
+  const lines = content.split('\n');
+  const preview = lines.length > 30 ? lines.slice(0, 30).join('\n') + `\n… (${lines.length - 30} more lines)` : content;
   return (
-    <div className="p-3">
-      <div className="text-[var(--text)]">
-        <span className="text-[var(--accent)]">$</span> {cmd}
-      </div>
+    <div className="font-mono bg-[var(--coding-surface-raised)] max-h-[300px] overflow-y-auto scrollable">
+      {preview.split('\n').map((line, i) => (
+        <div key={i} className="px-3 whitespace-pre bg-green-500/5 text-green-700 leading-5">
+          <span className="inline-block w-8 text-right mr-2 text-[var(--text-faint)] select-none text-[11px]">{i + 1}</span>
+          {line}
+        </div>
+      ))}
     </div>
   );
 }

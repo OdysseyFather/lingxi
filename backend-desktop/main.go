@@ -100,6 +100,7 @@ func main() {
 	api.POST("/chat/abort", handler.AbortChat)
 	api.POST("/chat/quick", handler.QuickChat)
 	api.GET("/ws", handler.WsHandler)
+	api.GET("/terminal/ws", handler.TerminalWsHandler)
 
 	// 挂起任务
 	api.GET("/sessions/:id/pending", handler.GetPendingTask)

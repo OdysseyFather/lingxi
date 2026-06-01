@@ -925,4 +925,17 @@ body {
 @media (max-width: 768px) {
   .app-drag { -webkit-app-region: unset !important; }
   textarea, input[type="text"], input[type="number"] { font-size: 16px !important; }
+
+  .safe-area-top { padding-top: env(safe-area-inset-top, 0px); }
+  .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+  .h-screen {
+    height: 100dvh;
+  }
+
+  button { -webkit-tap-highlight-color: transparent; }
+
+  .coding-mobile-composer {
+    padding-bottom: max(12px, env(safe-area-inset-bottom, 12px));
+  }
 }

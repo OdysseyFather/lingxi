@@ -26,10 +26,11 @@ export const api = {
   saveOAuthConfig: (data) => req('POST', '/api/auth/oauth-configs', data),
 
   // sessions
-  listSessions: (agentId, mode) => {
+  listSessions: (agentId, mode, projectPath) => {
     const params = [];
     if (agentId != null) params.push(`agent_id=${agentId}`);
     if (mode) params.push(`mode=${mode}`);
+    if (projectPath) params.push(`project_path=${encodeURIComponent(projectPath)}`);
     return req('GET', `/api/sessions${params.length ? '?' + params.join('&') : ''}`);
   },
   createSession: (titleOrPayload) =>

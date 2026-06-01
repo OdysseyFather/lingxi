@@ -30,6 +30,7 @@ func CodingChat(c *gin.Context) {
 		Message    string         `json:"message"`
 		SessionID  string         `json:"sessionId"`
 		WorkingDir string         `json:"workingDir"`
+		Thinking   *bool          `json:"thinking"`
 		Images     []imagePayload `json:"images"`
 		Files      []struct {
 			Name    string `json:"name"`
@@ -93,8 +94,12 @@ func CodingChat(c *gin.Context) {
 		updateSessionTitle(sessionID, string(runes))
 	}
 
+	thinkingEnabled := true
+	if body.Thinking != nil {
+		thinkingEnabled = *body.Thinking
+	}
 	c.JSON(http.StatusAccepted, gin.H{"status": "accepted", "sessionId": sessionID})
-	go runCodingClaude(sessionID, body.Message, imagePaths, body.WorkingDir)
+	go runCodingClaude(sessionID, body.Message, imagePaths, body.WorkingDir, thinkingEnabled)
 }
 
 // CodingChatAnswerBatch 接收 AskQuestion 批量答案
@@ -125,12 +130,12 @@ func CodingChatAnswerBatch(c *gin.Context) {
 
 	appendMessage(sessionID, "user", message)
 	c.JSON(http.StatusAccepted, gin.H{"status": "accepted", "sessionId": sessionID})
-	go runCodingClaude(sessionID, message, nil, body.WorkingDir)
+	go runCodingClaude(sessionID, message, nil, body.WorkingDir, true)
 }
 
 // ─── Coding Claude 独立执行 ─────────────────────────────────────────
 
-func runCodingClaude(sessionID int64, message string, imagePaths []string, workingDir string) {
+func runCodingClaude(sessionID int64, message string, imagePaths []string, workingDir string, thinkingEnabled bool) {
 	hub := globalHub
 	cfg := config.Get()
 
@@ -154,8 +159,8 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 		"--dangerously-skip-permissions",
 	}
 
-	// Coding 专属 system prompt（不包含通用智能体的身份伪装、保密规则等）
-	prompt := codingSystemPrompt
+	// Coding 专属 system prompt（根据当前 provider 决定是否启用 Task 子代理）
+	prompt := buildCodingSystemPrompt()
 
 	// 应用智能体角色设定（如果会话绑定了自定义 agent）
 	agentID := db.GetSessionAgentID(sessionID)
@@ -191,6 +196,9 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 	}
 	if workingDir != "" {
 		cmd.Env = append(cmd.Env, "CODING_WORKING_DIR="+workingDir)
+	}
+	if !thinkingEnabled {
+		cmd.Env = append(cmd.Env, "DISABLE_THINKING=1")
 	}
 
 	stdout, err := cmd.StdoutPipe()
@@ -371,14 +379,17 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 							hub.Send(sessionID, "agent_state", `{"state":"EXECUTING"}`)
 						}
 					}
-					// Sub-agent 检测：Task 工具调用标记
+					// Sub-agent：Task 工具开始，立即推送 subagent_start（后续 content_block_stop 时补充描述）
 					if toolName == "Task" || toolName == "task" {
 						agentID := fmt.Sprintf("sa_%s", inner.ContentBlock.ID)
 						info := subAgentInfo{
-							ID:     agentID,
-							Status: "working",
+							ID:          agentID,
+							Description: "Starting sub-agent...",
+							Status:      "working",
 						}
 						subAgents = append(subAgents, info)
+						p, _ := json.Marshal(info)
+						hub.Send(sessionID, "subagent_start", string(p))
 					}
 					b := msgBlock{
 						Type:  "tool",
@@ -481,29 +492,30 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 							if elapsed < 0 {
 								elapsed = 0
 							}
-							fullInput := last.Input
-							summary := safeSummarizeToolInput(last.Name, fullInput)
+						fullInput := last.Input
+						summary := safeSummarizeToolInput(last.Name, fullInput)
 
-							if last.Name == "TodoWrite" {
-								emitTaskUpdate(hub, sessionID, fullInput)
-							}
-							if isFileModifyTool(last.Name) {
-								emitFileDiff(hub, sessionID, last.Name, fullInput, workingDir)
-							}
+						if last.Name == "TodoWrite" {
+							emitTaskUpdate(hub, sessionID, fullInput)
+						}
+						if isFileModifyTool(last.Name) {
+							emitFileDiff(hub, sessionID, last.Name, fullInput, workingDir)
+						}
 
-							// Sub-agent：Task 工具调用开始时推送 subagent_start（此时 input 完整）
-							if last.Name == "Task" || last.Name == "task" {
-								emitSubAgentFromTaskInput(hub, sessionID, fullInput, &subAgents)
-							}
+						// Sub-agent：Task 工具完成，更新描述并标记 done
+						if last.Name == "Task" || last.Name == "task" {
+							updateSubAgentDescription(hub, sessionID, fullInput, &subAgents)
+						}
 
-							last.Input = summary
-							last.Ms = elapsed
-							last.Status = "ok"
-							endPayload, _ := json.Marshal(map[string]any{
-								"done":   true,
-								"name":   last.Name,
-								"label":  last.Label,
-								"input":  summary,
+						last.Input = summary
+						last.Ms = elapsed
+						last.Status = "ok"
+						endPayload, _ := json.Marshal(map[string]any{
+							"done":      true,
+							"name":      last.Name,
+							"label":     last.Label,
+							"input":     summary,
+							"fullInput": fullInput,
 								"ms":     elapsed,
 								"status": "ok",
 							})
@@ -799,47 +811,40 @@ func emitCodingInteractiveFromText(hub *Hub, sessionID int64, text string, pendi
 	}
 }
 
-// emitSubAgentFromTaskInput 从 Task 工具的 input JSON 中提取子代理信息并推送
-func emitSubAgentFromTaskInput(hub *Hub, sessionID int64, rawInput string, agents *[]subAgentInfo) {
+// updateSubAgentDescription 从 Task 工具的 input JSON 中提取描述，更新最近的 working 子代理并标记为 done
+func updateSubAgentDescription(hub *Hub, sessionID int64, rawInput string, agents *[]subAgentInfo) {
 	type taskInput struct {
 		Description string `json:"description"`
 		Prompt      string `json:"prompt"`
 	}
 	var ti taskInput
-	if err := json.Unmarshal([]byte(rawInput), &ti); err != nil {
-		return
-	}
-	desc := ti.Description
-	if desc == "" {
-		desc = ti.Prompt
-		if len(desc) > 100 {
-			desc = desc[:100] + "..."
+	if err := json.Unmarshal([]byte(rawInput), &ti); err == nil {
+		desc := ti.Description
+		if desc == "" {
+			desc = ti.Prompt
+			if len(desc) > 100 {
+				desc = desc[:100] + "..."
+			}
+		}
+		if desc != "" {
+			for i := len(*agents) - 1; i >= 0; i-- {
+				if (*agents)[i].Status == "working" {
+					(*agents)[i].Description = desc
+					break
+				}
+			}
 		}
 	}
-	if desc == "" {
-		return
-	}
 
-	// 找到最新的 working 状态子代理并更新描述
+	// 标记最近一个 working 子代理为 done
 	for i := len(*agents) - 1; i >= 0; i-- {
-		if (*agents)[i].Status == "working" && (*agents)[i].Description == "" {
-			(*agents)[i].Description = desc
+		if (*agents)[i].Status == "working" {
+			(*agents)[i].Status = "done"
 			payload, _ := json.Marshal((*agents)[i])
-			hub.Send(sessionID, "subagent_start", string(payload))
+			hub.Send(sessionID, "subagent_done", string(payload))
 			return
 		}
 	}
-
-	// 没找到匹配的，创建新的
-	agentID := fmt.Sprintf("sa_%d", time.Now().UnixMilli())
-	info := subAgentInfo{
-		ID:          agentID,
-		Description: desc,
-		Status:      "working",
-	}
-	*agents = append(*agents, info)
-	payload, _ := json.Marshal(info)
-	hub.Send(sessionID, "subagent_start", string(payload))
 }
 
 // detectSubAgentEvents 检测 Claude Code 输出中的 sub-agent 创建/完成信号（文本模式兜底）

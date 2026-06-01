@@ -90,6 +90,7 @@ lingxi-agent/
 │   │   ├── agent_personality.go # Agent 群聊人格 CRUD（GET/PUT /api/agents/:id/personality）
 │   │   ├── coding_chat.go    # Coding 模式独立聊天 handler（POST /api/coding/chat + answer-batch）
 │   │   ├── coding_prompt.go  # Coding 专属 system prompt（纯编程助手，无身份伪装）
+│   │   ├── terminal.go       # PTY 终端 WebSocket handler（creack/pty）
 │   │   └── ws_hub.go         # WebSocket Hub
 │   ├── connector/            # IM 平台对接（企微/钉钉/飞书）
 │   ├── model/                # 数据模型
@@ -171,6 +172,7 @@ lingxi-agent/
 │   │   │   ├── FileSidebar.jsx      # 文件树侧栏（暖色调 + 搜索过滤 + 拖拽引用）
 │   │   │   ├── AskQuestionWizard.jsx # 渐进式批量问题向导（逐个展示+汇总确认+一次性提交）
 │   │   │   ├── AgentsWindow.jsx     # Cursor 风格 Sub-agent 监控面板
+│   │   │   ├── TerminalPanel.jsx   # 集成终端面板（xterm.js + PTY WebSocket，多标签页）
 │   │   │   └── CodingSettingsPage.jsx # Coding 专属设置页（独立于主界面）
 │   │   ├── nexus/            # Agent 间对话（Project Nexus）
 │   │   │   ├── NexusPage.jsx        # 双栏界面（左侧对话列表 + 右侧发现/对话视图，无联系人）
@@ -426,6 +428,7 @@ dist-electron/
 | GET | /api/coding/changes | GetWorkspaceChanges | git status 文件变更列表 |
 | GET | /api/coding/diff | GetFileDiff | 文件 git diff |
 | GET | /api/coding/branch | GetGitBranch | 当前 git 分支 |
+| GET | /api/terminal/ws | TerminalWsHandler | PTY 终端 WebSocket（多标签页交互式 shell） |
 | POST | /api/coding/chat | CodingChat | Coding 模式独立聊天入口 |
 | POST | /api/coding/chat/answer-batch | CodingChatAnswerBatch | 批量问题答案提交 |
 | GET | /api/health | HealthCheck | 结构化健康检查 |
@@ -788,6 +791,22 @@ xattr -cr "/Applications/灵犀.app"
 - **Agents Window**：`AgentsWindow.jsx` Cursor 风格 Sub-agent 监控面板（主 Agent 卡片+子 Agent 列表+实时状态）
 - **CodePreview 右侧分栏**：CodePreview 从聊天上方改为右侧分栏（flex 布局+可拖拽宽度+多文件标签页+Cmd+F 搜索+Tab 缩进）
 - **TaskTodoList 增强**：双向同步 + 子任务支持 + 任务耗时；StickyTaskBar 增加跳过/取消操作按钮
+
+### Coding View 持续增强（v2026-06 Phase 10）
+- **会话按项目路径关联**：`sessions.project_path` 列 + ListSessions API `?project_path=xxx` 筛选 + CreateSession 携带项目路径，切换项目目录时自动过滤会话
+- **文件 Diff 内联展示**：移除顶部实时 LiveDiffPanel，改为在 CodingToolCard 内展示可折叠的 git diff（行级颜色编码 + 变更统计）
+- **终端集成**：后端 `GET /api/terminal/ws` PTY WebSocket（creack/pty）+ 前端 `TerminalPanel.jsx`（@xterm/xterm），多标签页、最大化、VSCode 深色主题
+- **H5 移动端完整适配**：viewport-fit=cover + safe-area-inset + 100dvh + MobileHeader 增强（汉堡菜单/终端/设置）+ MobileDrawer 会话抽屉 + 全屏移动端终端 + 响应式 padding + 触摸优化
+
+### Coding View 专业化增强（v2026-06 Phase 11）
+- **工具调用完整展示**：后端 `tool_end` 事件新增 `fullInput` 字段传递完整工具输入 JSON，前端 CodingToolCard 重写为专业开发者视图（Bash 命令直接显示、文件路径可复制、Edit 操作 old/new 对比、Read/Grep/Glob 参数详情、Task 子代理描述+prompt 预览）
+- **ToolGroupCard 默认展开**：工具组卡片默认展开显示所有工具调用详情（可折叠），区别于主模式的默认折叠
+- **任务计划强制规则**：system prompt 中 task_plan 规则升级为"最高优先级"，要求 Agent 在所有非 trivial 任务前必须先输出任务计划，每步完成后立即更新状态
+- **图片粘贴支持**：CodingComposer 新增 `onPaste` 处理器，支持 Cmd+V 粘贴图片（预览缩略图 + 移除按钮）和 `<ImagePlus>` 图片上传按钮
+- **桌面文件拖拽**：CodingComposer 增强 `handleDrop`，支持从桌面拖拽图片文件（自动 base64 编码）和文本文件（读取内容作为附件）
+- **思考模式开关**：`codingSlice` 新增 `codingThinkingEnabled` 状态（持久化 localStorage），CodingComposer 工具栏新增 Think 开关按钮（紫色高亮），发送消息时携带 `thinking` 参数
+- **后端思考模式支持**：`POST /api/coding/chat` 新增 `thinking` 参数，传递 `DISABLE_THINKING=1` 环境变量控制 Claude 思考链
+- **CodePreview 全高度**：移除 `h-[45%]` 限制，改为 `h-full` 占满右侧面板全部可用空间，移除无用的展开/收起按钮
 
 ### 纯 Go 协议转换代理（v2026-05 Phase 3）
 - **替代 LiteLLM Bridge**：`backend-desktop/proxy/` 纯 Go 实现，启动零延迟、无 Python 依赖

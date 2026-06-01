@@ -14,10 +14,11 @@ import (
 	"lingxi-agent/model"
 )
 
-// ListSessions GET /api/sessions?agent_id=N&mode=coding
+// ListSessions GET /api/sessions?agent_id=N&mode=coding&project_path=/path
 func ListSessions(c *gin.Context) {
 	agentIDStr := c.Query("agent_id")
 	modeFilter := c.Query("mode")
+	projectPath := c.Query("project_path")
 
 	modeVal := ""
 	if modeFilter != "" {
@@ -29,17 +30,22 @@ func ListSessions(c *gin.Context) {
 		err  error
 	)
 
+	baseSelect := `SELECT id, title, message_count, COALESCE(agent_id,0), COALESCE(pinned,0), COALESCE(folder,''), COALESCE(permission_mode,'trust'), COALESCE(project_path,''), created_at, updated_at FROM sessions`
+	orderBy := ` ORDER BY COALESCE(pinned,0) DESC, updated_at DESC`
+
 	if agentIDStr != "" {
 		agentID, _ := strconv.ParseInt(agentIDStr, 10, 64)
-		rows, err = db.DB.Query(`
-			SELECT id, title, message_count, COALESCE(agent_id,0), COALESCE(pinned,0), COALESCE(folder,''), COALESCE(permission_mode,'trust'), created_at, updated_at
-			FROM sessions WHERE COALESCE(agent_id,0)=? AND COALESCE(is_a2a,0)=0 AND COALESCE(mode,'')=? ORDER BY COALESCE(pinned,0) DESC, updated_at DESC
-		`, agentID, modeVal)
+		if projectPath != "" {
+			rows, err = db.DB.Query(baseSelect+` WHERE COALESCE(agent_id,0)=? AND COALESCE(is_a2a,0)=0 AND COALESCE(mode,'')=? AND COALESCE(project_path,'')=?`+orderBy, agentID, modeVal, projectPath)
+		} else {
+			rows, err = db.DB.Query(baseSelect+` WHERE COALESCE(agent_id,0)=? AND COALESCE(is_a2a,0)=0 AND COALESCE(mode,'')=?`+orderBy, agentID, modeVal)
+		}
 	} else {
-		rows, err = db.DB.Query(`
-			SELECT id, title, message_count, COALESCE(agent_id,0), COALESCE(pinned,0), COALESCE(folder,''), COALESCE(permission_mode,'trust'), created_at, updated_at
-			FROM sessions WHERE COALESCE(is_a2a,0)=0 AND COALESCE(mode,'')=? ORDER BY COALESCE(pinned,0) DESC, updated_at DESC
-		`, modeVal)
+		if projectPath != "" {
+			rows, err = db.DB.Query(baseSelect+` WHERE COALESCE(is_a2a,0)=0 AND COALESCE(mode,'')=? AND COALESCE(project_path,'')=?`+orderBy, modeVal, projectPath)
+		} else {
+			rows, err = db.DB.Query(baseSelect+` WHERE COALESCE(is_a2a,0)=0 AND COALESCE(mode,'')=?`+orderBy, modeVal)
+		}
 	}
 	if err != nil {
 		slog.Warn("list error", "err", err)
@@ -51,7 +57,7 @@ func ListSessions(c *gin.Context) {
 	sessions := make([]model.Session, 0)
 	for rows.Next() {
 		var s model.Session
-		if err := rows.Scan(&s.ID, &s.Title, &s.MessageCount, &s.AgentID, &s.Pinned, &s.Folder, &s.PermissionMode, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.MessageCount, &s.AgentID, &s.Pinned, &s.Folder, &s.PermissionMode, &s.ProjectPath, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			continue
 		}
 		sessions = append(sessions, s)
@@ -66,6 +72,7 @@ func CreateSession(c *gin.Context) {
 		AgentID        int64  `json:"agent_id"`
 		PermissionMode string `json:"permission_mode"`
 		Mode           string `json:"mode"`
+		ProjectPath    string `json:"project_path"`
 	}
 	_ = c.ShouldBindJSON(&body)
 	if body.Title == "" {
@@ -75,14 +82,14 @@ func CreateSession(c *gin.Context) {
 		body.PermissionMode = "trust"
 	}
 
-	res, err := db.DB.Exec(`INSERT INTO sessions (title, agent_id, permission_mode, mode) VALUES (?,?,?,?)`, body.Title, body.AgentID, body.PermissionMode, body.Mode)
+	res, err := db.DB.Exec(`INSERT INTO sessions (title, agent_id, permission_mode, mode, project_path) VALUES (?,?,?,?,?)`, body.Title, body.AgentID, body.PermissionMode, body.Mode, body.ProjectPath)
 	if err != nil {
 		slog.Warn("create error", "err", err)
 		c.Status(http.StatusInternalServerError)
 		return
 	}
 	id, _ := res.LastInsertId()
-	c.JSON(http.StatusOK, gin.H{"id": id, "title": body.Title, "agent_id": body.AgentID, "permission_mode": body.PermissionMode, "mode": body.Mode})
+	c.JSON(http.StatusOK, gin.H{"id": id, "title": body.Title, "agent_id": body.AgentID, "permission_mode": body.PermissionMode, "mode": body.Mode, "project_path": body.ProjectPath})
 }
 
 // UpdateSession PATCH /api/sessions/:id

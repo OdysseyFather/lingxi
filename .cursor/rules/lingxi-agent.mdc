@@ -670,3 +670,20 @@ PORT=3099 DB_PATH=/tmp/lingxi-instance2/smart-agent.db FRONTEND_DIST=../frontend
 - [x] **StickyTaskBar 增强**：增加"跳过当前任务"和"取消所有任务"操作按钮 + 实时耗时显示 + 展开/收起详情
 - [x] **CodingChatView 重写**：所有状态引用从 `chatSlice` 切换到 `codingChatSlice`，包括 UserMessage/AssistantMessage/TextBlock/LiveBlock/ThinkingIndicator/SessionHeader/CodingComposer
 - [x] **会话切换清理增强**：`setActiveSession` 同时清空 Coding 独立状态（messages/liveBlocks/streaming/questions/subAgents）
+
+### Coding View 持续增强（v2026-06 Phase 10）
+- [x] **会话按项目路径关联**：`sessions.project_path` 列 + `ListSessions` API 支持 `?project_path=xxx` 筛选 + `CreateSession` 自动携带项目路径，切换项目目录时自动显示该项目的会话
+- [x] **文件 Diff 内联展示**：移除顶部实时 LiveDiffPanel，改为在工具调用卡片（CodingToolCard）内展示可折叠的 git diff（行级颜色编码 + 变更统计），`file_diff` WS 事件附加到对应的 tool block
+- [x] **终端集成**：后端 `GET /api/terminal/ws` PTY WebSocket 端点（creack/pty）+ 前端 `TerminalPanel.jsx`（@xterm/xterm + FitAddon + WebLinksAddon），支持多标签页、最大化、VSCode 深色主题
+- [x] **CodingIconBar 新增终端按钮**：左侧图标栏新增 Terminal 图标，点击切换底部终端面板
+- [x] **H5 移动端完整适配**：viewport-fit=cover + safe-area-inset + 100dvh + MobileHeader 增强（汉堡菜单/终端/设置/模式切换）+ MobileDrawer 会话抽屉（项目选择/新建/切换）+ 全屏移动端终端 + 响应式 padding（px-3 sm:px-6）+ 触摸优化（tap-highlight-color/active 状态）
+
+### Coding View 专业化增强（v2026-06 Phase 11）
+- [x] **工具调用完整展示**：后端 `tool_end` 事件新增 `fullInput` 字段传递完整工具输入 JSON，前端 CodingToolCard 重写为专业开发者视图（Bash 命令直接显示、文件路径可复制、Edit old/new 对比、Read/Grep/Glob 参数详情、Task 子代理描述+prompt 预览）
+- [x] **ToolGroupCard 默认展开**：工具组卡片默认展开显示所有工具调用详情（可折叠），区别于主模式的默认折叠
+- [x] **任务计划强制规则**：system prompt 中 task_plan 规则升级为"最高优先级"，要求 Agent 在所有非 trivial 任务前必须先输出任务计划，每步完成后立即更新状态
+- [x] **图片粘贴支持**：CodingComposer 新增 `onPaste` + `pickImageFiles` + `<ImagePlus>` 图片上传按钮，Cmd+V 粘贴图片（预览缩略图 + 移除按钮）
+- [x] **桌面文件拖拽**：CodingComposer `handleDrop` 增强，支持桌面图片文件（自动 base64）和文本文件（读取内容附件）
+- [x] **思考模式开关**：`codingSlice` 新增 `codingThinkingEnabled`（持久化 localStorage），CodingComposer 工具栏 Think 开关按钮（紫色），消息携带 `thinking` 参数
+- [x] **后端思考模式支持**：`POST /api/coding/chat` 新增 `thinking` 布尔参数，`DISABLE_THINKING=1` 环境变量控制 Claude 思考链
+- [x] **CodePreview 全高度**：移除 `h-[45%]`，改为 `h-full` 占满右侧面板，移除展开/收起按钮

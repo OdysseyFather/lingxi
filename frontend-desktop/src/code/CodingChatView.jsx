@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState, useCallback, useMemo, useTransition } from 'react';
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Highlight, themes } from 'prism-react-renderer';
 import {
-  Brain, Loader2, FolderOpen, ChevronDown, ChevronRight, ChevronUp,
-  Copy, Check, CheckCircle2, Clock, Zap, Pencil, RotateCcw, FilePlus, FileEdit, X,
+  Brain, Loader2, FolderOpen, ChevronDown, ChevronRight,
+  Copy, Check, CheckCircle2, Clock, Zap, Pencil, RotateCcw, X,
   History,
 } from 'lucide-react';
 import { cn } from '../ui/cn';
@@ -18,7 +18,7 @@ import { AskQuestionBlock } from './AskQuestionBlock';
 import { PermissionBlock } from './PermissionBlock';
 import { AskQuestionWizard } from './AskQuestionWizard';
 import { AgentsWindow } from './AgentsWindow';
-import { StickyTaskBar, TaskTodoList } from './TaskTodoList';
+import { StickyTaskBar } from './TaskTodoList';
 import { ThemedBox, ThemedButton } from './themed-containers';
 
 export function CodingChatView({ projectPath, onChangeProject }) {
@@ -29,7 +29,6 @@ export function CodingChatView({ projectPath, onChangeProject }) {
   const codingSendMessage = useStore((s) => s.codingSendMessage);
   const activeSessionId = useStore((s) => s.activeSessionId);
   const codingTasks = useStore((s) => s.codingTasks);
-  const liveDiffs = useStore((s) => s.liveDiffs) || [];
   const pendingQuestions = useStore((s) => s.codingPendingQuestions);
   const subAgents = useStore((s) => s.subAgents);
   const loadCodingMessages = useStore((s) => s.loadCodingMessages);
@@ -59,7 +58,9 @@ export function CodingChatView({ projectPath, onChangeProject }) {
     setStickToBottom(atBottom);
   }, []);
 
-  const handleSend = useCallback((text, attachedFiles) => {
+  const codingThinkingEnabled = useStore((s) => s.codingThinkingEnabled);
+
+  const handleSend = useCallback((text, attachedFiles, images) => {
     let msg = text;
     if (attachedFiles?.length > 0) {
       const refs = attachedFiles.map(f => {
@@ -68,8 +69,10 @@ export function CodingChatView({ projectPath, onChangeProject }) {
       }).join(' ');
       msg = `${refs}\n\n${text}`;
     }
-    codingSendMessage({ message: msg, workingDir: projectPath || '' });
-  }, [codingSendMessage, projectPath]);
+    const imgs = images?.map(({ mediaType, data }) => ({ mediaType, data })) || [];
+    const files = attachedFiles?.filter(f => f.content).map(f => ({ name: f.name, ext: f.ext, content: f.content })) || [];
+    codingSendMessage({ message: msg, workingDir: projectPath || '', images: imgs, files, thinking: codingThinkingEnabled });
+  }, [codingSendMessage, projectPath, codingThinkingEnabled]);
 
   if (!activeSessionId) {
     return (
@@ -86,16 +89,12 @@ export function CodingChatView({ projectPath, onChangeProject }) {
         <StickyTaskBar tasks={codingTasks} />
       )}
 
-      {liveDiffs.length > 0 && (
-        <LiveDiffPanel diffs={liveDiffs} />
-      )}
-
       <div
         ref={scrollRef}
         onScroll={handleScroll}
         className="flex-1 overflow-y-auto scrollable"
       >
-        <div className="max-w-3xl mx-auto px-6 pb-6">
+        <div className="max-w-3xl mx-auto px-3 sm:px-6 pb-6">
           <SessionHeader projectPath={projectPath} />
 
           {messages.length === 0 && !isStreaming && (
@@ -112,10 +111,6 @@ export function CodingChatView({ projectPath, onChangeProject }) {
                 <LiveBlock key={i} block={block} />
               ))}
             </div>
-          )}
-
-          {codingTasks.length > 0 && (
-            <TaskTodoList tasks={codingTasks} title="任务列表" collapsed={false} />
           )}
 
           {subAgents.length > 0 && (
@@ -314,16 +309,6 @@ function AssistantMessage({ msg, checkpoints }) {
 
   const HIDDEN_TOOLS = ['TodoWrite', 'TodoRead', 'todo_write', 'todo_read'];
   const toolBlocks = blocks.filter(b => b.type === 'tool' && !HIDDEN_TOOLS.includes(b.name));
-  const todoToolBlocks = blocks.filter(b => b.type === 'tool' && HIDDEN_TOOLS.includes(b.name));
-  const inlineTasks = useMemo(() => {
-    for (const b of todoToolBlocks) {
-      try {
-        const inp = typeof b.input === 'string' ? JSON.parse(b.input) : b.input;
-        if (Array.isArray(inp?.todos) && inp.todos.length > 0) return inp.todos;
-      } catch {}
-    }
-    return null;
-  }, [todoToolBlocks]);
   const otherBlocks = blocks.filter(b => b.type !== 'tool');
 
   const plainText = useMemo(() => {
@@ -395,17 +380,10 @@ function AssistantMessage({ msg, checkpoints }) {
       {toolBlocks.length > 0 && (
         <ToolGroupCard tools={toolBlocks} />
       )}
-      {inlineTasks && inlineTasks.length > 0 && (
-        <TaskTodoList tasks={inlineTasks} title="任务列表" collapsed={false} />
-      )}
       {otherBlocks.map((block, i) => {
         if (block.type === 'thinking') return <ThinkingBlock key={i} text={block.text} />;
         if (block.type === 'text' && block.text) return <TextBlock key={i} text={block.text} />;
-        if (block.type === 'task_list') {
-          const tasks = block.tasks || block.todos || [];
-          if (tasks.length > 0) return <TaskTodoList key={i} tasks={tasks} title={block.title || '任务列表'} collapsed={false} />;
-          return null;
-        }
+        if (block.type === 'task_list') return null;
         if (block.type === 'ask_question') {
           return (
             <AskQuestionBlock
@@ -469,30 +447,23 @@ function RollbackModal({ checkpoint, onConfirm, onCancel }) {
 }
 
 function ToolGroupCard({ tools }) {
-  const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const allDone = tools.every(t => t.done !== false);
   const allSuccess = tools.every(t => t.status !== 'failed');
   const totalMs = tools.reduce((sum, t) => sum + (t.ms || 0), 0);
   const label = tools.length === 1
-    ? tools[0].label || tools[0].name || '执行工具'
-    : `执行了 ${tools.length} 条命令`;
-
-  const toolNames = tools.length > 1
-    ? [...new Set(tools.map(t => t.name).filter(Boolean))].slice(0, 4).join(', ')
-    : '';
+    ? tools[0].label || tools[0].name || 'Tool'
+    : `${tools.length} tool calls`;
 
   return (
     <div className="my-3 rounded-xl border border-[var(--coding-border)] bg-[var(--coding-surface)] overflow-hidden">
       <button
-        onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center gap-2.5 px-4 py-2.5 text-left text-[13px] hover:bg-[var(--accent-soft)] transition"
+        onClick={() => setCollapsed(v => !v)}
+        className="w-full flex items-center gap-2.5 px-4 py-2 text-left text-[13px] hover:bg-[var(--accent-soft)] transition"
       >
-        {open ? <ChevronUp size={14} className="text-[var(--text-faint)]" /> : <ChevronDown size={14} className="text-[var(--text-faint)]" />}
+        {collapsed ? <ChevronRight size={14} className="text-[var(--text-faint)]" /> : <ChevronDown size={14} className="text-[var(--text-faint)]" />}
         <Zap size={13} className="text-[var(--accent)] shrink-0" />
         <span className="font-medium text-[var(--text-soft)]">{label}</span>
-        {toolNames && !open && (
-          <span className="text-[11px] text-[var(--text-faint)] truncate max-w-[200px]">{toolNames}</span>
-        )}
         <span className="flex-1" />
         {allDone && totalMs > 0 && (
           <span className="text-[11px] text-[var(--text-faint)] flex items-center gap-1 mr-2">
@@ -504,10 +475,10 @@ function ToolGroupCard({ tools }) {
         {allDone && !allSuccess && <span className="text-red-400 text-[12px]">有失败</span>}
         {!allDone && <Loader2 size={14} className="text-[var(--accent)] animate-spin" />}
       </button>
-      {open && (
+      {!collapsed && (
         <div className="border-t border-[var(--coding-border)]">
           {tools.map((tool, i) => (
-            <CodingToolCard key={i} name={tool.name} label={tool.label} done={tool.done !== false} input={tool.input} status={tool.status} ms={tool.ms} />
+            <CodingToolCard key={i} name={tool.name} label={tool.label} done={tool.done !== false} input={tool.input} fullInput={tool.fullInput} status={tool.status} ms={tool.ms} fileDiff={tool.fileDiff} />
           ))}
         </div>
       )}
@@ -830,16 +801,12 @@ function LiveBlock({ block }) {
   if (block.type === 'tool') {
     const HIDDEN_TOOLS = ['TodoWrite', 'TodoRead', 'todo_write', 'todo_read'];
     if (HIDDEN_TOOLS.includes(block.name)) return null;
-    return <CodingToolCard name={block.name} label={block.label} done={block.done} input={block.input} status={block.status} ms={block.ms} />;
+    return <CodingToolCard name={block.name} label={block.label} done={block.done} input={block.input} fullInput={block.fullInput} status={block.status} ms={block.ms} fileDiff={block.fileDiff} />;
   }
   if (block.type === 'text' && block.text) {
     return <TextBlock text={block.text} isLive />;
   }
-  if (block.type === 'task_list') {
-    const tasks = block.tasks || block.todos || [];
-    if (tasks.length > 0) return <TaskTodoList tasks={tasks} title={block.title || '任务列表'} collapsed={false} />;
-    return null;
-  }
+  if (block.type === 'task_list') return null;
   if (block.type === 'ask_question') {
     return (
       <AskQuestionBlock
@@ -887,91 +854,6 @@ function ThinkingIndicator() {
           <Clock size={10} />
           {elapsed}s
         </span>
-      )}
-    </div>
-  );
-}
-
-function LiveDiffPanel({ diffs }) {
-  const [activeIdx, setActiveIdx] = useState(0);
-  const [collapsed, setCollapsed] = useState(false);
-
-  if (!diffs || diffs.length === 0) return null;
-
-  const active = diffs[Math.min(activeIdx, diffs.length - 1)];
-  const filePath = active?.file || '';
-
-  const diffLines = useMemo(() => {
-    if (!active?.diff) return [];
-    return active.diff.split('\n').filter(l => {
-      if (l.startsWith('diff --git') || l.startsWith('index ') || l.startsWith('---') || l.startsWith('+++')) return false;
-      return true;
-    });
-  }, [active?.diff]);
-
-  return (
-    <div className="border-b border-[var(--coding-border)] bg-[var(--coding-surface-raised)]">
-      <div className="flex items-center border-b border-[var(--coding-border)] bg-[var(--coding-surface)]">
-        <div className="flex-1 flex items-center gap-0.5 px-2 overflow-x-auto scrollable">
-          {diffs.map((d, i) => {
-            const name = d.file?.split('/').pop() || '';
-            const isActive = i === Math.min(activeIdx, diffs.length - 1);
-            return (
-              <button
-                key={d.file}
-                onClick={() => setActiveIdx(i)}
-                className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 text-[12px] rounded-t-lg transition shrink-0',
-                  isActive
-                    ? 'bg-[var(--coding-surface-raised)] border border-b-0 border-[var(--coding-border)] text-[var(--text)] font-medium -mb-px'
-                    : 'text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)]'
-                )}
-              >
-                {d.isNew ? <FilePlus size={12} className="text-green-500" /> : <FileEdit size={12} className="text-blue-500" />}
-                <span>{name}</span>
-                <span className="text-[10px] ml-1">
-                  {d.added > 0 && <span className="text-green-600">+{d.added}</span>}
-                  {d.removed > 0 && <span className="text-red-500 ml-0.5">-{d.removed}</span>}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-        <button
-          onClick={() => setCollapsed(v => !v)}
-          className="p-1.5 mr-1 text-[var(--text-faint)] hover:text-[var(--text-soft)] transition"
-        >
-          {collapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
-        </button>
-      </div>
-
-      {!collapsed && (
-        <div className="max-h-[240px] overflow-y-auto scrollable">
-          <div className="flex items-center gap-2 px-4 py-1.5 bg-[var(--coding-surface)] text-[12px] text-[var(--text-faint)] border-b border-[var(--coding-border)]">
-            {active?.isNew ? (
-              <span className="px-1.5 py-0.5 rounded bg-green-500/10 text-green-600 text-[10px] font-medium">NEW</span>
-            ) : (
-              <span className="px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-600 text-[10px] font-medium">MODIFIED</span>
-            )}
-            <span className="font-mono truncate">{filePath}</span>
-          </div>
-
-          <div className="font-mono text-[12px] leading-[1.6]">
-            {diffLines.map((line, i) => {
-              let bg = '';
-              let color = 'var(--text-soft)';
-              if (line.startsWith('@@')) { bg = 'bg-blue-500/5'; color = '#3b82f6'; }
-              else if (line.startsWith('+')) { bg = 'bg-green-500/10'; color = '#16a34a'; }
-              else if (line.startsWith('-')) { bg = 'bg-red-500/10'; color = '#dc2626'; }
-
-              return (
-                <div key={i} className={cn('px-4 whitespace-pre', bg)} style={{ color }}>
-                  {line}
-                </div>
-              );
-            })}
-          </div>
-        </div>
       )}
     </div>
   );

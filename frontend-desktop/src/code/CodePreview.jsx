@@ -2,7 +2,7 @@ import { useMemo, useState, useCallback, useRef, useEffect } from 'react';
 import { Highlight, themes } from 'prism-react-renderer';
 import {
   X, FileCode2, Copy, Check, ArrowUpRight, Save, Loader2,
-  Maximize2, Minimize2, Search, ChevronDown,
+  Search, ChevronDown,
 } from 'lucide-react';
 import { cn } from '../ui/cn';
 import { api } from '../api/client';
@@ -32,7 +32,6 @@ export function CodePreview({
   const [editContent, setEditContent] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [expanded, setExpanded] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -156,13 +155,10 @@ export function CodePreview({
   }, [handleSave]);
 
   return (
-    <div className={cn(
-      'flex flex-col bg-white border-b border-[#e8e4e0] transition-all',
-      expanded ? 'flex-1' : 'h-[45%]'
-    )}>
+    <div className="flex flex-col bg-[var(--coding-surface-raised)] h-full">
       {/* Multi-file tabs */}
       {hasMultipleFiles && (
-        <div className="flex items-center gap-0 border-b border-[#e8e4e0] bg-[#f5f0eb] overflow-x-auto scrollable shrink-0">
+        <div className="flex items-center gap-0 border-b border-[var(--coding-border)] bg-[var(--coding-surface)] overflow-x-auto scrollable shrink-0">
           {openFiles.map((f) => {
             const fName = f.split('/').pop();
             const isActive = f === (activeFile || filePath);
@@ -170,16 +166,16 @@ export function CodePreview({
               <div
                 key={f}
                 className={cn(
-                  'flex items-center gap-1.5 px-3 py-1.5 text-[12px] border-r border-[#e8e4e0] cursor-pointer transition-all group shrink-0',
-                  isActive ? 'bg-white text-[#333] font-medium' : 'text-[#999] hover:text-[#666] hover:bg-[#faf8f6]'
+                  'flex items-center gap-1.5 px-3 py-1.5 text-[12px] border-r border-[var(--coding-border)] cursor-pointer transition-all group shrink-0',
+                  isActive ? 'bg-[var(--coding-surface-raised)] text-[var(--text)] font-medium' : 'text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)]'
                 )}
                 onClick={() => onSelectFile?.(f)}
               >
-                <FileCode2 size={11} className={isActive ? 'text-[#c4a882]' : 'text-[#ccc]'} />
+                <FileCode2 size={11} className={isActive ? 'text-[var(--accent)]' : 'text-[var(--text-faint)]'} />
                 <span className="truncate max-w-[120px]">{fName}</span>
                 <button
                   onClick={(e) => { e.stopPropagation(); onCloseFile?.(f); }}
-                  className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-[#e8e4e0] transition"
+                  className="p-0.5 rounded opacity-0 group-hover:opacity-100 hover:bg-[var(--coding-border)] transition"
                 >
                   <X size={10} />
                 </button>
@@ -190,16 +186,16 @@ export function CodePreview({
       )}
 
       {/* Toolbar */}
-      <div className="h-10 flex items-center gap-2 px-4 border-b border-[#e8e4e0] bg-[#faf8f6] shrink-0">
-        <FileCode2 size={14} className="text-[#c4a882] shrink-0" />
-        <span className="text-[13px] font-medium text-[#333] truncate">{fileName}</span>
-        <span className="text-[11px] text-[#bbb] font-mono truncate" title={filePath}>{shortPath}</span>
+      <div className="h-10 flex items-center gap-2 px-4 border-b border-[var(--coding-border)] bg-[var(--coding-surface)] shrink-0">
+        <FileCode2 size={14} className="text-[var(--accent)] shrink-0" />
+        <span className="text-[13px] font-medium text-[var(--text)] truncate">{fileName}</span>
+        <span className="text-[11px] text-[var(--text-faint)] font-mono truncate" title={filePath}>{shortPath}</span>
         <div className="flex-1" />
-        <span className="text-[10px] text-[#bbb] font-mono">{lines.length} lines</span>
+        <span className="text-[10px] text-[var(--text-faint)] font-mono">{lines.length} lines</span>
 
         <button
           onClick={() => { setShowSearch(true); setTimeout(() => searchInputRef.current?.focus(), 50); }}
-          className="p-1.5 rounded-md text-[#bbb] hover:text-[#666] hover:bg-[#f5f0eb] transition"
+          className="p-1.5 rounded-md text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)] transition"
           title="Search (⌘F)"
         >
           <Search size={13} />
@@ -208,7 +204,7 @@ export function CodePreview({
         {!editing ? (
           <button
             onClick={handleStartEdit}
-            className="px-2.5 py-1 rounded-md text-[11px] font-medium text-[#888] hover:text-[#555] hover:bg-[#f0ebe6] transition"
+            className="px-2.5 py-1 rounded-md text-[11px] font-medium text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--accent-soft)] transition"
           >
             Edit
           </button>
@@ -218,7 +214,7 @@ export function CodePreview({
             disabled={saving}
             className={cn(
               'flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-medium transition',
-              saved ? 'text-green-600 bg-green-50' : 'text-[#c4a882] hover:bg-[#f5f0eb]'
+              saved ? 'text-green-600 bg-green-50' : 'text-[var(--accent)] hover:bg-[var(--accent-soft)]'
             )}
           >
             {saving ? <Loader2 size={11} className="animate-spin" /> : saved ? <Check size={11} /> : <Save size={11} />}
@@ -228,28 +224,21 @@ export function CodePreview({
 
         <button
           onClick={handleInsert}
-          className="p-1.5 rounded-md text-[#bbb] hover:text-[#c4a882] hover:bg-[#f5f0eb] transition"
+          className="p-1.5 rounded-md text-[var(--text-faint)] hover:text-[var(--accent)] hover:bg-[var(--accent-soft)] transition"
           title="Insert to chat"
         >
           <ArrowUpRight size={13} />
         </button>
         <button
           onClick={handleCopy}
-          className="p-1.5 rounded-md text-[#bbb] hover:text-[#666] hover:bg-[#f5f0eb] transition"
+          className="p-1.5 rounded-md text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)] transition"
           title="Copy"
         >
           {copied ? <Check size={13} className="text-green-500" /> : <Copy size={13} />}
         </button>
         <button
-          onClick={() => setExpanded(v => !v)}
-          className="p-1.5 rounded-md text-[#bbb] hover:text-[#666] hover:bg-[#f5f0eb] transition"
-          title={expanded ? 'Collapse' : 'Expand'}
-        >
-          {expanded ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
-        </button>
-        <button
           onClick={onClose}
-          className="p-1.5 rounded-md text-[#bbb] hover:text-[#666] hover:bg-[#f5f0eb] transition"
+          className="p-1.5 rounded-md text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)] transition"
           title="Close"
         >
           <X size={13} />
@@ -258,15 +247,15 @@ export function CodePreview({
 
       {/* Search bar */}
       {showSearch && (
-        <div className="h-9 flex items-center gap-2 px-4 border-b border-[#e8e4e0] bg-[#fdf8f3] shrink-0">
-          <Search size={12} className="text-[#bbb] shrink-0" />
+        <div className="h-9 flex items-center gap-2 px-4 border-b border-[var(--coding-border)] bg-[var(--coding-surface)] shrink-0">
+          <Search size={12} className="text-[var(--text-faint)] shrink-0" />
           <input
             ref={searchInputRef}
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search in file..."
-            className="flex-1 bg-transparent text-[13px] text-[#333] placeholder-[#ccc] outline-none"
+            className="flex-1 bg-transparent text-[13px] text-[var(--text)] placeholder-[var(--text-faint)] outline-none"
             onKeyDown={(e) => {
               if (e.key === 'Enter' && searchResults.length > 0) {
                 const next = (activeSearchIdx + (e.shiftKey ? -1 : 1) + searchResults.length) % searchResults.length;
@@ -276,13 +265,13 @@ export function CodePreview({
             }}
           />
           {searchResults.length > 0 && (
-            <span className="text-[11px] text-[#999]">
+            <span className="text-[11px] text-[var(--text-faint)]">
               {activeSearchIdx + 1}/{searchResults.length}
             </span>
           )}
           <button
             onClick={() => { setShowSearch(false); setSearchQuery(''); setSearchResults([]); }}
-            className="p-1 rounded text-[#bbb] hover:text-[#666] transition"
+            className="p-1 rounded text-[var(--text-faint)] hover:text-[var(--text-soft)] transition"
           >
             <X size={12} />
           </button>
@@ -293,13 +282,13 @@ export function CodePreview({
       <div ref={codeContainerRef} className="flex-1 overflow-auto scrollable min-h-0">
         {loading ? (
           <div className="flex items-center justify-center h-32">
-            <div className="w-5 h-5 border-2 border-[#e0dbd5] border-t-[#c4a882] rounded-full animate-spin" />
+            <div className="w-5 h-5 border-2 border-[var(--coding-border)] border-t-[var(--accent)] rounded-full animate-spin" />
           </div>
         ) : editing ? (
           <div className="flex h-full">
             <div className="py-4 pr-2 select-none shrink-0">
               {editContent.split('\n').map((_, i) => (
-                <div key={i} className="text-right text-[11px] text-[#ccc] font-mono leading-5 px-3" style={{ minWidth: 48 }}>
+                <div key={i} className="text-right text-[11px] text-[var(--text-faint)] font-mono leading-5 px-3" style={{ minWidth: 48 }}>
                   {i + 1}
                 </div>
               ))}
@@ -309,7 +298,7 @@ export function CodePreview({
               value={editContent}
               onChange={(e) => setEditContent(e.target.value)}
               onKeyDown={handleKeyDown}
-              className="flex-1 py-4 text-[13px] leading-5 font-mono text-[#333] bg-transparent outline-none resize-none"
+              className="flex-1 py-4 text-[13px] leading-5 font-mono text-[var(--text)] bg-transparent outline-none resize-none"
               spellCheck={false}
             />
           </div>
@@ -326,10 +315,10 @@ export function CodePreview({
                       {...getLineProps({ line })}
                       className={cn(
                         'flex transition-colors',
-                        isActive ? 'bg-[#fff3e0]' : isHighlighted ? 'bg-[#fdf8f3]' : 'hover:bg-[#faf8f6]'
+                        isActive ? 'bg-amber-100/50' : isHighlighted ? 'bg-[var(--accent-soft)]' : 'hover:bg-[var(--accent-soft)]'
                       )}
                     >
-                      <span className="inline-block w-10 text-right mr-4 text-[#ccc] select-none text-[11px] shrink-0 leading-5">
+                      <span className="inline-block w-10 text-right mr-4 text-[var(--text-faint)] select-none text-[11px] shrink-0 leading-5">
                         {i + 1}
                       </span>
                       <span className="flex-1">
@@ -342,7 +331,7 @@ export function CodePreview({
             )}
           </Highlight>
         ) : (
-          <pre className="p-4 text-[13px] leading-5 font-mono text-[#333]">
+          <pre className="p-4 text-[13px] leading-5 font-mono text-[var(--text)]">
             {lines.map((line, i) => {
               const isHighlighted = searchResults.some(r => r.line === i);
               const isActive = searchResults[activeSearchIdx]?.line === i;
@@ -351,10 +340,10 @@ export function CodePreview({
                   key={i}
                   className={cn(
                     'flex transition-colors',
-                    isActive ? 'bg-[#fff3e0]' : isHighlighted ? 'bg-[#fdf8f3]' : 'hover:bg-[#faf8f6]'
+                    isActive ? 'bg-amber-100/50' : isHighlighted ? 'bg-[var(--accent-soft)]' : 'hover:bg-[var(--accent-soft)]'
                   )}
                 >
-                  <span className="inline-block w-10 text-right mr-4 text-[#ccc] select-none text-[11px] shrink-0 leading-5">
+                  <span className="inline-block w-10 text-right mr-4 text-[var(--text-faint)] select-none text-[11px] shrink-0 leading-5">
                     {i + 1}
                   </span>
                   <span className="flex-1">{line}</span>

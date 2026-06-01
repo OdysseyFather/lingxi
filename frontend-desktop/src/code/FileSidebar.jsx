@@ -27,7 +27,7 @@ function getFileIcon(name, isDir) {
 
 function getFileColor(name) {
   const ext = name.split('.').pop()?.toLowerCase();
-  return EXT_COLORS[ext] || 'text-[#999]';
+  return EXT_COLORS[ext] || 'text-[var(--text-faint)]';
 }
 
 function TreeNode({ entry, depth, onNavigate, expanded, onToggle, filter }) {
@@ -51,7 +51,7 @@ function TreeNode({ entry, depth, onNavigate, expanded, onToggle, filter }) {
       <button
         className={cn(
           'w-full flex items-center gap-1.5 px-2 py-[4px] text-[12px]',
-          'text-[#666] hover:text-[#333] hover:bg-[#f0ebe6] transition rounded-md',
+          'text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--accent-soft)] transition rounded-md',
         )}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
         onClick={() => {
@@ -63,8 +63,8 @@ function TreeNode({ entry, depth, onNavigate, expanded, onToggle, filter }) {
         title={entry.is_dir ? `拖拽引用目录: ${entry.name}` : `拖拽引用: ${entry.name}`}
       >
         {entry.is_dir ? (
-          isOpen ? <ChevronDown size={11} className="shrink-0 text-[#aaa]" />
-                 : <ChevronRight size={11} className="shrink-0 text-[#aaa]" />
+          isOpen ? <ChevronDown size={11} className="shrink-0 text-[var(--text-faint)]" />
+                 : <ChevronRight size={11} className="shrink-0 text-[var(--text-faint)]" />
         ) : <span className="w-[11px] shrink-0" />}
         <Icon size={13} className={cn('shrink-0', color)} />
         <span className="truncate">{entry.name}</span>
@@ -137,9 +137,9 @@ export function FileSidebar({ projectPath, onFileSelect, onClose }) {
   const shortPath = projectPath?.split('/').pop() || 'workspace';
 
   return (
-    <div className="w-56 border-r border-[#e8e4e0] bg-[#faf8f6] flex flex-col shrink-0 select-none">
-      <div className="flex items-center justify-between px-2 py-2 border-b border-[#e8e4e0]">
-        <div className="flex items-center gap-1.5 text-[11px] text-[#888] font-medium truncate">
+    <div className="w-56 border-r border-[var(--coding-border)] bg-[var(--coding-surface)] flex flex-col shrink-0 select-none">
+      <div className="flex items-center justify-between px-2 py-2 border-b border-[var(--coding-border)]">
+        <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)] font-medium truncate">
           <FolderOpen size={12} className="text-amber-500" />
           <span className="truncate">{shortPath}</span>
         </div>
@@ -149,42 +149,42 @@ export function FileSidebar({ projectPath, onFileSelect, onClose }) {
               setLoading(true);
               loadDir(projectPath).then((entries) => { setTree(entries); setLoading(false); });
             }}
-            className="p-1 rounded text-[#aaa] hover:text-[#666] transition"
+            className="p-1 rounded text-[var(--text-faint)] hover:text-[var(--text-soft)] transition"
             title="刷新"
           >
             <RefreshCw size={11} className={loading ? 'animate-spin' : ''} />
           </button>
           {onClose && (
-            <button onClick={onClose} className="p-1 rounded text-[#aaa] hover:text-[#666] transition" title="关闭">
+            <button onClick={onClose} className="p-1 rounded text-[var(--text-faint)] hover:text-[var(--text-soft)] transition" title="关闭">
               <X size={11} />
             </button>
           )}
         </div>
       </div>
 
-      <div className="px-2 py-1.5 border-b border-[#e8e4e0]">
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-white border border-[#e0dbd5] text-[11px]">
-          <Search size={11} className="text-[#bbb] shrink-0" />
+      <div className="px-2 py-1.5 border-b border-[var(--coding-border)]">
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-[var(--coding-surface-raised)] border border-[var(--coding-border)] text-[11px]">
+          <Search size={11} className="text-[var(--text-faint)] shrink-0" />
           <input
             type="text"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="搜索文件…"
-            className="flex-1 bg-transparent outline-none text-[#555] placeholder-[#ccc]"
+            className="flex-1 bg-transparent outline-none text-[var(--text)] placeholder-[var(--text-faint)]"
           />
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto scrollable py-1">
         {tree.length === 0 && !loading && (
-          <div className="px-3 py-8 text-[11px] text-[#bbb] text-center">
-            <FolderOpen size={24} className="mx-auto mb-2 text-[#ddd]" />
+          <div className="px-3 py-8 text-[11px] text-[var(--text-faint)] text-center">
+            <FolderOpen size={24} className="mx-auto mb-2 text-[var(--coding-border)]" />
             <p>目录为空</p>
           </div>
         )}
         {loading && tree.length === 0 && (
-          <div className="px-3 py-8 text-[11px] text-[#bbb] text-center">
-            <RefreshCw size={14} className="mx-auto mb-2 animate-spin text-[#ccc]" />
+          <div className="px-3 py-8 text-[11px] text-[var(--text-faint)] text-center">
+            <RefreshCw size={14} className="mx-auto mb-2 animate-spin text-[var(--text-faint)]" />
             <p>加载中…</p>
           </div>
         )}
@@ -201,7 +201,7 @@ export function FileSidebar({ projectPath, onFileSelect, onClose }) {
         ))}
       </div>
 
-      <div className="px-2 py-1.5 border-t border-[#e8e4e0] text-[10px] text-[#bbb] text-center">
+      <div className="px-2 py-1.5 border-t border-[var(--coding-border)] text-[10px] text-[var(--text-faint)] text-center">
         拖拽文件到输入框引用
       </div>
     </div>

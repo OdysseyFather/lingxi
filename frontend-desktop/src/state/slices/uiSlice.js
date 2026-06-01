@@ -27,6 +27,8 @@ export const createUISlice = (set, get) => ({
   toggleCodingChanges: () => set((s) => ({ codingChangesOpen: !s.codingChangesOpen })),
   codingFileTreeOpen: true,
   toggleCodingFileTree: () => set((s) => ({ codingFileTreeOpen: !s.codingFileTreeOpen })),
+  codingTerminalOpen: false,
+  toggleCodingTerminal: () => set((s) => ({ codingTerminalOpen: !s.codingTerminalOpen })),
 
   settingsTab: 'profiles',
   setSettingsTab: (t) => set({ settingsTab: t }),

@@ -56,6 +56,13 @@ export const createCodingSlice = (set, get) => ({
   codingTeam: null,
   setCodingTeam: (team) => set({ codingTeam: team }),
 
+  // 思考模式开关
+  codingThinkingEnabled: localStorage.getItem('lingxi-coding-thinking') !== 'false',
+  setCodingThinkingEnabled: (v) => {
+    localStorage.setItem('lingxi-coding-thinking', v ? 'true' : 'false');
+    set({ codingThinkingEnabled: v });
+  },
+
   // Git 分支
   gitBranch: '',
   refreshGitBranch: async () => {

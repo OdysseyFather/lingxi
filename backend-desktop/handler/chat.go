@@ -2168,6 +2168,7 @@ func emitTaskUpdate(hub *Hub, sessionID int64, rawInput string) {
 			Content string `json:"content"`
 			Status  string `json:"status"`
 		} `json:"todos"`
+		Merge *bool `json:"merge"`
 	}
 	if err := json.Unmarshal([]byte(rawInput), &parsed); err != nil {
 		return
@@ -2175,9 +2176,14 @@ func emitTaskUpdate(hub *Hub, sessionID int64, rawInput string) {
 	if len(parsed.Todos) == 0 {
 		return
 	}
+	merge := true
+	if parsed.Merge != nil {
+		merge = *parsed.Merge
+	}
 	payload, _ := json.Marshal(map[string]any{
 		"todos": parsed.Todos,
 		"title": "Tasks",
+		"merge": merge,
 	})
 	hub.Send(sessionID, "task_update", string(payload))
 }

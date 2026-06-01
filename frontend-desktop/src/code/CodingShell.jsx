@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef, lazy, Suspense } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeftRight, Plus, FolderOpen, Search } from 'lucide-react';
+import { ArrowLeftRight, Plus, FolderOpen, Search, Menu, Terminal, Settings, X } from 'lucide-react';
 import { cn } from '../ui/cn';
 import { useStore, initStore } from '../state/useStore';
 import { CodingIconBar } from './CodingIconBar';
@@ -11,12 +11,11 @@ import { FileSidebar } from './FileSidebar';
 import { WorkspaceChanges } from './WorkspaceChanges';
 import { CodingSettingsPage } from './CodingSettingsPage';
 import { CodePreview } from './CodePreview';
+import { TerminalPanel } from './TerminalPanel';
 import { ToastStack } from '../ui/primitives';
 import { api } from '../api/client';
 
 const ScheduledTasksPage = lazy(() => import('../ScheduledTasksPage'));
-
-const STORAGE_KEY = 'lingxi-code-project-path';
 
 function PageFallback() {
   return (
@@ -31,13 +30,18 @@ export function CodingShell() {
   const codingChangesOpen = useStore((s) => s.codingChangesOpen);
   const codingFileTreeOpen = useStore((s) => s.codingFileTreeOpen);
   const toggleCodingChanges = useStore((s) => s.toggleCodingChanges);
+  const codingTerminalOpen = useStore((s) => s.codingTerminalOpen);
+  const toggleCodingTerminal = useStore((s) => s.toggleCodingTerminal);
   const notifications = useStore((s) => s.notifications);
   const isLoggedIn = useStore((s) => s.isLoggedIn);
   const authChecked = useStore((s) => s.authChecked);
-
-  const [projectPath, setProjectPath] = useState(() => localStorage.getItem(STORAGE_KEY) || '');
+  const setCodingProjectPath = useStore((s) => s.setCodingProjectPath);
+  const refreshSessions = useStore((s) => s.refreshSessions);
+  const projectPath = useStore((s) => s.codingProjectPath);
   const [workspaceChanges, setWorkspaceChanges] = useState([]);
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+  const [mobileDrawerOpen, setMobileDrawerOpen] = useState(false);
+  const [mobileTerminalOpen, setMobileTerminalOpen] = useState(false);
   const [previewFile, setPreviewFile] = useState(null);
   const [previewContent, setPreviewContent] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -53,20 +57,19 @@ export function CodingShell() {
   }, []);
 
   const handleChangeProject = useCallback(async () => {
+    let newPath = '';
     if (window.electronAPI?.selectDirectory) {
       const selected = await window.electronAPI.selectDirectory();
-      if (selected) {
-        localStorage.setItem(STORAGE_KEY, selected);
-        setProjectPath(selected);
-      }
+      if (selected) newPath = selected;
     } else {
       const fallback = prompt('请输入项目目录路径：', projectPath || '');
-      if (fallback?.trim()) {
-        localStorage.setItem(STORAGE_KEY, fallback.trim());
-        setProjectPath(fallback.trim());
-      }
+      if (fallback?.trim()) newPath = fallback.trim();
     }
-  }, [projectPath]);
+    if (newPath && newPath !== projectPath) {
+      setCodingProjectPath(newPath);
+      await refreshSessions();
+    }
+  }, [projectPath, setCodingProjectPath, refreshSessions]);
 
   const fetchChanges = useCallback(async () => {
     if (!projectPath) return;
@@ -178,6 +181,10 @@ export function CodingShell() {
         <MobileHeader
           projectPath={projectPath}
           onSwitchMode={() => useStore.getState().setAppMode('main')}
+          onToggleDrawer={() => setMobileDrawerOpen(v => !v)}
+          onToggleTerminal={() => setMobileTerminalOpen(v => !v)}
+          onOpenSettings={() => useStore.getState().setCodingView('settings')}
+          terminalOpen={mobileTerminalOpen}
         />
       )}
       {/* 顶部 tab 栏（移动端隐藏） */}
@@ -231,48 +238,58 @@ export function CodingShell() {
 
         {/* 主区域 */}
         <main className="flex-1 flex min-h-0 bg-[var(--bg)]">
-          {/* 聊天/设置区域 */}
+          {/* 聊天/设置区域 + 终端 */}
           <div className="flex-1 flex flex-col min-h-0">
-            <Suspense fallback={<PageFallback />}>
-              <AnimatePresence mode="wait">
-                {codingView === 'chat' && (
-                  <motion.div
-                    key="coding-chat"
-                    className="flex-1 flex flex-col min-h-0"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.15 }}
-                  >
-                    <CodingChatView projectPath={projectPath} onChangeProject={handleChangeProject} />
-                  </motion.div>
-                )}
-                {codingView === 'settings' && (
-                  <motion.div
-                    key="coding-settings"
-                    className="flex-1 flex flex-col min-h-0"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.15 }}
-                  >
-                    <CodingSettingsPage />
-                  </motion.div>
-                )}
-                {codingView === 'scheduled' && (
-                  <motion.div
-                    key="coding-scheduled"
-                    className="flex-1 overflow-auto scrollable bg-[var(--bg)] p-4"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.15 }}
-                  >
-                    <ScheduledTasksPage />
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </Suspense>
+            <div className="flex-1 flex flex-col min-h-0">
+              <Suspense fallback={<PageFallback />}>
+                <AnimatePresence mode="wait">
+                  {codingView === 'chat' && (
+                    <motion.div
+                      key="coding-chat"
+                      className="flex-1 flex flex-col min-h-0"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <CodingChatView projectPath={projectPath} onChangeProject={handleChangeProject} />
+                    </motion.div>
+                  )}
+                  {codingView === 'settings' && (
+                    <motion.div
+                      key="coding-settings"
+                      className="flex-1 flex flex-col min-h-0"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <CodingSettingsPage />
+                    </motion.div>
+                  )}
+                  {codingView === 'scheduled' && (
+                    <motion.div
+                      key="coding-scheduled"
+                      className="flex-1 overflow-auto scrollable bg-[var(--bg)] p-4"
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.15 }}
+                    >
+                      <ScheduledTasksPage />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </Suspense>
+            </div>
+
+            {/* 底部终端面板 */}
+            {codingTerminalOpen && !isMobile && (
+              <TerminalPanel
+                projectPath={projectPath}
+                onClose={toggleCodingTerminal}
+              />
+            )}
           </div>
 
           {/* 右侧代码预览面板（flex 分栏，可拖拽调整宽度） */}
@@ -300,6 +317,52 @@ export function CodingShell() {
           )}
         </main>
       </div>
+
+      {/* 移动端侧边抽屉 */}
+      <AnimatePresence>
+        {isMobile && mobileDrawerOpen && (
+          <>
+            <motion.div
+              className="fixed inset-0 bg-black/30 z-50"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setMobileDrawerOpen(false)}
+            />
+            <motion.div
+              className="fixed left-0 top-0 bottom-0 w-[280px] bg-[var(--coding-surface)] z-50 flex flex-col shadow-2xl"
+              initial={{ x: -280 }}
+              animate={{ x: 0 }}
+              exit={{ x: -280 }}
+              transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+            >
+              <MobileDrawer
+                onClose={() => setMobileDrawerOpen(false)}
+                onChangeProject={handleChangeProject}
+                projectPath={projectPath}
+              />
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* 移动端终端面板（全屏覆盖） */}
+      <AnimatePresence>
+        {isMobile && mobileTerminalOpen && (
+          <motion.div
+            className="fixed inset-0 z-50 bg-[#1e1e1e] flex flex-col"
+            initial={{ y: '100%' }}
+            animate={{ y: 0 }}
+            exit={{ y: '100%' }}
+            transition={{ type: 'spring', damping: 28, stiffness: 320 }}
+          >
+            <TerminalPanel
+              projectPath={projectPath}
+              onClose={() => setMobileTerminalOpen(false)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 底部状态栏（移动端简化） */}
       {!isMobile && <BottomStatusBar projectPath={projectPath} onChangeProject={handleChangeProject} />}
@@ -396,30 +459,122 @@ function CodingSearchModal({ onClose, onSelect }) {
   );
 }
 
-function MobileHeader({ projectPath, onSwitchMode }) {
+function MobileHeader({ projectPath, onSwitchMode, onToggleDrawer, onToggleTerminal, onOpenSettings, terminalOpen }) {
   const createSession = useStore((s) => s.createSession);
-  const shortProject = projectPath ? projectPath.split('/').pop() : 'Coding Agent';
+  const shortProject = projectPath ? projectPath.split('/').pop() : 'Coding';
   return (
-    <div className="h-12 flex items-center justify-between px-4 bg-[var(--bg-elev)] border-b border-[var(--coding-border)] shrink-0">
-      <div className="flex items-center gap-3">
-        <span className="text-[var(--accent)] font-bold text-base font-mono">&gt;;</span>
-        <span className="text-[14px] font-bold text-[var(--text)]">{shortProject}</span>
-      </div>
+    <div className="h-12 flex items-center justify-between px-3 bg-[var(--bg-elev)] border-b border-[var(--coding-border)] shrink-0 safe-area-top">
       <div className="flex items-center gap-2">
+        <button onClick={onToggleDrawer} className="p-2 -ml-1 rounded-lg text-[var(--text-soft)] active:bg-[var(--accent-soft)] transition">
+          <Menu size={20} />
+        </button>
+        <span className="text-[14px] font-bold text-[var(--text)] truncate max-w-[120px]">{shortProject}</span>
+      </div>
+      <div className="flex items-center gap-1">
         <button
           onClick={() => createSession('编程会话')}
-          className="p-2 rounded-lg text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)] transition"
+          className="p-2 rounded-lg text-[var(--text-faint)] active:bg-[var(--accent-soft)] transition"
         >
           <Plus size={18} />
         </button>
         <button
-          onClick={onSwitchMode}
-          className="p-2 rounded-lg text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)] transition"
-          title="切换到灵犀模式"
+          onClick={onToggleTerminal}
+          className={cn(
+            'p-2 rounded-lg transition',
+            terminalOpen ? 'text-[var(--accent)] bg-[var(--accent-soft)]' : 'text-[var(--text-faint)] active:bg-[var(--accent-soft)]'
+          )}
         >
-          <ArrowLeftRight size={16} />
+          <Terminal size={16} />
+        </button>
+        <button
+          onClick={onOpenSettings}
+          className="p-2 rounded-lg text-[var(--text-faint)] active:bg-[var(--accent-soft)] transition"
+        >
+          <Settings size={16} />
+        </button>
+        <button
+          onClick={onSwitchMode}
+          className="p-2 rounded-lg text-[var(--text-faint)] active:bg-[var(--accent-soft)] transition"
+        >
+          <ArrowLeftRight size={15} />
         </button>
       </div>
     </div>
+  );
+}
+
+function MobileDrawer({ onClose, onChangeProject, projectPath }) {
+  const sessions = useStore((s) => s.sessions);
+  const activeSessionId = useStore((s) => s.activeSessionId);
+  const setActiveSession = useStore((s) => s.setActiveSession);
+  const createSession = useStore((s) => s.createSession);
+  const deleteSession = useStore((s) => s.deleteSession);
+
+  const handleSelect = useCallback(async (id) => {
+    await setActiveSession(id);
+    onClose();
+  }, [setActiveSession, onClose]);
+
+  const handleNew = useCallback(async () => {
+    await createSession('编程会话');
+    onClose();
+  }, [createSession, onClose]);
+
+  return (
+    <>
+      <div className="h-12 flex items-center justify-between px-4 border-b border-[var(--coding-border)] shrink-0">
+        <div className="flex items-center gap-2">
+          <span className="text-[var(--accent)] font-bold text-base font-mono">&gt;;</span>
+          <span className="text-[14px] font-bold text-[var(--text)]">Sessions</span>
+        </div>
+        <button onClick={onClose} className="p-2 rounded-lg text-[var(--text-faint)] active:bg-[var(--accent-soft)]">
+          <X size={18} />
+        </button>
+      </div>
+
+      {/* 项目路径 */}
+      <button
+        onClick={() => { onChangeProject(); }}
+        className="mx-3 mt-3 mb-2 flex items-center gap-2 px-3 py-2.5 rounded-xl bg-[var(--accent-soft)] border border-[var(--coding-border)] text-[13px] text-[var(--accent)] font-medium active:scale-[0.98] transition"
+      >
+        <FolderOpen size={15} />
+        <span className="truncate">{projectPath ? projectPath.split('/').pop() : '选择工作目录'}</span>
+      </button>
+
+      {/* 新建会话 */}
+      <button
+        onClick={handleNew}
+        className="mx-3 mb-2 flex items-center gap-2 px-3 py-2.5 rounded-xl border border-dashed border-[var(--coding-border)] text-[13px] text-[var(--text-soft)] font-medium active:bg-[var(--accent-soft)] transition"
+      >
+        <Plus size={15} />
+        <span>New session</span>
+      </button>
+
+      {/* 会话列表 */}
+      <div className="flex-1 overflow-y-auto px-2">
+        {sessions.map((s) => (
+          <div key={s.id} className="relative group">
+            <button
+              onClick={() => handleSelect(s.id)}
+              className={cn(
+                'w-full text-left px-3 py-3 text-[14px] rounded-xl my-0.5 transition-all flex items-center gap-2',
+                s.id === activeSessionId
+                  ? 'bg-[var(--accent-soft)] text-[var(--text)] font-medium'
+                  : 'text-[var(--text-soft)] active:bg-[var(--accent-soft)]'
+              )}
+            >
+              <span className={cn(
+                'w-2 h-2 rounded-full shrink-0',
+                s.id === activeSessionId ? 'bg-[var(--accent)]' : 'bg-transparent'
+              )} />
+              <span className="truncate">{s.title || '未命名会话'}</span>
+            </button>
+          </div>
+        ))}
+        {sessions.length === 0 && (
+          <div className="text-center text-[13px] text-[var(--text-faint)] py-10">暂无会话</div>
+        )}
+      </div>
+    </>
   );
 }
