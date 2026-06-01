@@ -173,7 +173,21 @@ lingxi-agent/
 │   │   │   ├── AskQuestionWizard.jsx # 渐进式批量问题向导（逐个展示+汇总确认+一次性提交）
 │   │   │   ├── AgentsWindow.jsx     # Cursor 风格 Sub-agent 监控面板
 │   │   │   ├── TerminalPanel.jsx   # 集成终端面板（xterm.js + PTY WebSocket，多标签页）
-│   │   │   └── CodingSettingsPage.jsx # Coding 专属设置页（独立于主界面）
+│   │   │   ├── CodingSettingsPage.jsx # Coding 专属设置页（独立于主界面）
+│   │   │   ├── CodingErrorBoundary.jsx # Coding View 专用 ErrorBoundary
+│   │   │   ├── WorkspacePanel.jsx  # 左侧工作空间面板（mini/expanded + 文件树/任务 tab）
+│   │   │   ├── AgentStatusCard.jsx # Agent 状态卡片（头像/名称/连接状态）
+│   │   │   ├── DrawerPanel.jsx     # 右侧抽屉面板（代码预览/Diff Review 多标签页）
+│   │   │   ├── AgentMessageCard.jsx # 分层消息卡片（思考/工具/正文/变更 四层）
+│   │   │   ├── DiffReviewView.jsx  # Diff 逐块审查（hunk 级 Accept/Reject）
+│   │   │   ├── PlanCard.jsx        # 可编辑任务计划（拖拽排序/新增/确认执行）
+│   │   │   ├── ModeSwitcher.jsx    # Normal/Plan/Think 模式切换器
+│   │   │   ├── PermissionSettingsPanel.jsx # 权限设置面板（trust/managed/strict）
+│   │   │   ├── RemoteAccessPanel.jsx # 远程接入配对码面板
+│   │   │   ├── MobileRemoteView.jsx # 手机 H5 远程查看/审批 UI
+│   │   │   ├── permissionConfig.js # 工具风险等级定义 + 自动审批逻辑
+│   │   │   ├── codingThemes.js    # 5 套 Coding 主题（CSS 变量体系）
+│   │   │   └── keyboardShortcuts.js # 全局快捷键定义
 │   │   ├── nexus/            # Agent 间对话（Project Nexus）
 │   │   │   ├── NexusPage.jsx        # 双栏界面（左侧对话列表 + 右侧发现/对话视图，无联系人）
 │   │   │   ├── A2AConversationView.jsx # Agent 对话观察视图
@@ -807,6 +821,38 @@ xattr -cr "/Applications/灵犀.app"
 - **思考模式开关**：`codingSlice` 新增 `codingThinkingEnabled` 状态（持久化 localStorage），CodingComposer 工具栏新增 Think 开关按钮（紫色高亮），发送消息时携带 `thinking` 参数
 - **后端思考模式支持**：`POST /api/coding/chat` 新增 `thinking` 参数，传递 `DISABLE_THINKING=1` 环境变量控制 Claude 思考链
 - **CodePreview 全高度**：移除 `h-[45%]` 限制，改为 `h-full` 占满右侧面板全部可用空间，移除无用的展开/收起按钮
+
+### Coding View Agent-First 重构（v2026-06 Phase 12）
+- **三栏布局重构**：`CodingShell` 从双栏改为三栏（左侧 `WorkspacePanel` + 中央对话 + 右侧 `DrawerPanel`），删除旧 `CodingIconBar`
+- **WorkspacePanel 左侧面板**：mini（40px 图标栏）/ expanded（240px 面板）双模式 + 文件树/任务列表 tab 切换 + AgentStatusCard Agent 状态卡片 + 快捷操作栏
+- **AgentMessageCard 消息分层**：替换原 AssistantMessage，四层结构（ThinkingLayer 可折叠思考 / ToolLayer 工具调用 / TextLayer Markdown 渲染 / ChangeSummaryLayer 文件变更汇总）
+- **DrawerPanel 右侧抽屉**：多标签页（代码预览 / Diff Review）+ 可拖拽宽度 + 最大化 + framer-motion 动画
+- **DiffReviewView 逐块审查**：统一 diff 解析（parseDiffHunks）+ 每个 hunk 独立 Accept/Reject + 进度可视化 + 批量操作
+- **PlanCard 计划模式**：AI 生成可编辑任务计划 + 步骤拖拽排序/新增/删除 + 确认后执行 + 进度条
+- **ModeSwitcher 模式切换**：Normal / Plan / Think 三模式，CodingComposer 内嵌切换器，替代独立 Think 开关
+- **权限分级系统**：`permissionConfig.js` 定义工具风险等级（low/medium/high）+ `PermissionSettingsPanel.jsx` UI（trust/managed/strict 三档 + CodingSettingsPage 集成）
+- **codingThemes 主题系统**：5 套预定义主题（warm/dark/midnight/forest/sakura）+ CSS 变量动态注入 + `codingTheme` 状态持久化
+- **keyboardShortcuts 快捷键**：21 个全局快捷键定义 + 平台适配（Mac/Win）+ 匹配工具函数
+- **CodingErrorBoundary**：Coding View 专用 ErrorBoundary（友好错误 UI + 一键重试）
+- **手机 H5 远程接入前端**：`RemoteAccessPanel.jsx` 桌面端配对码生成面板（6 位一次性码 + 5 分钟过期 + 连接状态）+ `MobileRemoteView.jsx` 移动端完整 UI（配对输入 / 审批卡片 / 实时进度 / 断连重连）
+- **代码清理**：删除 5 个废弃文件（CodeView/CodeComposer/CodeToolCard/CodeToolbar/CodingIconBar），减少死代码约 1200 行
+
+### Coding View UI/UX 深度重构（v2026-06 Phase 13）
+- **原子组件库升级**：StatusBadge（五态动画）、GlassCard（glassmorphism）、SkeletonLoader（骨架屏）、ToastNotification（非阻塞通知）、PulseRing（呼吸光晕）
+- **TaskTodoList 流式重构**：任务卡片 AnimatePresence 逐条动画入场，StatusBadge 状态图标弹性过渡，完成时 Sparkles 放大动画
+- **工具调用聚合**：连续同类型工具自动聚合（Read ×5）为折叠组，summary 头显示聚合信息 + 总耗时；避免流水账式展示
+- **CodingToolCard 颜色体系**：6 色编码（blue/amber/purple/emerald/sky/indigo），running 状态边框发光，详情面板动画展开
+- **AskQuestionWizard 升级**：问题卡片滑入动画 + 选项 whileHover/whileTap 微交互 + 彩色进度段 + 装饰性 accent 线
+- **AgentsWindow 树状化**：虚线连接器 + 并行 Agent mini 时间轴色块 + AgentStatusPill 替代文字标签
+- **PermissionBlock 风险分级**：low→内联 auto-approved；medium→amber 确认条；high→红色全卡片阻断 + 脉冲标签
+- **全局视觉升级**：glassmorphism 悬浮栏、hover 微交互（scale/bg）、骨架屏替代 loading 文字、dark mode CSS 变量兼容
+
+### Coding View 交互修复（v2026-06 Phase 14）
+- **AskQuestion 提交后 Q&A 显示**：提交答案后将问答内容追加为用户消息 + 之前 liveBlocks 合并为 assistant 消息
+- **AskQuestion 提交后 Thinking 反馈**：清空 liveBlocks + 设置 agentState 为 THINKING，确保 ThinkingIndicator 显示
+- **Permission Allow 修复**：修正 LiveBlock 组件 activeSession 引用错误，改为正确的 activeSessionId
+- **Permission 状态自动解除**：agent_state 从 AWAITING_PERMISSION → THINKING 时自动标记 permission block resolved
+- **AgentsWindow 固定到聊天上方**：Agent Tree 从消息流内移到滚动区域外固定位置，始终可见
 
 ### 纯 Go 协议转换代理（v2026-05 Phase 3）
 - **替代 LiteLLM Bridge**：`backend-desktop/proxy/` 纯 Go 实现，启动零延迟、无 Python 依赖

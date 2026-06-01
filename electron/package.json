@@ -1,6 +1,6 @@
 {
   "name": "lingxi-agent",
-  "version": "1.0.162",
+  "version": "1.0.184",
   "description": "灵犀 AI 助手",
   "main": "main.js",
   "private": true,
@@ -60,6 +60,15 @@
           "CLAUDE.md",
           "skills/**",
           ".claude/agents/**"
+        ]
+      },
+      {
+        "from": "resources/sdk-runner",
+        "to": "sdk-runner",
+        "filter": [
+          "sdk-runner.js",
+          "package.json",
+          "node_modules/**"
         ]
       }
     ],

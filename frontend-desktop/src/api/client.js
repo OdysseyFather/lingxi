@@ -60,6 +60,7 @@ export const api = {
   // coding chat (独立于通用 chat)
   sendCodingChat: (payload) => req('POST', '/api/coding/chat', payload),
   submitCodingAnswerBatch: (payload) => req('POST', '/api/coding/chat/answer-batch', payload),
+  submitCodingPermissionResponse: (payload) => req('POST', '/api/coding/chat/permission-response', payload),
 
   // coding checkpoints
   createCheckpoint: (sessionId, messageId) => req('POST', '/api/coding/checkpoint', { sessionId: String(sessionId), messageId }),

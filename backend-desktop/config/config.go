@@ -20,6 +20,10 @@ type Config struct {
 		BaseURL   string // ANTHROPIC_BASE_URL
 		ModelEnv  string // ANTHROPIC_MODEL（覆盖 settings.json）
 	}
+	SDK struct {
+		RunnerScript string // sdk-runner.js 脚本路径
+		NodeBin      string // Node.js 可执行文件路径
+	}
 	DingTalk struct {
 		ClientID     string
 		ClientSecret string
@@ -50,6 +54,11 @@ func Get() *Config {
 		override(&cfg.Claude.AuthToken, "ANTHROPIC_AUTH_TOKEN")
 		override(&cfg.Claude.BaseURL, "ANTHROPIC_BASE_URL")
 		override(&cfg.Claude.ModelEnv, "ANTHROPIC_MODEL")
+
+		cfg.SDK.RunnerScript = "../electron/resources/sdk-runner/sdk-runner.js"
+		cfg.SDK.NodeBin = "node"
+		override(&cfg.SDK.RunnerScript, "SDK_RUNNER_SCRIPT")
+		override(&cfg.SDK.NodeBin, "SDK_NODE_BIN")
 
 		cfg.DingTalk.ClientID = ""
 		cfg.DingTalk.ClientSecret = ""

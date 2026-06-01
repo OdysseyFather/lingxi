@@ -71,11 +71,12 @@ const PROVIDER_MODELS = {
   openrouter_openai: [{ group: '热门', models: ['anthropic/claude-sonnet-4', 'openai/gpt-4o', 'google/gemini-2.5-pro'] }],
 };
 
-// ─── 导航 Tab 定义（精简为三项）
+// ─── 导航 Tab 定义
 const TABS = [
-  { id: 'profiles', label: '模型与接入点', icon: Cpu },
-  { id: 'usage',    label: '用量统计',     icon: BarChart3 },
-  { id: 'remote',   label: '远程访问',     icon: Smartphone },
+  { id: 'profiles',    label: '模型与接入点', icon: Cpu },
+  { id: 'permissions', label: '权限管控',     icon: ShieldCheck },
+  { id: 'usage',       label: '用量统计',     icon: BarChart3 },
+  { id: 'remote',      label: '远程访问',     icon: Smartphone },
 ];
 
 export function CodingSettingsPage() {
@@ -109,9 +110,101 @@ export function CodingSettingsPage() {
 
       {/* 右侧内容 */}
       <div className="flex-1 overflow-y-auto scrollable">
-        {tab === 'profiles' && <CodingProfilesPanel />}
-        {tab === 'usage'    && <CodingUsagePanel />}
-        {tab === 'remote'   && <CodingRemotePanel />}
+        {tab === 'profiles'    && <CodingProfilesPanel />}
+        {tab === 'permissions' && <CodingPermissionsPanel />}
+        {tab === 'usage'       && <CodingUsagePanel />}
+        {tab === 'remote'      && <CodingRemotePanel />}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  权限管控
+// ══════════════════════════════════════════════════════════════════
+
+function CodingPermissionsPanel() {
+  const permMode = useStore((s) => s.codingPermissionMode);
+  const setPermMode = useStore((s) => s.setCodingPermissionMode);
+
+  const modes = [
+    {
+      id: 'trust',
+      title: '自动放行',
+      desc: 'Agent 自动执行所有工具调用，无需确认。适合信任的项目和快速开发。',
+      icon: Zap,
+      color: 'text-green-600',
+      bg: 'bg-green-50',
+      border: 'border-green-200',
+    },
+    {
+      id: 'managed',
+      title: '交互式确认',
+      desc: 'Agent 在执行写入/命令等操作前，需要你确认。适合敏感项目或生产环境。',
+      icon: ShieldCheck,
+      color: 'text-amber-600',
+      bg: 'bg-amber-50',
+      border: 'border-amber-200',
+    },
+  ];
+
+  return (
+    <div className="max-w-2xl mx-auto py-8 px-6">
+      <h2 className="text-[18px] font-bold text-[#333] mb-1">权限管控</h2>
+      <p className="text-[13px] text-[#999] mb-6">
+        控制 Agent 执行工具调用时是否需要你的确认。新建会话时生效。
+      </p>
+
+      <div className="space-y-3">
+        {modes.map((m) => {
+          const Icon = m.icon;
+          const active = permMode === m.id;
+          return (
+            <button
+              key={m.id}
+              onClick={() => setPermMode(m.id)}
+              className={cn(
+                'w-full flex items-start gap-4 p-5 rounded-xl border-2 text-left transition-all',
+                active ? `${m.border} ${m.bg}` : 'border-[#e8e4e0] bg-white hover:bg-[#faf8f6]',
+              )}
+            >
+              <div className={cn(
+                'w-10 h-10 rounded-lg flex items-center justify-center shrink-0',
+                active ? m.bg : 'bg-gray-50',
+              )}>
+                <Icon size={20} className={active ? m.color : 'text-gray-400'} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className={cn('text-[14px] font-medium', active ? 'text-[#333]' : 'text-[#666]')}>
+                    {m.title}
+                  </span>
+                  {active && (
+                    <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full', m.color, m.bg)}>
+                      当前模式
+                    </span>
+                  )}
+                </div>
+                <p className="text-[12px] text-[#999] leading-relaxed">{m.desc}</p>
+              </div>
+              <div className={cn(
+                'w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5',
+                active ? `${m.border} ${m.bg}` : 'border-gray-300',
+              )}>
+                {active && <div className={cn('w-2.5 h-2.5 rounded-full', m.color.replace('text-', 'bg-'))} />}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-6 p-4 rounded-xl bg-[#faf8f6] border border-[#e8e4e0]">
+        <p className="text-[12px] text-[#999] leading-relaxed">
+          <strong className="text-[#777]">注意：</strong>
+          权限模式在创建新会话时生效。已有会话的权限模式不会改变。
+          在「交互式确认」模式下，Agent 执行 Bash、Write、Edit 等写入操作时会弹出确认卡片，
+          你可以选择「Allow」放行或「Deny」拒绝。只读操作（Read、Grep、Glob）不受影响。
+        </p>
       </div>
     </div>
   );

@@ -176,10 +176,12 @@ func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 模型映射
-	if antReq.Model == "" {
-		antReq.Model = s.config.Model
+	// 强制使用配置模型：子代理可能请求其他模型名（如 claude-sonnet），
+	// 但 OpenAI 上游只支持配置的模型，必须覆盖
+	if antReq.Model != s.config.Model && antReq.Model != "" {
+		slog.Info("proxy model override", "requested", antReq.Model, "using", s.config.Model)
 	}
+	antReq.Model = s.config.Model
 
 	oaiReq, err := TransformRequest(&antReq, s.config.Provider)
 	if err != nil {

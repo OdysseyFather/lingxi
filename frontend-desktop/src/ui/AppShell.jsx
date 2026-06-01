@@ -29,7 +29,7 @@ const ScheduledTasksPage = lazyRetry(() => import('../ScheduledTasksPage'));
 const WorkflowPage = lazyRetry(() => import('../WorkflowPage'));
 const NexusPage = lazyRetry(() => import('../nexus/NexusPage'));
 const EvolutionPage = lazyRetry(() => import('../EvolutionPage'));
-const CodeViewPage = lazyRetry(() => import('../code/CodeView').then(m => ({ default: m.CodeView })));
+
 const LoginPage = lazyRetry(() => import('../LoginPage'));
 import EvolutionProgressPanel from './EvolutionProgressPanel';
 import { cn } from './cn';

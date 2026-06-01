@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,10 +13,12 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"lingxi-agent/config"
 	"lingxi-agent/db"
+	"lingxi-agent/router"
 	"lingxi-agent/usage"
 
 	"github.com/gin-gonic/gin"
@@ -120,7 +123,6 @@ func CodingChatAnswerBatch(c *gin.Context) {
 		return
 	}
 
-	// 将批量答案格式化为结构化消息
 	var sb strings.Builder
 	sb.WriteString("[批量回答]\n")
 	for qID, answer := range body.Answers {
@@ -133,16 +135,164 @@ func CodingChatAnswerBatch(c *gin.Context) {
 	go runCodingClaude(sessionID, message, nil, body.WorkingDir, true)
 }
 
-// ─── Coding Claude 独立执行 ─────────────────────────────────────────
+// CodingChatPermissionResponse 接收前端的权限响应
+// POST /api/coding/chat/permission-response
+func CodingChatPermissionResponse(c *gin.Context) {
+	var body struct {
+		SessionID    string                 `json:"sessionId"`
+		PermissionID string                 `json:"permissionId"`
+		Behavior     string                 `json:"behavior"` // "allow" | "deny"
+		UpdatedInput map[string]interface{} `json:"updatedInput,omitempty"`
+		Message      string                 `json:"message,omitempty"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.SessionID == "" || body.PermissionID == "" {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+
+	sessionID, err := strconv.ParseInt(body.SessionID, 10, 64)
+	if err != nil {
+		c.Status(http.StatusBadRequest)
+		return
+	}
+
+	ch := getPermissionChan(sessionID, body.PermissionID)
+	if ch == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "no pending permission request"})
+		return
+	}
+
+	resp := permissionResponse{
+		Behavior:     body.Behavior,
+		UpdatedInput: body.UpdatedInput,
+		Message:      body.Message,
+	}
+
+	select {
+	case ch <- resp:
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	default:
+		c.JSON(http.StatusConflict, gin.H{"error": "already responded"})
+	}
+}
+
+// ─── 权限请求/响应管理 ──────────────────────────────────────────
+
+type permissionResponse struct {
+	Behavior     string                 `json:"behavior"`
+	UpdatedInput map[string]interface{} `json:"updatedInput,omitempty"`
+	Message      string                 `json:"message,omitempty"`
+}
+
+// pendingPermissions 存储每个会话中等待用户响应的权限请求通道
+// key: "sessionID:permissionID" → channel
+var pendingPermissions sync.Map
+
+func permKey(sessionID int64, permID string) string {
+	return fmt.Sprintf("%d:%s", sessionID, permID)
+}
+
+func registerPermissionChan(sessionID int64, permID string) chan permissionResponse {
+	ch := make(chan permissionResponse, 1)
+	pendingPermissions.Store(permKey(sessionID, permID), ch)
+	return ch
+}
+
+func getPermissionChan(sessionID int64, permID string) chan permissionResponse {
+	v, ok := pendingPermissions.Load(permKey(sessionID, permID))
+	if !ok {
+		return nil
+	}
+	return v.(chan permissionResponse)
+}
+
+func removePermissionChan(sessionID int64, permID string) {
+	pendingPermissions.Delete(permKey(sessionID, permID))
+}
+
+func clearSessionPermissions(sessionID int64) {
+	pendingPermissions.Range(func(key, value any) bool {
+		k := key.(string)
+		prefix := fmt.Sprintf("%d:", sessionID)
+		if strings.HasPrefix(k, prefix) {
+			pendingPermissions.Delete(key)
+		}
+		return true
+	})
+}
+
+// ─── SDK Runner 配置结构 ─────────────────────────────────────────
+
+type sdkRunnerConfig struct {
+	Prompt         string            `json:"prompt"`
+	SessionID      string            `json:"sessionId,omitempty"`
+	SystemPrompt   string            `json:"systemPrompt,omitempty"`
+	WorkingDir     string            `json:"workingDir,omitempty"`
+	Thinking       bool              `json:"thinking"`
+	ImagePaths     []string          `json:"imagePaths,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	PermissionMode string            `json:"permissionMode,omitempty"` // "bypass" | "interactive"
+}
+
+// ─── SDK 事件结构 ────────────────────────────────────────────────
+
+type sdkEvent struct {
+	Type    string          `json:"type"`
+	Subtype string          `json:"subtype,omitempty"`
+
+	// system/init
+	Session string `json:"session_id,omitempty"`
+
+	// stream_event — 包含原始 Anthropic stream event，与 CLI 格式一致
+	Event           json.RawMessage `json:"event,omitempty"`
+	ParentToolUseID *string         `json:"parent_tool_use_id,omitempty"`
+
+	// result
+	CostUSD    float64      `json:"cost_usd,omitempty"`
+	DurationMs int64        `json:"duration_ms,omitempty"`
+	IsError    bool         `json:"is_error,omitempty"`
+	Result     string       `json:"result,omitempty"`
+	Usage      *claudeUsage `json:"usage,omitempty"`
+	Model      string       `json:"model,omitempty"`
+	NumTurns   int          `json:"num_turns,omitempty"`
+
+	// usage_update（assistant 消息级）
+	InputTokens              int64 `json:"input_tokens,omitempty"`
+	OutputTokens             int64 `json:"output_tokens,omitempty"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
+
+	// task_event
+	TaskID      string          `json:"task_id,omitempty"`
+	ToolUseID   string          `json:"tool_use_id,omitempty"`
+	Description string          `json:"description,omitempty"`
+	Status      string          `json:"status,omitempty"`
+	Summary     string          `json:"summary,omitempty"`
+	Patch       json.RawMessage `json:"patch,omitempty"`
+
+	// sdk_error
+	Error string `json:"error,omitempty"`
+
+	// permission_request（SDK canUseTool 回调）
+	ToolName  string          `json:"toolName,omitempty"`
+	Input     json.RawMessage `json:"input,omitempty"`
+	IsAskUser bool            `json:"isAskUser,omitempty"`
+	ID        string          `json:"id,omitempty"`
+}
+
+// ─── Coding Claude 独立执行（SDK 模式） ─────────────────────────────
 
 func runCodingClaude(sessionID int64, message string, imagePaths []string, workingDir string, thinkingEnabled bool) {
 	hub := globalHub
 	cfg := config.Get()
 
+	// 重置 TaskCreate 计数器，确保每次新对话从 1 开始
+	taskCreateCounter.Store(0)
+
 	// 终止同一会话中可能还在运行的旧进程
 	if prev, ok := activeChats.Load(sessionID); ok {
 		if oldCmd, _ := prev.(*exec.Cmd); oldCmd != nil && oldCmd.Process != nil {
-			slog.Info("killing previous claude process for coding session", "session", sessionID, "pid", oldCmd.Process.Pid)
+			slog.Info("killing previous sdk-runner for coding session", "session", sessionID, "pid", oldCmd.Process.Pid)
 			oldCmd.Process.Kill()
 			time.Sleep(200 * time.Millisecond)
 		}
@@ -151,59 +301,74 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 
 	claudeSessionID := getClaudeSessionID(sessionID)
 
-	args := []string{
-		"-p",
-		"--output-format", "stream-json",
-		"--verbose",
-		"--include-partial-messages",
-		"--dangerously-skip-permissions",
-	}
-
-	// Coding 专属 system prompt（根据当前 provider 决定是否启用 Task 子代理）
+	// 构建 system prompt
 	prompt := buildCodingSystemPrompt()
-
-	// 应用智能体角色设定（如果会话绑定了自定义 agent）
 	agentID := db.GetSessionAgentID(sessionID)
 	if agentID > 0 {
 		if a, err := db.GetAgent(agentID); err == nil && !a.Builtin && strings.TrimSpace(a.SystemPrompt) != "" {
 			prompt = applyAgentPersona(prompt, a.Name, a.SystemPrompt)
 		}
 	}
-
-	// 注入工作目录上下文
 	if workingDir != "" {
 		prompt += fmt.Sprintf("\n\n# 【当前工作目录】\n\n你当前正在操作的项目目录是：`%s`\n所有文件操作、终端命令、代码搜索都应该在这个目录下进行。不要去其他目录寻找文件。\n如果用户提到相对路径，请基于此目录解析。", workingDir)
 	}
 
-	if claudeSessionID != "" {
-		args = append(args, "--resume", claudeSessionID)
-		args = append(args, "--system-prompt", prompt)
-	} else {
-		args = append(args, "--system-prompt", prompt)
+	// 构建 SDK 环境变量
+	sdkEnv := buildSDKEnv(cfg)
+
+	// 读取权限模式设置
+	permMode := getCodingPermissionMode(sessionID)
+
+	// 构建 SDK runner stdin 配置
+	runnerCfg := sdkRunnerConfig{
+		Prompt:         message,
+		SystemPrompt:   prompt,
+		Thinking:       thinkingEnabled,
+		ImagePaths:     imagePaths,
+		Env:            sdkEnv,
+		PermissionMode: permMode,
 	}
-
-	claudeBin := cfg.Claude.Bin
-	cmd := exec.Command(claudeBin, args...)
-	cmd.Stdin = strings.NewReader(buildStdinMessage(message, imagePaths))
-	cmd.Env = buildClaudeEnv(cfg)
-
+	if claudeSessionID != "" {
+		runnerCfg.SessionID = claudeSessionID
+	}
 	if workingDir != "" {
-		workingDir = expandHome(workingDir)
-		if info, err := os.Stat(workingDir); err == nil && info.IsDir() {
-			cmd.Dir = workingDir
-			slog.Info("coding claude workingDir set", "dir", workingDir, "session", sessionID)
+		wd := expandHome(workingDir)
+		if info, err := os.Stat(wd); err == nil && info.IsDir() {
+			runnerCfg.WorkingDir = wd
 		}
 	}
-	if workingDir != "" {
-		cmd.Env = append(cmd.Env, "CODING_WORKING_DIR="+workingDir)
+
+	stdinJSON, _ := json.Marshal(runnerCfg)
+
+	// 启动 SDK runner
+	nodeBin := cfg.SDK.NodeBin
+	runnerScript := cfg.SDK.RunnerScript
+
+	// 确保脚本路径为绝对路径（cmd.Dir 会改变工作目录）
+	if !filepath.IsAbs(runnerScript) {
+		if abs, err := filepath.Abs(runnerScript); err == nil {
+			runnerScript = abs
+		}
 	}
-	if !thinkingEnabled {
-		cmd.Env = append(cmd.Env, "DISABLE_THINKING=1")
+
+	cmd := exec.Command(nodeBin, runnerScript)
+
+	if runnerCfg.WorkingDir != "" {
+		cmd.Dir = runnerCfg.WorkingDir
+	}
+
+	// 使用 StdinPipe 实现双向通信（权限模式下 Go 需要向 SDK runner 发送权限响应）
+	stdinPipe, err := cmd.StdinPipe()
+	if err != nil {
+		slog.Warn("sdk-runner stdin pipe error", "err", err)
+		hub.Send(sessionID, "text", jsonStr("启动失败: "+err.Error()))
+		hub.Send(sessionID, "done", "[DONE]")
+		return
 	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		slog.Warn("coding stdout pipe error", "err", err)
+		slog.Warn("sdk-runner stdout pipe error", "err", err)
 		hub.Send(sessionID, "text", jsonStr("启动失败: "+err.Error()))
 		hub.Send(sessionID, "done", "[DONE]")
 		return
@@ -211,20 +376,30 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 	stderrPipe, _ := cmd.StderrPipe()
 
 	if err := cmd.Start(); err != nil {
-		slog.Warn("coding cmd start error", "err", err)
+		slog.Warn("sdk-runner start error", "err", err)
 		hub.Send(sessionID, "text", jsonStr("启动失败: "+err.Error()))
 		hub.Send(sessionID, "done", "[DONE]")
 		return
 	}
-	slog.Info("coding claude started", "pid", cmd.Process.Pid, "session", sessionID)
+	slog.Info("sdk-runner started", "pid", cmd.Process.Pid, "session", sessionID, "permMode", permMode)
+
+	// 写入配置 JSON 作为 stdin 第一行（不关闭 pipe，保持通道开放用于权限响应）
+	if _, err := stdinPipe.Write(append(stdinJSON, '\n')); err != nil {
+		slog.Warn("sdk-runner stdin write error", "err", err)
+	}
 
 	activeChats.Store(sessionID, cmd)
-	defer activeChats.Delete(sessionID)
+	defer func() {
+		activeChats.Delete(sessionID)
+		clearSessionPermissions(sessionID)
+		stdinPipe.Close()
+	}()
 
 	go func() {
 		s := bufio.NewScanner(stderrPipe)
+		s.Buffer(make([]byte, 256*1024), 256*1024)
 		for s.Scan() {
-			slog.Info("[coding claude stderr]", "text", s.Text())
+			slog.Info("[sdk-runner stderr]", "text", s.Text())
 		}
 	}()
 
@@ -237,10 +412,8 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 		aggUsage           claudeUsage
 		aggCostUSD         float64
 		modelUsed          string
-		// Coding 专属：缓冲 ask_question 直到 message_stop
-		pendingQuestions []json.RawMessage
-		// Sub-agent 状态追踪
-		subAgents []subAgentInfo
+		pendingQuestions   []json.RawMessage
+		subAgents          []subAgentInfo
 	)
 
 	appendBlock := func(typ, name, chunk string) {
@@ -311,8 +484,9 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 		if line == "" {
 			continue
 		}
-		var ev claudeEvent
+		var ev sdkEvent
 		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			slog.Warn("sdk-runner bad JSON line", "err", err, "line", line[:min(100, len(line))])
 			continue
 		}
 
@@ -320,21 +494,19 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 		case "system":
 			if ev.Subtype == "init" && ev.Session != "" {
 				newClaudeSessionID = ev.Session
-			}
-
-		case "result":
-			if ev.CostUSD > 0 {
-				aggCostUSD = ev.CostUSD
-			}
-			if ev.Usage != nil {
-				aggUsage = *ev.Usage
+				slog.Info("sdk session init", "sdkSessionId", ev.Session, "dbSession", sessionID)
 			}
 
 		case "stream_event":
+			// SDKPartialAssistantMessage — 包含原始 Anthropic stream event
+			// 与 CLI --output-format stream-json 中的 stream_event 格式完全一致
 			var inner innerEvent
 			if err := json.Unmarshal(ev.Event, &inner); err != nil {
 				continue
 			}
+
+			// 来自子代理的消息添加前缀标识
+			isSubagent := ev.ParentToolUseID != nil && *ev.ParentToolUseID != ""
 
 			switch inner.Type {
 			case "message_start":
@@ -362,11 +534,11 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 					}
 				}
 
-		case "content_block_start":
-			if inner.ContentBlock.Type == "tool_use" {
-				toolName := inner.ContentBlock.Name
-				slog.Info("coding tool_use detected", "tool", toolName, "blockID", inner.ContentBlock.ID, "session", sessionID)
-				if !isAskUserTool(toolName) {
+			case "content_block_start":
+				if inner.ContentBlock.Type == "tool_use" {
+					toolName := inner.ContentBlock.Name
+					slog.Info("coding tool_use detected", "tool", toolName, "blockID", inner.ContentBlock.ID, "session", sessionID, "subagent", isSubagent)
+					if !isAskUserTool(toolName) {
 						payload, _ := json.Marshal(map[string]any{
 							"id":    inner.ContentBlock.ID,
 							"name":  toolName,
@@ -379,18 +551,8 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 							hub.Send(sessionID, "agent_state", `{"state":"EXECUTING"}`)
 						}
 					}
-					// Sub-agent：Task 工具开始，立即推送 subagent_start（后续 content_block_stop 时补充描述）
-					if toolName == "Task" || toolName == "task" {
-						agentID := fmt.Sprintf("sa_%s", inner.ContentBlock.ID)
-						info := subAgentInfo{
-							ID:          agentID,
-							Description: "Starting sub-agent...",
-							Status:      "working",
-						}
-						subAgents = append(subAgents, info)
-						p, _ := json.Marshal(info)
-						hub.Send(sessionID, "subagent_start", string(p))
-					}
+					// Agent 工具：不在此处创建 subagent，由 SDK 原生 task_event 处理
+				// 避免重复创建（content_block_start + task_started 双重触发）
 					b := msgBlock{
 						Type:  "tool",
 						Name:  toolName,
@@ -443,81 +605,57 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 				if len(blocks) > 0 {
 					last := &blocks[len(blocks)-1]
 					if last.Type == "text" && last.Text != "" {
-						emitTaskPlanFromText(hub, sessionID, last.Text)
-						// Coding 专属：检测 questions_batch 并缓冲
+						last.Text = emitTaskPlanFromText(hub, sessionID, last.Text)
 						if qs := extractQuestionsBatch(last.Text); len(qs) > 0 {
 							pendingQuestions = append(pendingQuestions, qs...)
 						} else {
-							// 也检测单个 ask_question（兜底兼容）
 							emitCodingInteractiveFromText(hub, sessionID, last.Text, &pendingQuestions)
 						}
-						// 文本模式兜底：检测 sub-agent 相关信息
-						detectSubAgentEvents(hub, sessionID, last.Text, &subAgents)
+						// 子代理生命周期由 SDK 原生 task_event 管理，不再从文本中检测
 					}
-					if last.Type == "tool" {
-						if isAskUserTool(last.Name) {
-							interactiveText := convertAskToolToInteractiveBlock(last.Input)
-							if interactiveText != "" {
-								last.Type = "text"
-								last.Text = interactiveText
-								last.Name = ""
-								last.Label = ""
-								last.Input = ""
-								last.Done = false
-								last.Ms = 0
-								endPayload, _ := json.Marshal(map[string]any{
-									"done": true, "name": "AskUserQuestion", "label": "提问",
-									"input": "", "ms": 0, "status": "ok", "hidden": true,
-								})
-								hub.Send(sessionID, "tool_end", string(endPayload))
-								// 缓冲到 pendingQuestions 而非立即推送
-								if qs := extractQuestionsBatch(interactiveText); len(qs) > 0 {
-									pendingQuestions = append(pendingQuestions, qs...)
-								} else {
-									hub.Send(sessionID, "text", jsonStr(interactiveText))
-								}
-								hub.Send(sessionID, "agent_state", `{"state":"WAITING_FOR_USER"}`)
-							} else {
-								blocks = blocks[:len(blocks)-1]
-								endPayload, _ := json.Marshal(map[string]any{
-									"done": true, "name": last.Name, "label": last.Label,
-									"input": "", "ms": 0, "status": "ok", "hidden": true,
-								})
-								hub.Send(sessionID, "tool_end", string(endPayload))
-							}
-						} else {
+				if last.Type == "tool" {
+					if isAskUserTool(last.Name) {
+						// AskUserQuestion 现在通过 canUseTool → permission_request
+						// 阻塞流程处理，content stream 中的工具块直接隐藏即可，
+						// 不再提取 pendingQuestions（避免重复弹出向导）。
+						blocks = blocks[:len(blocks)-1]
+						endPayload, _ := json.Marshal(map[string]any{
+							"done": true, "name": last.Name, "label": "提问",
+							"input": "", "ms": 0, "status": "ok", "hidden": true,
+						})
+						hub.Send(sessionID, "tool_end", string(endPayload))
+					} else {
 							last.Done = true
 							startedMs := last.Ms
 							elapsed := time.Now().UnixMilli() - startedMs
 							if elapsed < 0 {
 								elapsed = 0
 							}
-						fullInput := last.Input
-						summary := safeSummarizeToolInput(last.Name, fullInput)
+							fullInput := last.Input
+							summary := safeSummarizeToolInput(last.Name, fullInput)
 
-						if last.Name == "TodoWrite" {
-							emitTaskUpdate(hub, sessionID, fullInput)
-						}
-						if isFileModifyTool(last.Name) {
-							emitFileDiff(hub, sessionID, last.Name, fullInput, workingDir)
-						}
+							if isTaskTool(last.Name) {
+								emitTaskToolUpdate(hub, sessionID, last.Name, fullInput)
+							}
+							if isFileModifyTool(last.Name) {
+								emitFileDiff(hub, sessionID, last.Name, fullInput, workingDir)
+							}
+							if last.Name == "Agent" || last.Name == "Task" || last.Name == "task" {
+								// 尝试更新 SDK 原生 task 事件创建的 subagent 描述
+								updateSubAgentDescriptionOnly(fullInput, &subAgents)
+							}
 
-						// Sub-agent：Task 工具完成，更新描述并标记 done
-						if last.Name == "Task" || last.Name == "task" {
-							updateSubAgentDescription(hub, sessionID, fullInput, &subAgents)
-						}
-
-						last.Input = summary
-						last.Ms = elapsed
-						last.Status = "ok"
-						endPayload, _ := json.Marshal(map[string]any{
-							"done":      true,
-							"name":      last.Name,
-							"label":     last.Label,
-							"input":     summary,
-							"fullInput": fullInput,
-								"ms":     elapsed,
-								"status": "ok",
+							last.Input = summary
+							last.Ms = elapsed
+							last.Status = "ok"
+							endPayload, _ := json.Marshal(map[string]any{
+								"done":      true,
+								"name":      last.Name,
+								"label":     last.Label,
+								"input":     summary,
+								"fullInput": fullInput,
+								"ms":        elapsed,
+								"status":    "ok",
 							})
 							hub.Send(sessionID, "tool_end", string(endPayload))
 							hub.Send(sessionID, "agent_state", `{"state":"THINKING"}`)
@@ -526,7 +664,6 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 				}
 
 			case "message_stop":
-				// Coding 专属：在 message 结束时，将缓冲的所有问题一次性推送
 				if len(pendingQuestions) > 0 {
 					batchPayload, _ := json.Marshal(map[string]any{
 						"questions": pendingQuestions,
@@ -536,6 +673,52 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 					pendingQuestions = nil
 				}
 			}
+
+		case "task_event":
+			handleSDKTaskEvent(hub, sessionID, &ev, &subAgents)
+
+		case "usage_update":
+			if ev.InputTokens > 0 {
+				aggUsage.InputTokens = ev.InputTokens
+			}
+			if ev.OutputTokens > 0 {
+				aggUsage.OutputTokens = ev.OutputTokens
+			}
+			if ev.CacheCreationInputTokens > 0 {
+				aggUsage.CacheCreationInputTokens = ev.CacheCreationInputTokens
+			}
+			if ev.CacheReadInputTokens > 0 {
+				aggUsage.CacheReadInputTokens = ev.CacheReadInputTokens
+			}
+			if ev.Model != "" {
+				modelUsed = ev.Model
+			}
+
+		case "result":
+			if ev.CostUSD > 0 {
+				aggCostUSD = ev.CostUSD
+			}
+			if ev.Usage != nil {
+				aggUsage = *ev.Usage
+			}
+			if ev.Session != "" && newClaudeSessionID == "" {
+				newClaudeSessionID = ev.Session
+			}
+
+		case "sdk_error":
+			errMsg := "AI 引擎执行异常"
+			if ev.Error != "" {
+				errMsg += "：" + ev.Error
+			}
+			slog.Warn("sdk-runner error", "error", ev.Error, "session", sessionID)
+			hub.Send(sessionID, "text", jsonStr(errMsg))
+			appendBlock("text", "", errMsg)
+
+		case "sdk_done":
+			slog.Info("sdk-runner done signal", "session", sessionID)
+
+		case "permission_request":
+			handlePermissionRequest(hub, sessionID, &ev, stdinPipe)
 		}
 	}
 
@@ -543,12 +726,11 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 
 	if exitErr != nil && len(blocks) == 0 {
 		errMsg := "AI 引擎执行异常，请检查模型接入点配置是否正确。"
-		slog.Warn("coding claude exited with error and no output", "err", exitErr, "session", sessionID)
+		slog.Warn("sdk-runner exited with error and no output", "err", exitErr, "session", sessionID)
 		hub.Send(sessionID, "text", jsonStr(errMsg))
 		blocks = append(blocks, msgBlock{Type: "text", Text: errMsg})
 	}
 
-	// 如果还有缓冲的 questions 没推送（比如 CLI 异常退出前），兜底推送
 	if len(pendingQuestions) > 0 {
 		batchPayload, _ := json.Marshal(map[string]any{
 			"questions": pendingQuestions,
@@ -622,13 +804,381 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 		hub.Send(sessionID, "message_usage", string(evt))
 	}
 
-	// 如果本轮有文件修改操作，自动创建 Checkpoint
 	if savedMsgID > 0 && hasFileModifyInBlocks(blocks) {
 		go createAutoCheckpoint(sessionID, savedMsgID, workingDir, hub)
 	}
 
+	// 确保所有子代理状态标记为完成
+	finalizeSubAgents(hub, sessionID, &subAgents)
+
 	tryPostChatEvolution(agentID, sessionID, blocks)
 	hub.Send(sessionID, "done", "[DONE]")
+}
+
+// handleSDKTaskEvent 处理 SDK 原生的 task_started / task_progress / task_notification 事件
+func handleSDKTaskEvent(hub *Hub, sessionID int64, ev *sdkEvent, subAgents *[]subAgentInfo) {
+	slog.Info("sdk task_event", "subtype", ev.Subtype, "taskId", ev.TaskID, "desc", ev.Description, "status", ev.Status, "session", sessionID)
+
+	switch ev.Subtype {
+	case "task_started":
+		info := subAgentInfo{
+			ID:          ev.TaskID,
+			Description: ev.Description,
+			Status:      "working",
+		}
+		*subAgents = append(*subAgents, info)
+		payload, _ := json.Marshal(info)
+		hub.Send(sessionID, "subagent_start", string(payload))
+
+	case "task_progress":
+		found := false
+		for i := range *subAgents {
+			if (*subAgents)[i].ID == ev.TaskID {
+				if ev.Description != "" {
+					(*subAgents)[i].Description = ev.Description
+				}
+				payload, _ := json.Marshal((*subAgents)[i])
+				hub.Send(sessionID, "subagent_update", string(payload))
+				found = true
+				break
+			}
+		}
+		if !found {
+			slog.Info("task_progress for unknown task", "taskId", ev.TaskID)
+		}
+
+	case "task_updated":
+		var patch map[string]interface{}
+		if ev.Patch != nil {
+			json.Unmarshal(ev.Patch, &patch)
+		}
+		slog.Info("task_updated patch", "patch", patch, "taskId", ev.TaskID)
+
+		status, _ := patch["status"].(string)
+		if status == "completed" || status == "failed" || status == "killed" || status == "done" {
+			for i := range *subAgents {
+				if (*subAgents)[i].ID == ev.TaskID {
+					(*subAgents)[i].Status = "done"
+					payload, _ := json.Marshal((*subAgents)[i])
+					hub.Send(sessionID, "subagent_done", string(payload))
+					return
+				}
+			}
+		}
+
+	case "task_notification":
+		if ev.IsError {
+			slog.Warn("sub-agent error",
+				"taskId", ev.TaskID,
+				"error", ev.Error,
+				"summary", ev.Summary,
+				"status", ev.Status,
+				"session", sessionID)
+			// Emit error to frontend so user can see what went wrong
+			errMsg := ev.Error
+			if errMsg == "" {
+				errMsg = ev.Summary
+			}
+			if errMsg == "" {
+				errMsg = "Sub-agent failed (unknown error)"
+			}
+			hub.Send(sessionID, "text", jsonStr(fmt.Sprintf("\n\n> ⚠️ Sub-agent error: %s\n", errMsg)))
+		}
+		for i := range *subAgents {
+			if (*subAgents)[i].ID == ev.TaskID {
+				if ev.IsError {
+					(*subAgents)[i].Status = "error"
+					errMsg := ev.Error
+					if errMsg == "" {
+						errMsg = ev.Summary
+					}
+					(*subAgents)[i].Error = errMsg
+				} else {
+					(*subAgents)[i].Status = "done"
+				}
+				if ev.Summary != "" {
+					(*subAgents)[i].Description = ev.Summary
+				}
+				payload, _ := json.Marshal((*subAgents)[i])
+				hub.Send(sessionID, "subagent_done", string(payload))
+				return
+			}
+		}
+		slog.Info("task_notification for unknown task", "taskId", ev.TaskID)
+	}
+}
+
+// finalizeSubAgents marks all remaining "working" sub-agents as "done"
+func finalizeSubAgents(hub *Hub, sessionID int64, subAgents *[]subAgentInfo) {
+	for i := range *subAgents {
+		if (*subAgents)[i].Status == "working" {
+			(*subAgents)[i].Status = "done"
+			payload, _ := json.Marshal((*subAgents)[i])
+			hub.Send(sessionID, "subagent_done", string(payload))
+			slog.Info("finalized stale subagent", "id", (*subAgents)[i].ID, "session", sessionID)
+		}
+	}
+}
+
+// handlePermissionRequest 处理 SDK runner 发来的权限请求
+// 推送 permission_request WS 事件到前端，等待用户响应后通过 stdinPipe 回传给 SDK runner
+func handlePermissionRequest(hub *Hub, sessionID int64, ev *sdkEvent, stdinPipe io.WriteCloser) {
+	permID := ev.ID
+	if permID == "" {
+		slog.Warn("permission_request missing id", "session", sessionID)
+		return
+	}
+
+	slog.Info("permission_request received", "session", sessionID, "tool", ev.ToolName, "permId", permID, "isAskUser", ev.IsAskUser)
+
+	// AskUserQuestion 走专门的问答阻塞流程
+	if ev.IsAskUser {
+		handleAskUserPermission(hub, sessionID, permID, ev, stdinPipe)
+		return
+	}
+
+	// 推送到前端
+	wsPayload, _ := json.Marshal(map[string]any{
+		"id":        permID,
+		"tool_name": ev.ToolName,
+		"input":     ev.Input,
+		"isAskUser": ev.IsAskUser,
+	})
+	hub.Send(sessionID, "permission_request", string(wsPayload))
+	hub.Send(sessionID, "agent_state", `{"state":"AWAITING_PERMISSION"}`)
+
+	// 注册等待通道
+	ch := registerPermissionChan(sessionID, permID)
+	defer removePermissionChan(sessionID, permID)
+
+	// 等待用户响应（最长 5 分钟）
+	select {
+	case resp := <-ch:
+		// 将响应写回 SDK runner stdin
+		stdinResp := map[string]any{
+			"type":     "permission_response",
+			"id":       permID,
+			"behavior": resp.Behavior,
+		}
+		if resp.UpdatedInput != nil {
+			stdinResp["updatedInput"] = resp.UpdatedInput
+		}
+		if resp.Message != "" {
+			stdinResp["message"] = resp.Message
+		}
+		respJSON, _ := json.Marshal(stdinResp)
+		if _, err := stdinPipe.Write(append(respJSON, '\n')); err != nil {
+			slog.Warn("failed to write permission response to stdin", "err", err, "session", sessionID)
+		}
+		slog.Info("permission response sent", "session", sessionID, "permId", permID, "behavior", resp.Behavior)
+		hub.Send(sessionID, "agent_state", `{"state":"THINKING"}`)
+
+	case <-time.After(5 * time.Minute):
+		// 超时自动拒绝
+		slog.Warn("permission request timed out", "session", sessionID, "permId", permID)
+		denyResp, _ := json.Marshal(map[string]any{
+			"type":     "permission_response",
+			"id":       permID,
+			"behavior": "deny",
+			"message":  "Permission request timed out (5 min)",
+		})
+		stdinPipe.Write(append(denyResp, '\n'))
+		hub.Send(sessionID, "agent_state", `{"state":"THINKING"}`)
+	}
+}
+
+// handleAskUserPermission 处理 AskUserQuestion 工具的阻塞流程。
+// 将 SDK 工具输入转换为前端 ask_questions_batch 格式，
+// 阻塞等待用户回答后再 allow SDK runner 继续。
+//
+// Claude Agent SDK 的 AskUserQuestion updatedInput 格式：
+//
+//	{
+//	  "questions": [ ...原始 questions 数组... ],
+//	  "answers": { "问题全文": "选中的 label" }
+//	}
+func handleAskUserPermission(hub *Hub, sessionID int64, permID string, ev *sdkEvent, stdinPipe io.WriteCloser) {
+	// 解析 AskUserQuestion 的 input → 提取 questions 数组
+	inputJSON, _ := json.Marshal(ev.Input)
+	var askInput struct {
+		Questions []json.RawMessage `json:"questions"`
+	}
+	json.Unmarshal(inputJSON, &askInput)
+
+	// 转换为前端 ask_questions_batch 格式
+	questions := askInput.Questions
+	if len(questions) == 0 {
+		questions = []json.RawMessage{inputJSON}
+	}
+
+	batchPayload, _ := json.Marshal(map[string]any{
+		"questions":     questions,
+		"permission_id": permID,
+	})
+	hub.Send(sessionID, "ask_questions_batch", string(batchPayload))
+	hub.Send(sessionID, "agent_state", `{"state":"WAITING_FOR_BATCH_ANSWER"}`)
+
+	slog.Info("ask_user blocking: waiting for user answer", "session", sessionID, "permId", permID, "numQuestions", len(questions))
+
+	ch := registerPermissionChan(sessionID, permID)
+	defer removePermissionChan(sessionID, permID)
+
+	select {
+	case resp := <-ch:
+		// 构建 SDK 期望的 updatedInput：{ questions, answers }
+		// 前端传来的 updatedInput.answers 可能用 q_0/q_1 作为 key，
+		// 需要转换为 SDK 要求的 "问题全文" 作为 key。
+		updatedInput := map[string]any{
+			"questions": questions,
+		}
+		if resp.UpdatedInput != nil {
+			if ans, ok := resp.UpdatedInput["answers"]; ok {
+				// 尝试把 q_N key 映射回问题全文
+				sdkAnswers := remapAnswersToQuestionText(questions, ans)
+				updatedInput["answers"] = sdkAnswers
+			}
+			if r, ok := resp.UpdatedInput["response"]; ok {
+				updatedInput["response"] = r
+			}
+		}
+
+		stdinResp := map[string]any{
+			"type":         "permission_response",
+			"id":           permID,
+			"behavior":     "allow",
+			"updatedInput": updatedInput,
+		}
+		respJSON, _ := json.Marshal(stdinResp)
+		if _, err := stdinPipe.Write(append(respJSON, '\n')); err != nil {
+			slog.Warn("failed to write ask_user response to stdin", "err", err, "session", sessionID)
+		}
+		slog.Info("ask_user answer forwarded to SDK", "session", sessionID, "permId", permID)
+		hub.Send(sessionID, "agent_state", `{"state":"THINKING"}`)
+
+	case <-time.After(10 * time.Minute):
+		slog.Warn("ask_user timed out", "session", sessionID, "permId", permID)
+		denyResp, _ := json.Marshal(map[string]any{
+			"type":     "permission_response",
+			"id":       permID,
+			"behavior": "deny",
+			"message":  "User did not respond within 10 minutes",
+		})
+		stdinPipe.Write(append(denyResp, '\n'))
+		hub.Send(sessionID, "agent_state", `{"state":"THINKING"}`)
+	}
+}
+
+// remapAnswersToQuestionText 将前端 {q_0: "label", q_1: "label"} 格式的答案
+// 转换为 SDK 要求的 {"问题全文": "label"} 格式。
+// 如果 key 已经是问题全文（非 q_N 格式），直接保留。
+func remapAnswersToQuestionText(rawQuestions []json.RawMessage, answersRaw any) map[string]any {
+	answersMap, ok := answersRaw.(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	// 解析每个 question 的 "question" 字段，建立 q_N → questionText 映射
+	qTextByIdx := make(map[string]string) // "q_0" → "How should I..."
+	for i, raw := range rawQuestions {
+		var q struct {
+			Question string `json:"question"`
+		}
+		if json.Unmarshal(raw, &q) == nil && q.Question != "" {
+			qTextByIdx[fmt.Sprintf("q_%d", i)] = q.Question
+		}
+	}
+
+	result := make(map[string]any, len(answersMap))
+	for key, val := range answersMap {
+		if qText, exists := qTextByIdx[key]; exists {
+			result[qText] = val
+		} else {
+			result[key] = val
+		}
+	}
+	return result
+}
+
+// getCodingPermissionMode 读取当前会话的权限模式
+// sessions.permission_mode: "trust"=完全放行, "managed"=权限管控
+func getCodingPermissionMode(sessionID int64) string {
+	var mode string
+	err := db.DB.QueryRow(`SELECT COALESCE(permission_mode, '') FROM sessions WHERE id=?`, sessionID).Scan(&mode)
+	if err == nil && mode == "managed" {
+		return "interactive"
+	}
+	return "bypass"
+}
+
+// buildSDKEnv 构建 SDK runner 的环境变量（key→value map，由 sdk-runner.js 合并到 process.env）
+func buildSDKEnv(cfg *config.Config) map[string]string {
+	env := make(map[string]string)
+
+	_, rtName, rtModel, rtBaseURL, rtToken, rtProtocol, rtTransformer, _, _ := activeProfileSnapshot()
+	rtID, _, _, _ := activeRuntimeSnapshot()
+
+	authToken := rtToken
+	baseURL := rtBaseURL
+
+	if authToken == "" {
+		authToken = cfg.Claude.AuthToken
+	}
+	if baseURL == "" {
+		baseURL = cfg.Claude.BaseURL
+	}
+
+	if rtProtocol == "openai" {
+		if rtToken == "" || rtBaseURL == "" || rtModel == "" {
+			slog.Info("openai profile incomplete for SDK", "id", rtID)
+			baseURL = "http://127.0.0.1:1"
+			authToken = "bridge-profile-incomplete"
+		} else {
+			bridgeURL, err := router.EnsureRunning(router.Profile{
+				ID:          rtID,
+				Name:        rtName,
+				BaseURL:     rtBaseURL,
+				Model:       rtModel,
+				Token:       rtToken,
+				Transformer: rtTransformer,
+			})
+			if err != nil {
+				slog.Warn("bridge EnsureRunning error for SDK", "err", err)
+				baseURL = "http://127.0.0.1:1"
+				authToken = "bridge-unavailable"
+			} else {
+				baseURL = bridgeURL
+				authToken = "bridge-internal"
+			}
+		}
+	} else {
+		router.Stop()
+	}
+
+	// SDK 使用 ANTHROPIC_API_KEY 而非 ANTHROPIC_AUTH_TOKEN
+	if authToken != "" {
+		env["ANTHROPIC_API_KEY"] = authToken
+	}
+	if baseURL != "" {
+		env["ANTHROPIC_BASE_URL"] = baseURL
+	}
+	if rtModel != "" {
+		env["ANTHROPIC_MODEL"] = rtModel
+	}
+	env["CLAUDE_CODE_DISABLE_AUTOUPDATER"] = "1"
+	env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+
+	maskedKey := authToken
+	if len(maskedKey) > 10 {
+		maskedKey = maskedKey[:5] + "..." + maskedKey[len(maskedKey)-3:]
+	}
+	slog.Info("buildSDKEnv result",
+		"protocol", rtProtocol,
+		"model", rtModel,
+		"baseURL", baseURL,
+		"authToken", maskedKey,
+	)
+
+	return env
 }
 
 func hasFileModifyInBlocks(blocks []msgBlock) bool {
@@ -641,10 +1191,8 @@ func hasFileModifyInBlocks(blocks []msgBlock) bool {
 }
 
 func createAutoCheckpoint(sessionID, messageID int64, workingDir string, hub *Hub) {
-	// 从 blocks 中提取被修改的文件路径（简化：只记录 workingDir 下最近 git 变更）
 	var files []db.FileSnapshot
 	if workingDir != "" {
-		// 尝试读取 git 跟踪的变更文件
 		changedPaths := getGitChangedFiles(workingDir)
 		for _, p := range changedPaths {
 			content, err := os.ReadFile(p)
@@ -698,14 +1246,13 @@ func getGitChangedFiles(dir string) []string {
 
 // ─── Coding 专属辅助函数 ────────────────────────────────────────────
 
-// subAgentInfo 追踪 sub-agent 的生命周期
 type subAgentInfo struct {
 	ID          string `json:"id"`
 	Description string `json:"description"`
-	Status      string `json:"status"` // working / done / error
+	Status      string `json:"status"`
+	Error       string `json:"error,omitempty"`
 }
 
-// extractQuestionsBatch 从文本中提取 questions_batch JSON 块
 func extractQuestionsBatch(text string) []json.RawMessage {
 	type questionsBatch struct {
 		Type      string            `json:"type"`
@@ -723,7 +1270,6 @@ func extractQuestionsBatch(text string) []json.RawMessage {
 		return batch.Questions
 	}
 
-	// 先匹配 ```json ... ``` 包裹
 	re := regexp.MustCompile("(?s)```json\\s*\n(.*?)\n```")
 	matches := re.FindAllStringSubmatch(text, -1)
 	for _, m := range matches {
@@ -734,7 +1280,6 @@ func extractQuestionsBatch(text string) []json.RawMessage {
 		}
 	}
 
-	// 兜底：扫描裸 JSON
 	for i := 0; i < len(text); i++ {
 		if text[i] != '{' {
 			continue
@@ -761,8 +1306,6 @@ func extractQuestionsBatch(text string) []json.RawMessage {
 	return nil
 }
 
-// emitCodingInteractiveFromText 检测单个 choice/input JSON（兜底兼容）
-// 和 emitInteractiveFromText 类似，但将检测到的问题缓冲而非立即推送
 func emitCodingInteractiveFromText(hub *Hub, sessionID int64, text string, pendingQuestions *[]json.RawMessage) {
 	type genericJSON struct {
 		Type string `json:"type"`
@@ -780,7 +1323,6 @@ func emitCodingInteractiveFromText(hub *Hub, sessionID int64, text string, pendi
 		return true
 	}
 
-	// 先匹配 ```json ... ```
 	re := regexp.MustCompile("(?s)```json\\s*\n(.*?)\n```")
 	matches := re.FindAllStringSubmatch(text, -1)
 	for _, m := range matches {
@@ -789,7 +1331,6 @@ func emitCodingInteractiveFromText(hub *Hub, sessionID int64, text string, pendi
 		}
 	}
 
-	// 裸 JSON 扫描
 	for i := 0; i < len(text); i++ {
 		if text[i] != '{' {
 			continue
@@ -811,7 +1352,32 @@ func emitCodingInteractiveFromText(hub *Hub, sessionID int64, text string, pendi
 	}
 }
 
-// updateSubAgentDescription 从 Task 工具的 input JSON 中提取描述，更新最近的 working 子代理并标记为 done
+// updateSubAgentDescriptionOnly 只更新描述，不改变状态（由 SDK task_event 管理生命周期）
+func updateSubAgentDescriptionOnly(rawInput string, agents *[]subAgentInfo) {
+	type taskInput struct {
+		Description string `json:"description"`
+		Prompt      string `json:"prompt"`
+	}
+	var ti taskInput
+	if err := json.Unmarshal([]byte(rawInput), &ti); err == nil {
+		desc := ti.Description
+		if desc == "" {
+			desc = ti.Prompt
+			if len(desc) > 100 {
+				desc = desc[:100] + "..."
+			}
+		}
+		if desc != "" {
+			for i := len(*agents) - 1; i >= 0; i-- {
+				if (*agents)[i].Status == "working" {
+					(*agents)[i].Description = desc
+					break
+				}
+			}
+		}
+	}
+}
+
 func updateSubAgentDescription(hub *Hub, sessionID int64, rawInput string, agents *[]subAgentInfo) {
 	type taskInput struct {
 		Description string `json:"description"`
@@ -836,7 +1402,6 @@ func updateSubAgentDescription(hub *Hub, sessionID int64, rawInput string, agent
 		}
 	}
 
-	// 标记最近一个 working 子代理为 done
 	for i := len(*agents) - 1; i >= 0; i-- {
 		if (*agents)[i].Status == "working" {
 			(*agents)[i].Status = "done"
@@ -847,15 +1412,12 @@ func updateSubAgentDescription(hub *Hub, sessionID int64, rawInput string, agent
 	}
 }
 
-// detectSubAgentEvents 检测 Claude Code 输出中的 sub-agent 创建/完成信号（文本模式兜底）
 func detectSubAgentEvents(hub *Hub, sessionID int64, text string, agents *[]subAgentInfo) {
-	// 检测 "Task tool" 或 sub-agent 创建模式
-	// Claude Code 使用 Task tool 创建子代理时，输出特定格式
 	taskRe := regexp.MustCompile(`(?i)(?:creating|launching|starting)\s+(?:sub-?agent|task)\s*(?::|：)\s*(.+?)(?:\n|$)`)
 	if matches := taskRe.FindStringSubmatch(text); len(matches) >= 2 {
-		agentID := fmt.Sprintf("sa_%d", time.Now().UnixMilli())
+		saID := fmt.Sprintf("sa_%d", time.Now().UnixMilli())
 		info := subAgentInfo{
-			ID:          agentID,
+			ID:          saID,
 			Description: strings.TrimSpace(matches[1]),
 			Status:      "working",
 		}
@@ -864,7 +1426,6 @@ func detectSubAgentEvents(hub *Hub, sessionID int64, text string, agents *[]subA
 		hub.Send(sessionID, "subagent_start", string(payload))
 	}
 
-	// 检测 sub-agent 完成
 	doneRe := regexp.MustCompile(`(?i)(?:sub-?agent|task)\s+(?:completed|finished|done)`)
 	if doneRe.MatchString(text) && len(*agents) > 0 {
 		last := &(*agents)[len(*agents)-1]
@@ -874,4 +1435,11 @@ func detectSubAgentEvents(hub *Hub, sessionID int64, text string, agents *[]subA
 			hub.Send(sessionID, "subagent_done", string(payload))
 		}
 	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

@@ -25,7 +25,7 @@ function detectLang(filePath) {
 
 export function CodePreview({
   filePath, content, loading, onClose, onInsertToChat, onContentChange,
-  openFiles = [], activeFile, onSelectFile, onCloseFile
+  openFiles = [], activeFile, onSelectFile, onCloseFile, embedded
 }) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);

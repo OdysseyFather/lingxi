@@ -17,6 +17,8 @@ electron/resources/node-bin-win/
 electron/resources/ccr/
 electron/resources/bridge/node_modules/
 electron/resources/bridge/package-lock.json
+electron/resources/smart-agent
+electron/resources/sdk-runner/node_modules/
 # whisper.cpp 大模型文件（超出 GitHub 100MB 限制）
 electron/resources/whisper/ggml-base.bin
 electron/resources/whisper/whisper-cli

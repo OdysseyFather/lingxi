@@ -15,6 +15,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"lingxi-agent/config"
@@ -1918,9 +1919,9 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 			case "content_block_stop":
 				if len(blocks) > 0 {
 					last := &blocks[len(blocks)-1]
-					if last.Type == "text" && last.Text != "" {
-						emitTaskPlanFromText(hub, sessionID, last.Text)
-						emitInteractiveFromText(hub, sessionID, last.Text)
+				if last.Type == "text" && last.Text != "" {
+					last.Text = emitTaskPlanFromText(hub, sessionID, last.Text)
+					emitInteractiveFromText(hub, sessionID, last.Text)
 					}
 					if last.Type == "tool" {
 						// 拦截 AskUserQuestion 类工具：转为前端可渲染的交互式文本块
@@ -1972,9 +1973,9 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 						fullInput := last.Input
 						summary := safeSummarizeToolInput(last.Name, fullInput)
 
-						// TodoWrite 工具：解析任务列表并推送 task_update 事件
-						if last.Name == "TodoWrite" {
-							emitTaskUpdate(hub, sessionID, fullInput)
+						// 任务管理工具：解析任务列表并推送 task_update 事件
+						if isTaskTool(last.Name) {
+							emitTaskToolUpdate(hub, sessionID, last.Name, fullInput)
 						}
 
 						// 文件修改类工具：推送实时 diff 预览
@@ -2096,8 +2097,9 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 	hub.Send(sessionID, "done", "[DONE]")
 }
 
-// emitTaskPlanFromText 检查文本中是否包含 task_plan JSON 块，如果有则推送 task_update 事件
-func emitTaskPlanFromText(hub *Hub, sessionID int64, text string) {
+// emitTaskPlanFromText 检查文本中是否包含 task_plan JSON 块，如果有则推送
+// task_update 事件并返回剥离 task_plan JSON 后的文本。
+func emitTaskPlanFromText(hub *Hub, sessionID int64, text string) string {
 	type taskItem struct {
 		ID      string `json:"id"`
 		Content string `json:"content"`
@@ -2108,7 +2110,7 @@ func emitTaskPlanFromText(hub *Hub, sessionID int64, text string) {
 		Tasks []taskItem `json:"tasks"`
 	}
 
-	tryEmit := func(raw string) bool {
+	tryParse := func(raw string) bool {
 		var obj taskPlan
 		if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &obj); err != nil {
 			return false
@@ -2124,13 +2126,16 @@ func emitTaskPlanFromText(hub *Hub, sessionID int64, text string) {
 		return true
 	}
 
+	cleaned := text
+
 	// 1) 匹配 ```json ... ``` 包裹的 JSON
 	re := regexp.MustCompile("(?s)```json\\s*\n(.*?)\n```")
 	matches := re.FindAllStringSubmatch(text, -1)
 	found := false
 	for _, m := range matches {
-		if len(m) >= 2 && tryEmit(m[1]) {
+		if len(m) >= 2 && tryParse(m[1]) {
 			found = true
+			cleaned = strings.Replace(cleaned, m[0], "", 1)
 		}
 	}
 
@@ -2149,7 +2154,9 @@ func emitTaskPlanFromText(hub *Hub, sessionID int64, text string) {
 					if depth == 0 {
 						candidate := text[i : j+1]
 						if strings.Contains(candidate, `"task_plan"`) {
-							tryEmit(candidate)
+							if tryParse(candidate) {
+								cleaned = strings.Replace(cleaned, candidate, "", 1)
+							}
 						}
 						i = j
 						break
@@ -2158,6 +2165,8 @@ func emitTaskPlanFromText(hub *Hub, sessionID int64, text string) {
 			}
 		}
 	}
+
+	return strings.TrimSpace(cleaned)
 }
 
 // emitTaskUpdate 解析 TodoWrite 工具的输入并推送 task_update 事件到前端
@@ -2184,6 +2193,92 @@ func emitTaskUpdate(hub *Hub, sessionID int64, rawInput string) {
 		"todos": parsed.Todos,
 		"title": "Tasks",
 		"merge": merge,
+	})
+	hub.Send(sessionID, "task_update", string(payload))
+}
+
+// isTaskTool 判断工具是否为任务管理类工具（TodoWrite 及 SDK 原生 TaskCreate/TaskUpdate）
+func isTaskTool(name string) bool {
+	switch name {
+	case "TodoWrite", "todo_write",
+		"TaskCreate", "task_create",
+		"TaskUpdate", "task_update":
+		return true
+	}
+	return false
+}
+
+// emitTaskToolUpdate 统一处理 TodoWrite 和 TaskCreate/TaskUpdate 工具的 task_update 推送。
+// TodoWrite 格式: {"todos":[...], "merge": bool}
+// TaskCreate 格式: {"activeForm":"...", "description":"...", "subject":"..."} 或 {"status":"...", "taskId":"..."}
+func emitTaskToolUpdate(hub *Hub, sessionID int64, toolName string, rawInput string) {
+	switch toolName {
+	case "TodoWrite", "todo_write":
+		emitTaskUpdate(hub, sessionID, rawInput)
+	case "TaskCreate", "task_create":
+		emitTaskCreateAsUpdate(hub, sessionID, rawInput)
+	case "TaskUpdate", "task_update":
+		emitTaskStatusUpdate(hub, sessionID, rawInput)
+	}
+}
+
+// taskCreateCounter 会话级递增计数器，确保 TaskCreate 生成的 ID
+// 与 task_plan / TaskUpdate 中 AI 使用的序号一致（"1","2","3"...）。
+var taskCreateCounter atomic.Int64
+
+// emitTaskCreateAsUpdate 将 TaskCreate 输入转换为 task_update 格式推送
+func emitTaskCreateAsUpdate(hub *Hub, sessionID int64, rawInput string) {
+	var parsed struct {
+		ActiveForm  string `json:"activeForm"`
+		Description string `json:"description"`
+		Subject     string `json:"subject"`
+	}
+	if err := json.Unmarshal([]byte(rawInput), &parsed); err != nil {
+		return
+	}
+	content := parsed.Subject
+	if content == "" {
+		content = parsed.ActiveForm
+	}
+	if content == "" {
+		content = parsed.Description
+	}
+	if content == "" {
+		return
+	}
+	taskID := fmt.Sprintf("%d", taskCreateCounter.Add(1))
+	payload, _ := json.Marshal(map[string]any{
+		"todos": []map[string]any{
+			{"id": taskID, "content": content, "status": "pending"},
+		},
+		"title": "Tasks",
+		"merge": true,
+	})
+	hub.Send(sessionID, "task_update", string(payload))
+}
+
+// emitTaskStatusUpdate 将 TaskUpdate 输入转换为 task_update 格式推送
+func emitTaskStatusUpdate(hub *Hub, sessionID int64, rawInput string) {
+	var parsed struct {
+		TaskID string `json:"taskId"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(rawInput), &parsed); err != nil {
+		return
+	}
+	if parsed.TaskID == "" {
+		return
+	}
+	status := parsed.Status
+	if status == "" {
+		status = "in_progress"
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"todos": []map[string]any{
+			{"id": parsed.TaskID, "status": status},
+		},
+		"title": "Tasks",
+		"merge": true,
 	})
 	hub.Send(sessionID, "task_update", string(payload))
 }

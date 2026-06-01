@@ -154,6 +154,25 @@ function getWhisperModel() {
   return '';
 }
 
+// ─── SDK Runner 路径 ─────────────────────────────────────────
+function getSDKRunnerEnv() {
+  const resourcesDir = app.isPackaged
+    ? process.resourcesPath
+    : path.join(__dirname, 'resources');
+  const isWin = process.platform === 'win32';
+  const nodeExt = isWin ? 'node.exe' : 'node';
+  const nodeBin = path.join(resourcesDir, 'node-bin', nodeExt);
+  const runnerScript = path.join(resourcesDir, 'sdk-runner', 'sdk-runner.js');
+  const env = {};
+  if (fs.existsSync(runnerScript)) {
+    env.SDK_RUNNER_SCRIPT = runnerScript;
+  }
+  if (fs.existsSync(nodeBin)) {
+    env.SDK_NODE_BIN = nodeBin;
+  }
+  return env;
+}
+
 // ─── 初始化 claude-code 隔离配置 ────────────────────────────────
 function initClaudeConfig() {
   const appHome = getAppHome();
@@ -403,6 +422,7 @@ function startBackend() {
     UPLOADS_PATH: uploadsPath,
     WHISPER_BIN: getWhisperBin(),
     WHISPER_MODEL: getWhisperModel(),
+    ...getSDKRunnerEnv(),
     ...authEnv,
   };
   // HOME 隔离：macOS/Linux 用 HOME，Windows 用 USERPROFILE + APPDATA

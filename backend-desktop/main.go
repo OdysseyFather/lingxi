@@ -344,6 +344,7 @@ func main() {
 	api.GET("/coding/branch", handler.GetGitBranch)
 	api.POST("/coding/chat", handler.CodingChat)
 	api.POST("/coding/chat/answer-batch", handler.CodingChatAnswerBatch)
+	api.POST("/coding/chat/permission-response", handler.CodingChatPermissionResponse)
 	api.POST("/coding/checkpoint", handler.CreateCheckpoint)
 	api.POST("/coding/rollback/:id", handler.RollbackCheckpoint)
 	api.GET("/coding/checkpoints/:sessionId", handler.ListCheckpoints)

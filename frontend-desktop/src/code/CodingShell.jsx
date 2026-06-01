@@ -3,15 +3,15 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeftRight, Plus, FolderOpen, Search, Menu, Terminal, Settings, X } from 'lucide-react';
 import { cn } from '../ui/cn';
 import { useStore, initStore } from '../state/useStore';
-import { CodingIconBar } from './CodingIconBar';
 import { CodingTabBar } from './CodingTabBar';
 import { BottomStatusBar } from './BottomStatusBar';
 import { CodingChatView } from './CodingChatView';
-import { FileSidebar } from './FileSidebar';
+import { WorkspacePanel } from './WorkspacePanel';
 import { WorkspaceChanges } from './WorkspaceChanges';
 import { CodingSettingsPage } from './CodingSettingsPage';
-import { CodePreview } from './CodePreview';
+import { DrawerPanel } from './DrawerPanel';
 import { TerminalPanel } from './TerminalPanel';
+import { CodingErrorBoundary } from './CodingErrorBoundary';
 import { ToastStack } from '../ui/primitives';
 import { api } from '../api/client';
 
@@ -28,10 +28,11 @@ function PageFallback() {
 export function CodingShell() {
   const codingView = useStore((s) => s.codingView);
   const codingChangesOpen = useStore((s) => s.codingChangesOpen);
-  const codingFileTreeOpen = useStore((s) => s.codingFileTreeOpen);
   const toggleCodingChanges = useStore((s) => s.toggleCodingChanges);
   const codingTerminalOpen = useStore((s) => s.codingTerminalOpen);
   const toggleCodingTerminal = useStore((s) => s.toggleCodingTerminal);
+  const codingActiveDiff = useStore((s) => s.codingActiveDiff);
+  const clearCodingActiveDiff = useStore((s) => s.clearCodingActiveDiff);
   const notifications = useStore((s) => s.notifications);
   const isLoggedIn = useStore((s) => s.isLoggedIn);
   const authChecked = useStore((s) => s.authChecked);
@@ -47,8 +48,6 @@ export function CodingShell() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [openFiles, setOpenFiles] = useState([]);
-  const [previewWidth, setPreviewWidth] = useState(480);
-  const resizingRef = useRef(false);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -117,24 +116,6 @@ export function CodingShell() {
     });
   }, [previewFile, handleFileSelect]);
 
-  const handleResizeStart = useCallback((e) => {
-    e.preventDefault();
-    resizingRef.current = true;
-    const startX = e.clientX;
-    const startWidth = previewWidth;
-    const handleMove = (moveE) => {
-      if (!resizingRef.current) return;
-      const diff = startX - moveE.clientX;
-      setPreviewWidth(Math.max(280, Math.min(800, startWidth + diff)));
-    };
-    const handleUp = () => {
-      resizingRef.current = false;
-      document.removeEventListener('mousemove', handleMove);
-      document.removeEventListener('mouseup', handleUp);
-    };
-    document.addEventListener('mousemove', handleMove);
-    document.addEventListener('mouseup', handleUp);
-  }, [previewWidth]);
 
   useEffect(() => {
     initStore();
@@ -175,6 +156,7 @@ export function CodingShell() {
   }
 
   return (
+    <CodingErrorBoundary title="Coding View 发生错误">
     <div className="h-screen flex flex-col bg-[var(--bg)]">
       {/* 移动端顶部栏 */}
       {isMobile && (
@@ -190,35 +172,107 @@ export function CodingShell() {
       {/* 顶部 tab 栏（移动端隐藏） */}
       {!isMobile && <CodingTabBar />}
 
-      {/* 中间主体 */}
-      <div className="flex-1 flex min-h-0 relative">
-        {/* 左侧图标栏（移动端隐藏） */}
-        {!isMobile && <CodingIconBar />}
-
-        {/* 文件树侧边栏 */}
-        {!isMobile && codingFileTreeOpen && projectPath && codingView === 'chat' && (
-          <FileSidebar
+      {/* 三栏主体 */}
+      <div className="flex-1 flex min-h-0">
+        {/* 左栏：WorkspacePanel */}
+        {!isMobile && (
+          <WorkspacePanel
             projectPath={projectPath}
             onFileSelect={handleFileSelect}
+            onChangeProject={handleChangeProject}
           />
         )}
 
-        {/* 左侧 Workspace Changes 抽屉（覆盖式面板） */}
+        {/* 中栏：聊天/设置区域 + 终端 */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="flex-1 flex flex-col min-h-0">
+            <Suspense fallback={<PageFallback />}>
+              <AnimatePresence mode="wait">
+                {codingView === 'chat' && (
+                  <motion.div
+                    key="coding-chat"
+                    className="flex-1 flex flex-col min-h-0"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <CodingErrorBoundary title="对话视图发生错误">
+                      <CodingChatView projectPath={projectPath} onChangeProject={handleChangeProject} />
+                    </CodingErrorBoundary>
+                  </motion.div>
+                )}
+                {codingView === 'settings' && (
+                  <motion.div
+                    key="coding-settings"
+                    className="flex-1 flex flex-col min-h-0"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <CodingSettingsPage />
+                  </motion.div>
+                )}
+                {codingView === 'scheduled' && (
+                  <motion.div
+                    key="coding-scheduled"
+                    className="flex-1 overflow-auto scrollable bg-[var(--bg)] p-4"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                  >
+                    <ScheduledTasksPage />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </Suspense>
+          </div>
+
+          {/* 底部终端面板 */}
+          {codingTerminalOpen && !isMobile && (
+            <TerminalPanel
+              projectPath={projectPath}
+              onClose={toggleCodingTerminal}
+            />
+          )}
+        </div>
+
+        {/* 右栏：Drawer Panel（代码预览 + Diff 审查） */}
+        <AnimatePresence>
+          {(previewFile || codingActiveDiff) && codingView === 'chat' && !isMobile && (
+            <DrawerPanel
+              key="drawer-panel"
+              activeFile={previewFile}
+              activeDiff={codingActiveDiff}
+              fileContent={previewContent}
+              fileLoading={previewLoading}
+              openFiles={openFiles}
+              onFileSelect={handleFileSelect}
+              onCloseFile={handleCloseFile}
+              onContentChange={(newContent) => setPreviewContent(newContent)}
+              onClose={() => { setPreviewFile(null); setOpenFiles([]); clearCodingActiveDiff(); }}
+            />
+          )}
+        </AnimatePresence>
+
+        {/* Workspace Changes 抽屉（覆盖式） */}
         <AnimatePresence>
           {!isMobile && codingChangesOpen && (
             <>
               <motion.div
-                className="absolute inset-0 bg-black/10 z-30"
+                className="fixed inset-0 bg-black/10 z-30"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 onClick={toggleCodingChanges}
               />
               <motion.div
-                className="absolute left-10 top-0 bottom-0 z-40 w-[320px]"
-                initial={{ x: -320 }}
+                className="fixed right-0 top-0 bottom-0 z-40 w-[320px] shadow-xl"
+                initial={{ x: 320 }}
                 animate={{ x: 0 }}
-                exit={{ x: -320 }}
+                exit={{ x: 320 }}
                 transition={{ type: 'spring', damping: 25, stiffness: 300 }}
               >
                 <WorkspaceChanges
@@ -235,87 +289,6 @@ export function CodingShell() {
             </>
           )}
         </AnimatePresence>
-
-        {/* 主区域 */}
-        <main className="flex-1 flex min-h-0 bg-[var(--bg)]">
-          {/* 聊天/设置区域 + 终端 */}
-          <div className="flex-1 flex flex-col min-h-0">
-            <div className="flex-1 flex flex-col min-h-0">
-              <Suspense fallback={<PageFallback />}>
-                <AnimatePresence mode="wait">
-                  {codingView === 'chat' && (
-                    <motion.div
-                      key="coding-chat"
-                      className="flex-1 flex flex-col min-h-0"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.15 }}
-                    >
-                      <CodingChatView projectPath={projectPath} onChangeProject={handleChangeProject} />
-                    </motion.div>
-                  )}
-                  {codingView === 'settings' && (
-                    <motion.div
-                      key="coding-settings"
-                      className="flex-1 flex flex-col min-h-0"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.15 }}
-                    >
-                      <CodingSettingsPage />
-                    </motion.div>
-                  )}
-                  {codingView === 'scheduled' && (
-                    <motion.div
-                      key="coding-scheduled"
-                      className="flex-1 overflow-auto scrollable bg-[var(--bg)] p-4"
-                      initial={{ opacity: 0 }}
-                      animate={{ opacity: 1 }}
-                      exit={{ opacity: 0 }}
-                      transition={{ duration: 0.15 }}
-                    >
-                      <ScheduledTasksPage />
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </Suspense>
-            </div>
-
-            {/* 底部终端面板 */}
-            {codingTerminalOpen && !isMobile && (
-              <TerminalPanel
-                projectPath={projectPath}
-                onClose={toggleCodingTerminal}
-              />
-            )}
-          </div>
-
-          {/* 右侧代码预览面板（flex 分栏，可拖拽调整宽度） */}
-          {previewFile && codingView === 'chat' && !isMobile && (
-            <>
-              <div
-                className="w-1 cursor-col-resize bg-[var(--coding-border)] hover:bg-[var(--accent)] transition shrink-0"
-                onMouseDown={handleResizeStart}
-              />
-              <div style={{ width: previewWidth }} className="shrink-0 flex flex-col min-h-0">
-                <CodePreview
-                  filePath={previewFile}
-                  content={previewContent}
-                  loading={previewLoading}
-                  onClose={() => { setPreviewFile(null); setOpenFiles([]); }}
-                  onInsertToChat={(text) => { setPreviewFile(null); }}
-                  onContentChange={(newContent) => setPreviewContent(newContent)}
-                  openFiles={openFiles}
-                  activeFile={previewFile}
-                  onSelectFile={handleFileSelect}
-                  onCloseFile={handleCloseFile}
-                />
-              </div>
-            </>
-          )}
-        </main>
       </div>
 
       {/* 移动端侧边抽屉 */}
@@ -380,6 +353,7 @@ export function CodingShell() {
 
       <ToastStack items={notifications} />
     </div>
+    </CodingErrorBoundary>
   );
 }
 

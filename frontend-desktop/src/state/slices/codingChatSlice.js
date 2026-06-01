@@ -48,6 +48,7 @@ export const createCodingChatSlice = (set, get) => ({
   codingCurrentQuestionIdx: 0,
   codingAnswers: {},
   codingQuestionsSubmitted: false,
+  codingQuestionsPermissionId: null,
 
   // ─── Sub-agent 状态 ─────────────────────────────────────────
   subAgents: [],
@@ -73,9 +74,22 @@ export const createCodingChatSlice = (set, get) => ({
     switch (event) {
       case 'agent_state': {
         const s = (payload && payload.state) || 'IDLE';
+        const prevState = state.codingAgentState;
         set({ codingAgentState: s });
         if (s === 'THINKING' && !state.codingIsStreaming) {
           set({ codingIsStreaming: true, codingStartedAt: Date.now(), codingLiveBlocks: [] });
+        }
+        if (s === 'THINKING' && prevState === 'AWAITING_PERMISSION') {
+          const blocks = [...get().codingLiveBlocks];
+          let changed = false;
+          for (let i = blocks.length - 1; i >= 0; i--) {
+            if (blocks[i].type === 'permission' && !blocks[i].resolved) {
+              blocks[i] = { ...blocks[i], resolved: true };
+              changed = true;
+              break;
+            }
+          }
+          if (changed) set({ codingLiveBlocks: blocks });
         }
         break;
       }
@@ -92,17 +106,22 @@ export const createCodingChatSlice = (set, get) => ({
       case 'task_update': {
         const newTasks = Array.isArray(payload?.todos) ? payload.todos : [];
         if (newTasks.length > 0) {
-          const existing = get().codingTasks;
-          const map = new Map(existing.map(t => [t.id, { ...t }]));
-          for (const t of newTasks) {
-            if (map.has(t.id)) {
-              const old = map.get(t.id);
-              map.set(t.id, { ...old, ...t });
-            } else {
-              map.set(t.id, t);
+          const shouldMerge = payload?.merge !== false;
+          if (shouldMerge) {
+            const existing = get().codingTasks;
+            const map = new Map(existing.map(t => [t.id, { ...t }]));
+            for (const t of newTasks) {
+              if (map.has(t.id)) {
+                const old = map.get(t.id);
+                map.set(t.id, { ...old, ...t });
+              } else {
+                map.set(t.id, t);
+              }
             }
+            set({ codingTasks: Array.from(map.values()) });
+          } else {
+            set({ codingTasks: newTasks });
           }
-          set({ codingTasks: Array.from(map.values()) });
           flushCodingNow(set, get);
         }
         break;
@@ -116,6 +135,7 @@ export const createCodingChatSlice = (set, get) => ({
             codingCurrentQuestionIdx: 0,
             codingAnswers: {},
             codingQuestionsSubmitted: false,
+            codingQuestionsPermissionId: payload?.permission_id || null,
           });
         }
         break;
@@ -182,6 +202,11 @@ export const createCodingChatSlice = (set, get) => ({
           done: false,
         });
         set({ codingLiveBlocks: blocks });
+        // Track active file for glow effect
+        const toolPath = payload?.input?.path || payload?.input?.file_path;
+        if (toolPath && get().addCodingActiveFile) {
+          get().addCodingActiveFile(toolPath);
+        }
         break;
       }
       case 'tool_end': {
@@ -198,6 +223,11 @@ export const createCodingChatSlice = (set, get) => ({
               if (payload.label) blocks[i].label = payload.label;
               if (payload.ms != null) blocks[i].ms = payload.ms;
               if (payload.status) blocks[i].status = payload.status;
+            }
+            // Remove from active files after delay
+            const toolPath = payload?.input?.path || payload?.input?.file_path || blocks[i]?.input?.path;
+            if (toolPath && get().removeCodingActiveFile) {
+              setTimeout(() => get().removeCodingActiveFile(toolPath), 2000);
             }
             break;
           }
@@ -295,7 +325,8 @@ export const createCodingChatSlice = (set, get) => ({
   },
 
   // ─── Coding 发送消息（调用独立 API） ───────────────────────
-  codingSendMessage: async ({ message, images = [], files = [], workingDir = '', thinking }) => {
+  codingSendMessage: async ({ message, images = [], files = [], workingDir, thinking }) => {
+    const effectiveWorkingDir = workingDir || get().codingProjectPath || '';
     let sid = get().activeSessionId;
     if (!sid) {
       sid = await get().createSession();
@@ -331,11 +362,12 @@ export const createCodingChatSlice = (set, get) => ({
       codingCurrentQuestionIdx: 0,
       codingAnswers: {},
       codingQuestionsSubmitted: false,
+      codingQuestionsPermissionId: null,
       subAgents: [],
     });
     try {
       const payload = { message, sessionId: String(sid), images, files };
-      if (workingDir) payload.workingDir = workingDir;
+      if (effectiveWorkingDir) payload.workingDir = effectiveWorkingDir;
       if (thinking !== undefined) payload.thinking = thinking;
       await api.sendCodingChat(payload);
     } catch (e) {
@@ -348,21 +380,76 @@ export const createCodingChatSlice = (set, get) => ({
   submitCodingAnswerBatch: async () => {
     const sid = get().activeSessionId;
     const answers = get().codingAnswers;
+    const questions = get().codingPendingQuestions;
     const workingDir = get().codingProjectPath || '';
+    const permissionId = get().codingQuestionsPermissionId;
     if (!sid || Object.keys(answers).length === 0) return;
 
     set({ codingQuestionsSubmitted: true });
+
+    // 将当前的 liveBlocks 合并为 assistant 消息（如果有内容的话）
+    const currentLiveBlocks = get().codingLiveBlocks.filter((b) => b.text || b.type === 'tool');
+    let updatedMessages = [...get().codingMessages];
+    if (currentLiveBlocks.length > 0) {
+      const assistantMsg = {
+        id: -(Date.now() - 1),
+        session_id: sid,
+        role: 'assistant',
+        content: JSON.stringify(currentLiveBlocks),
+        created_at: new Date().toISOString(),
+      };
+      updatedMessages.push(assistantMsg);
+    }
+
+    // 将问答记录作为用户消息添加到聊天历史中
+    const qaLines = questions.map((q, i) => {
+      const parsed = typeof q === 'string' ? (() => { try { return JSON.parse(q); } catch { return q; } })() : q;
+      const qText = parsed?.title || parsed?.question || parsed?.prompt || `Question ${i + 1}`;
+      const qId = parsed?.id || `q_${i}`;
+      const ans = answers[qId] || '';
+      return `**Q:** ${qText}\n**A:** ${ans}`;
+    }).join('\n\n');
+    if (qaLines) {
+      const qaMsg = {
+        id: -Date.now(),
+        session_id: sid,
+        role: 'user',
+        content: qaLines,
+        created_at: new Date().toISOString(),
+      };
+      updatedMessages.push(qaMsg);
+    }
+    // 清空 liveBlocks 以便 ThinkingIndicator 显示，告知用户 agent 正在继续
+    set({ codingMessages: updatedMessages, codingLiveBlocks: [] });
+
     try {
-      await api.submitCodingAnswerBatch({
-        sessionId: String(sid),
-        answers,
-        workingDir,
-      });
+      if (permissionId) {
+        // AskUserQuestion 走 permission-response 通道（阻塞式）
+        await api.submitCodingPermissionResponse({
+          sessionId: String(sid),
+          permissionId,
+          behavior: 'allow',
+          updatedInput: { answers },
+        });
+      } else {
+        // 兼容旧的非阻塞流程
+        await api.submitCodingAnswerBatch({
+          sessionId: String(sid),
+          answers,
+          workingDir,
+        });
+      }
       set({
         codingPendingQuestions: [],
         codingCurrentQuestionIdx: 0,
         codingAnswers: {},
+        codingQuestionsPermissionId: null,
+        codingAgentState: 'THINKING',
       });
+      // Auto-dismiss the "submitted" banner after a short delay
+      setTimeout(() => {
+        set({ codingQuestionsSubmitted: false });
+      }, 3000);
     } catch (e) {
       set({ codingQuestionsSubmitted: false });
       get().pushNotification({ title: '提交失败', body: e.message });
@@ -401,6 +488,7 @@ export const createCodingChatSlice = (set, get) => ({
       codingCurrentQuestionIdx: 0,
       codingAnswers: {},
       codingQuestionsSubmitted: false,
+      codingQuestionsPermissionId: null,
       codingTasks: [],
       liveDiffs: [],
       subAgents: [],

@@ -39,9 +39,10 @@ export const createSessionSlice = (set, get) => ({
     const appMode = get().appMode;
     const mode = appMode === 'coding' ? 'coding' : '';
     const projectPath = appMode === 'coding' ? (get().codingProjectPath || '') : '';
+    const permissionMode = appMode === 'coding' ? (get().codingPermissionMode || 'trust') : 'trust';
     const payload = typeof titleOrPayload === 'string'
-      ? { title: titleOrPayload || '新对话', agent_id: activeAgentId, mode, project_path: projectPath }
-      : { title: '新对话', agent_id: activeAgentId, mode, project_path: projectPath, ...(titleOrPayload || {}) };
+      ? { title: titleOrPayload || '新对话', agent_id: activeAgentId, mode, project_path: projectPath, permission_mode: permissionMode }
+      : { title: '新对话', agent_id: activeAgentId, mode, project_path: projectPath, permission_mode: permissionMode, ...(titleOrPayload || {}) };
     const r = await api.createSession(payload);
     await get().refreshSessions();
     await get().setActiveSession(r.id);

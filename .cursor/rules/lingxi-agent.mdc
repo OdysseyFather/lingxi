@@ -181,7 +181,20 @@ src/
 │   ├── FileChip.jsx      # 文件附件chip组件
 │   ├── BottomStatusBar.jsx # 底部状态栏
 │   ├── CodingSettingsPage.jsx # Coding 专属设置页（独立于主界面）
-│   ├── CodeView.jsx      # 旧版编程视图（保留兼容）
+│   ├── CodingErrorBoundary.jsx # Coding View 专用 ErrorBoundary
+│   ├── WorkspacePanel.jsx  # 左侧工作空间面板（mini/expanded + 文件树/任务 tab）
+│   ├── AgentStatusCard.jsx # Agent 状态卡片
+│   ├── DrawerPanel.jsx     # 右侧抽屉面板（代码预览/Diff Review 多标签页）
+│   ├── AgentMessageCard.jsx # 分层消息卡片（思考/工具/正文/变更 四层）
+│   ├── DiffReviewView.jsx  # Diff 逐块审查（hunk 级 Accept/Reject）
+│   ├── PlanCard.jsx        # 可编辑任务计划卡片
+│   ├── ModeSwitcher.jsx    # Normal/Plan/Think 模式切换器
+│   ├── PermissionSettingsPanel.jsx # 权限设置面板
+│   ├── RemoteAccessPanel.jsx # 远程接入配对码面板
+│   ├── MobileRemoteView.jsx # 手机 H5 远程查看/审批 UI
+│   ├── permissionConfig.js # 工具风险等级定义
+│   ├── codingThemes.js    # 5 套 Coding 主题
+│   ├── keyboardShortcuts.js # 全局快捷键定义
 │   └── FileSidebar.jsx   # 文件树侧栏（暖色调 + 搜索过滤 + 拖拽引用）
 ├── nexus/                # Agent 间对话（Project Nexus）
 │   ├── NexusPage.jsx     # 双栏通信界面（左侧对话列表 + 右侧发现/对话视图，无联系人）
@@ -687,3 +700,45 @@ PORT=3099 DB_PATH=/tmp/lingxi-instance2/smart-agent.db FRONTEND_DIST=../frontend
 - [x] **思考模式开关**：`codingSlice` 新增 `codingThinkingEnabled`（持久化 localStorage），CodingComposer 工具栏 Think 开关按钮（紫色），消息携带 `thinking` 参数
 - [x] **后端思考模式支持**：`POST /api/coding/chat` 新增 `thinking` 布尔参数，`DISABLE_THINKING=1` 环境变量控制 Claude 思考链
 - [x] **CodePreview 全高度**：移除 `h-[45%]`，改为 `h-full` 占满右侧面板，移除展开/收起按钮
+
+### Coding View Agent-First 重构（v2026-06 Phase 12）
+- [x] **三栏布局重构**：`CodingShell` 从双栏改为三栏（左侧 WorkspacePanel + 中央对话 + 右侧 DrawerPanel），删除旧 CodingIconBar
+- [x] **WorkspacePanel 左侧面板**：mini/expanded 双模式 + 文件树/任务列表 tab 切换 + AgentStatusCard + 快捷操作栏
+- [x] **AgentMessageCard 消息分层**：替换 AssistantMessage，四层（ThinkingLayer / ToolLayer / TextLayer / ChangeSummaryLayer）
+- [x] **DrawerPanel 右侧抽屉**：多标签页（代码预览 / Diff Review）+ 可拖拽宽度 + 最大化 + framer-motion 动画
+- [x] **DiffReviewView 逐块审查**：统一 diff 解析 + 每个 hunk 独立 Accept/Reject + 进度可视化 + 批量操作
+- [x] **PlanCard 计划模式**：可编辑任务计划 + 步骤拖拽排序/新增/删除 + 确认后执行 + 进度条
+- [x] **ModeSwitcher 模式切换**：Normal / Plan / Think 三模式切换器
+- [x] **权限分级系统**：permissionConfig.js 工具风险等级 + PermissionSettingsPanel（trust/managed/strict）+ 白名单/黑名单状态
+- [x] **codingThemes 主题系统**：5 套预定义主题 + CSS 变量动态注入 + localStorage 持久化
+- [x] **keyboardShortcuts 快捷键体系**：21 个全局快捷键 + 平台适配 + 匹配工具函数
+- [x] **CodingErrorBoundary**：Coding View 专用 ErrorBoundary（友好错误 UI + 一键重试）
+- [x] **手机 H5 远程接入前端**：RemoteAccessPanel（桌面端配对码）+ MobileRemoteView（移动端审批/进度）
+- [x] **代码清理**：删除 5 个废弃文件，减少死代码约 1200 行
+
+### Coding View UI/UX 深度重构（v2026-06 Phase 13）
+- [x] **StatusBadge 原子组件**：支持 pending/running/done/error/warning 五态，framer-motion 缩放动画过渡，替代所有手工状态图标
+- [x] **GlassCard 容器组件**：glassmorphism 效果（backdrop-blur-xl + 半透明 + glow 边框），用于 AgentsWindow/ToolGroup 等悬浮卡片
+- [x] **SkeletonLoader 骨架屏**：加载态使用灰色脉冲骨架屏替代"Generating..."文字，防止布局抖动
+- [x] **ToastNotification 通知**：非阻塞式右下角自动消失通知组件，用于低危工具操作反馈
+- [x] **ThemedProgressBar 动画化**：进度条从 CSS transition 升级为 framer-motion 弹性动画
+- [x] **StickyTaskBar 流式重构**：任务卡片逐条 AnimatePresence 动画入场（非突然全部弹出）；状态切换 StatusBadge 动画；allDone 时 Sparkles 放大弹性动画
+- [x] **ToolGroupCard 工具聚合**：连续同类型工具调用自动聚合为折叠组（如 Read ×5），summary 头显示聚合信息 + 总耗时；单工具不聚合
+- [x] **CodingToolCard 重构**：按工具类型颜色编码（blue/amber/purple/emerald/sky/indigo），running 状态边框发光效果，详情面板 AnimatePresence 展开动画
+- [x] **AskQuestionWizard 重构**：问题卡片滑入动画（AnimatePresence mode="wait"），选项 whileHover/whileTap 微交互，进度指示器彩色段动画
+- [x] **AgentsWindow 树状可视化**：虚线连接器（border-dashed）表达父子层级，并行 Agent 用 mini 时间轴色块展示状态；AgentStatusPill 替代简单文字标签
+- [x] **PermissionBlock 风险分级渲染**：low 风险→内联绿色 auto-approved 提示；medium→amber 确认条（"Always allow"按钮）；high→红色全卡片阻断（AlertTriangle + 脉冲"Requires Approval"）
+- [x] **消息操作栏升级**：hover 时 AnimatePresence 浮现，backdrop-blur-xl 毛玻璃，按钮 hover:bg 过渡
+- [x] **AgentMessageCard ToolLayer 工具聚合**：AggregatedToolGroup 子组件，同名工具折叠为一条可展开行（"Read ×3"）
+- [x] **WelcomeScreen 精致化**：Sparkles 图标 + gradient bg + spring 动画入场 + 按钮 whileHover/whileTap
+- [x] **ThinkingIndicator 升级**：8×8 圆角容器 + 呼吸发光点 + 状态文字 + 计时器
+- [x] **SystemMessage 改为 pill 胶囊样式**：居中圆角 + 半透明背景 + scale 入场
+- [x] **全局 hover 微交互**：所有可点击元素增加 hover:bg/active:scale-[0.97] 反馈
+- [x] **dark mode 兼容**：所有颜色使用 CSS 变量 + /opacity 写法，border-[var(--coding-border)]/50 等避免硬编码颜色值
+
+### Coding View 交互修复（v2026-06 Phase 14）
+- [x] **AskQuestion 提交后 Q&A 显示**：`submitCodingAnswerBatch` 提交答案后，将问答内容作为用户消息追加到 `codingMessages`，同时将之前的 `liveBlocks` 合并为 assistant 消息保存
+- [x] **AskQuestion 提交后 Thinking 反馈**：提交答案后立即清空 `codingLiveBlocks` + 设置 `codingAgentState: 'THINKING'`，确保 ThinkingIndicator 显示，用户知道 agent 在继续工作
+- [x] **Permission Allow 修复**：修正 `CodingChatView.jsx` 中 `LiveBlock` 组件错误地访问 `activeSession?.id`（undefined），改为正确使用 `activeSessionId`，解决 Allow 后 agent 不继续的 bug
+- [x] **Permission 状态自动解除**：`codingHandleWSEvent` 检测 `agent_state` 从 `AWAITING_PERMISSION` → `THINKING` 时，自动标记最近的 permission block 为 `resolved: true`
+- [x] **AgentsWindow 固定到聊天上方**：将 Agent Tree 面板从消息滚动区域内部移到滚动区域外面固定位置（在 StickyTaskBar 下方、聊天内容上方），始终可见不随消息滚动

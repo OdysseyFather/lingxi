@@ -239,6 +239,21 @@ else
   echo "▶ [3.6] 跳过 whisper.cpp（仅 macOS 支持离线语音识别）"
 fi
 
+# ── 3.7 安装 SDK Runner 依赖 ────────────────────────────────────
+echo ""
+echo "▶ [3.7] 安装 SDK Runner 依赖..."
+SDK_RUNNER_DIR="$RESOURCES_DIR/sdk-runner"
+if [ -f "$SDK_RUNNER_DIR/package.json" ]; then
+  pushd "$SDK_RUNNER_DIR" > /dev/null
+  NPM_CONFIG_CACHE=/tmp/npm-lingxi-cache npm install --omit=dev --no-audit --no-fund --loglevel=error 2>&1 || {
+    echo "  ⚠️  SDK Runner 依赖安装失败"
+  }
+  popd > /dev/null
+  echo "  ✓ SDK Runner 已就绪: $(du -sh "$SDK_RUNNER_DIR" | cut -f1)"
+else
+  echo "  ⚠️  未找到 $SDK_RUNNER_DIR/package.json，跳过"
+fi
+
 # ── 4. 内嵌 Node.js 二进制（claude CLI 运行时）────────────────────
 echo ""
 echo "▶ [4/5] 准备 Node.js 运行时..."

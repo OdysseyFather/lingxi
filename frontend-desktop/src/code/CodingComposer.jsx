@@ -3,6 +3,7 @@ import { Send, Square, Plus, ChevronDown, ChevronUp, FileText, X, Folder, ArrowR
 import { cn } from '../ui/cn';
 import { useStore } from '../state/useStore';
 import { api } from '../api/client';
+import { ModeSwitcher } from './ModeSwitcher';
 
 export const CodingComposer = forwardRef(function CodingComposer({ onSend, disabled, projectPath }, ref) {
   const [text, setText] = useState('');
@@ -35,6 +36,8 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
   const activeSession = useMemo(() => sessions.find(s => s.id === activeSessionId), [sessions, activeSessionId]);
   const codingThinkingEnabled = useStore((s) => s.codingThinkingEnabled);
   const setCodingThinkingEnabled = useStore((s) => s.setCodingThinkingEnabled);
+  const codingMode = useStore((s) => s.codingMode);
+  const setCodingMode = useStore((s) => s.setCodingMode);
 
   useImperativeHandle(ref, () => ({
     insertText: (str) => {
@@ -196,7 +199,7 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
   const modelName = activeProfile?.name || activeProfile?.model || 'Select model';
 
   return (
-    <div className="border-t border-[var(--coding-border)] bg-[var(--coding-surface-raised)] relative backdrop-blur-md coding-mobile-composer">
+    <div className="border-t border-[var(--coding-border)]/40 bg-[var(--coding-surface-raised)] relative backdrop-blur-md coding-mobile-composer">
       {/* 会话历史下拉菜单 */}
       {showSessionMenu && (
         <SessionHistoryDropdown
@@ -211,7 +214,7 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
 
       {/* 附件文件 chips */}
       {attachedFiles.length > 0 && (
-        <div className="max-w-3xl mx-auto px-6 pt-3 flex flex-wrap gap-2">
+        <div className="max-w-4xl mx-auto px-6 pt-3 flex flex-wrap gap-2">
           {attachedFiles.map((f, i) => (
             <FileChip key={i} name={f.name} path={f.path} isDir={f.isDir} onRemove={() => removeFile(i)} />
           ))}
@@ -220,7 +223,7 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
 
       {/* 斜杠命令菜单 */}
       {showSlashMenu && (
-        <div className="max-w-3xl mx-auto px-6">
+        <div className="max-w-4xl mx-auto px-6">
           <div className="mb-2 rounded-xl border border-[var(--coding-border)] bg-[var(--coding-surface-raised)] shadow-lg overflow-hidden backdrop-blur-md">
             {SLASH_COMMANDS.filter(c => c.cmd.startsWith(text)).map((c) => (
               <button
@@ -243,7 +246,7 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
 
       {/* 文件浏览器弹窗 */}
       {showFileBrowser && (
-        <div className="max-w-3xl mx-auto px-6">
+        <div className="max-w-4xl mx-auto px-6">
           <div className="mb-2 rounded-xl border border-[var(--coding-border)] bg-[var(--coding-surface-raised)] shadow-lg overflow-hidden max-h-[300px] flex flex-col backdrop-blur-md">
             <div className="px-4 py-2 border-b border-[var(--coding-border)] flex items-center gap-2 text-[12px] text-[var(--text-soft)] bg-[var(--coding-surface)]">
               <Folder size={13} className="text-[var(--accent)]" />
@@ -289,11 +292,11 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
       )}
 
       {/* 主输入区 */}
-      <div className="max-w-3xl mx-auto px-3 sm:px-6 py-3">
+      <div className="max-w-4xl mx-auto px-3 sm:px-6 py-3">
         <div
           className={cn(
             'rounded-2xl border bg-[var(--coding-surface-raised)] transition-all backdrop-blur-sm',
-            'border-[var(--coding-border)] focus-within:border-[var(--accent)] focus-within:shadow-[0_0_0_3px_var(--accent-soft)]',
+            'border-[var(--coding-border)]/40 focus-within:border-[var(--accent)]/60 focus-within:shadow-[0_0_0_2px_var(--accent-soft)]',
           )}
           onDragOver={handleDragOver}
           onDrop={handleDrop}
@@ -333,17 +336,17 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
           />
 
           {/* 工具栏 */}
-          <div className="flex items-center gap-2 px-3 pb-2.5">
+          <div className="flex items-center gap-1.5 px-3 pb-2.5 flex-wrap">
             <button
               onClick={openFileBrowser}
-              className="p-1.5 rounded-lg text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)] transition"
+              className="p-1.5 rounded-lg text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)] transition shrink-0"
               title="附加文件"
             >
               <Plus size={16} />
             </button>
 
             {/* 图片上传 */}
-            <label className="cursor-pointer">
+            <label className="cursor-pointer shrink-0">
               <input
                 type="file" accept="image/*" multiple className="hidden"
                 onChange={(e) => pickImageFiles(Array.from(e.target.files || []))}
@@ -353,26 +356,14 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
               </span>
             </label>
 
-            {/* 思考模式开关 */}
-            <button
-              onClick={() => setCodingThinkingEnabled(!codingThinkingEnabled)}
-              className={cn(
-                'flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition',
-                codingThinkingEnabled
-                  ? 'bg-purple-50 text-purple-600 border border-purple-200'
-                  : 'text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)]'
-              )}
-              title={codingThinkingEnabled ? '关闭思考模式 (Thinking)' : '开启思考模式 (Thinking)'}
-            >
-              <Brain size={13} />
-              <span className="hidden sm:inline">Think</span>
-            </button>
+            {/* 模式切换器 */}
+            <ModeSwitcher value={codingMode} onChange={setCodingMode} />
 
             {/* 会话选择器 */}
             <button
               onClick={() => setShowSessionMenu(v => !v)}
               className={cn(
-                'flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[12px] transition',
+                'flex items-center gap-1 px-2 py-1 rounded-lg text-[12px] transition shrink-0',
                 showSessionMenu
                   ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
                   : 'text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)]'
@@ -380,13 +371,13 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
               title="会话历史"
             >
               <MessageSquare size={13} />
-              <span className="truncate max-w-[100px] font-medium">
-                {activeSession?.title ? activeSession.title.slice(0, 15) : 'Sessions'}
+              <span className="truncate max-w-[80px] font-medium hidden sm:inline">
+                {activeSession?.title ? activeSession.title.slice(0, 12) : 'Sessions'}
               </span>
               {showSessionMenu ? <ChevronDown size={10} /> : <ChevronUp size={10} />}
             </button>
 
-            <div className="flex-1" />
+            <div className="flex-1 min-w-[8px]" />
 
             {/* 智能体选择器 */}
             <AgentPicker
@@ -398,16 +389,16 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
             />
 
             {/* 模型选择器 */}
-            <div className="relative">
+            <div className="relative shrink-0">
               <button
                 onClick={() => setShowModelMenu(v => !v)}
-                className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[12px] text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--accent-soft)] transition"
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[12px] text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--accent-soft)] transition"
               >
-                <span className="font-medium truncate max-w-[160px]">{modelName}</span>
+                <span className="font-medium truncate max-w-[120px]">{modelName}</span>
                 <ChevronDown size={11} />
               </button>
               {showModelMenu && (
-                <div className="absolute bottom-full right-0 mb-1 w-72 rounded-xl border border-[var(--coding-border)] bg-[var(--coding-surface-raised)] shadow-xl z-50 max-h-[300px] overflow-y-auto backdrop-blur-md">
+                <div className="absolute bottom-full right-0 mb-1 w-72 rounded-xl border border-[var(--coding-border)]/60 bg-[var(--coding-surface-raised)] shadow-xl z-50 max-h-[300px] overflow-y-auto backdrop-blur-md">
                   {profiles.map((p) => (
                     <button
                       key={p.id}
@@ -434,7 +425,7 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
             {isStreaming ? (
               <button
                 onClick={abort}
-                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 text-[13px] font-medium transition"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 text-[13px] font-medium transition shrink-0"
               >
                 <Square size={13} />
                 <span>Stop</span>
@@ -444,13 +435,13 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
                 onClick={handleSend}
                 disabled={!text.trim() && attachedFiles.length === 0}
                 className={cn(
-                  'flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[13px] font-medium transition',
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[13px] font-medium transition-all duration-200 shrink-0',
                   text.trim() || attachedFiles.length > 0
-                    ? 'bg-[var(--accent)] text-white hover:opacity-90 shadow-sm'
+                    ? 'bg-gradient-to-r from-[var(--accent)] to-[#b8956e] text-white hover:scale-105 hover:shadow-lg hover:shadow-[var(--accent)]/20 active:scale-95 shadow-md'
                     : 'bg-[var(--coding-surface)] text-[var(--text-faint)] cursor-default'
                 )}
               >
-                <ArrowRight size={13} />
+                <ArrowRight size={14} />
                 <span>Run</span>
               </button>
             )}
@@ -613,7 +604,7 @@ function SessionHistoryDropdown({ sessions, activeSessionId, onSelect, onDelete,
   };
 
   return (
-    <div className="absolute bottom-full left-0 right-0 z-50 max-w-3xl mx-auto px-6">
+    <div className="absolute bottom-full left-0 right-0 z-50 max-w-4xl mx-auto px-6">
       <div className="rounded-xl border border-[var(--coding-border)] bg-[var(--coding-surface-raised)] shadow-xl max-h-[340px] flex flex-col overflow-hidden mb-1 backdrop-blur-md">
         <div className="flex items-center gap-2 px-3 py-2.5 border-b border-[var(--coding-border)]">
           <Search size={13} className="text-[var(--text-faint)] shrink-0" />

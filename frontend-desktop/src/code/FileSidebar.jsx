@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../ui/cn';
 import { api } from '../api/client';
+import { useStore } from '../state/useStore';
 
 const EXT_ICONS = {
   go: FileCode2, js: FileCode2, jsx: FileCode2, ts: FileCode2, tsx: FileCode2,
@@ -30,10 +31,23 @@ function getFileColor(name) {
   return EXT_COLORS[ext] || 'text-[var(--text-faint)]';
 }
 
+const GIT_STATUS_MAP = {
+  'M': { label: 'M', color: 'text-yellow-600 bg-yellow-50' },
+  'A': { label: 'A', color: 'text-green-600 bg-green-50' },
+  'D': { label: 'D', color: 'text-red-500 bg-red-50' },
+  'U': { label: 'U', color: 'text-orange-500 bg-orange-50' },
+  '?': { label: 'U', color: 'text-green-500 bg-green-50' },
+};
+
 function TreeNode({ entry, depth, onNavigate, expanded, onToggle, filter }) {
   const Icon = getFileIcon(entry.name, entry.is_dir);
   const isOpen = expanded[entry.path];
   const color = entry.is_dir ? 'text-amber-500' : getFileColor(entry.name);
+  const codingActiveFiles = useStore((s) => s.codingActiveFiles);
+  const workspaceChanges = useStore((s) => s.workspaceChanges);
+  const isActive = codingActiveFiles?.has?.(entry.path) || false;
+  const gitChange = workspaceChanges?.find(c => entry.path?.endsWith(c.path));
+  const gitStatus = gitChange ? GIT_STATUS_MAP[gitChange.status] : null;
 
   if (filter && !entry.is_dir && !entry.name.toLowerCase().includes(filter.toLowerCase())) {
     return null;
@@ -52,6 +66,7 @@ function TreeNode({ entry, depth, onNavigate, expanded, onToggle, filter }) {
         className={cn(
           'w-full flex items-center gap-1.5 px-2 py-[4px] text-[12px]',
           'text-[var(--text-soft)] hover:text-[var(--text)] hover:bg-[var(--accent-soft)] transition rounded-md',
+          isActive && 'bg-amber-50 ring-1 ring-amber-200/60 text-amber-700 animate-pulse',
         )}
         style={{ paddingLeft: `${8 + depth * 14}px` }}
         onClick={() => {
@@ -66,8 +81,14 @@ function TreeNode({ entry, depth, onNavigate, expanded, onToggle, filter }) {
           isOpen ? <ChevronDown size={11} className="shrink-0 text-[var(--text-faint)]" />
                  : <ChevronRight size={11} className="shrink-0 text-[var(--text-faint)]" />
         ) : <span className="w-[11px] shrink-0" />}
-        <Icon size={13} className={cn('shrink-0', color)} />
-        <span className="truncate">{entry.name}</span>
+        <Icon size={13} className={cn('shrink-0', color, isActive && 'text-amber-500')} />
+        <span className={cn('truncate', gitStatus && 'font-medium')}>{entry.name}</span>
+        {gitStatus && (
+          <span className={cn('ml-auto text-[9px] font-bold px-1 rounded shrink-0', gitStatus.color)}>
+            {gitStatus.label}
+          </span>
+        )}
+        {isActive && <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping shrink-0" />}
       </button>
 
       {entry.is_dir && isOpen && entry.children && (
@@ -89,7 +110,7 @@ function TreeNode({ entry, depth, onNavigate, expanded, onToggle, filter }) {
   );
 }
 
-export function FileSidebar({ projectPath, onFileSelect, onClose }) {
+export function FileSidebar({ projectPath, onFileSelect, onClose, embedded }) {
   const [tree, setTree] = useState([]);
   const [expanded, setExpanded] = useState({});
   const [loading, setLoading] = useState(false);
@@ -137,7 +158,10 @@ export function FileSidebar({ projectPath, onFileSelect, onClose }) {
   const shortPath = projectPath?.split('/').pop() || 'workspace';
 
   return (
-    <div className="w-56 border-r border-[var(--coding-border)] bg-[var(--coding-surface)] flex flex-col shrink-0 select-none">
+    <div className={cn(
+      'flex flex-col select-none',
+      embedded ? 'w-full h-full bg-transparent' : 'w-56 border-r border-[var(--coding-border)] bg-[var(--coding-surface)] shrink-0'
+    )}>
       <div className="flex items-center justify-between px-2 py-2 border-b border-[var(--coding-border)]">
         <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-soft)] font-medium truncate">
           <FolderOpen size={12} className="text-amber-500" />
