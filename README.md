@@ -5,8 +5,8 @@
 <h1 align="center">灵犀 AI Agent</h1>
 
 <p align="center">
-  <strong>本地优先的桌面 AI Agent 操作系统</strong><br/>
-  一个工作台 · 14+ 模型 · 无限智能体 · 编程利器 · 屏幕操控 · Agent 互联 · 群聊协作 · 自我进化
+  <strong>在桌面跑一整个 AI Agent 军团</strong><br/>
+  14+ 模型 · 本地优先 · 人格蒸馏 · 自我进化 · 屏幕操控 · Agent 互联
 </p>
 
 <p align="center">
