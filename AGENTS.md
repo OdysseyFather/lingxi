@@ -439,6 +439,8 @@ dist-electron/
 | GET | /api/files/read | ReadFileContent | 读取文件内容 |
 | PUT | /api/files/write | WriteFileContent | 写入文件内容（CodePreview 编辑保存） |
 | GET | /api/files/project | GetProjectInfo | 获取项目信息 |
+| GET | /api/files/search | SearchFiles | 全局文件内容搜索（path+query+glob） |
+| GET | /api/files/search-names | SearchFileNames | 按文件名搜索 |
 | GET | /api/coding/changes | GetWorkspaceChanges | git status 文件变更列表 |
 | GET | /api/coding/diff | GetFileDiff | 文件 git diff |
 | GET | /api/coding/branch | GetGitBranch | 当前 git 分支 |
@@ -853,6 +855,59 @@ xattr -cr "/Applications/灵犀.app"
 - **Permission Allow 修复**：修正 LiveBlock 组件 activeSession 引用错误，改为正确的 activeSessionId
 - **Permission 状态自动解除**：agent_state 从 AWAITING_PERMISSION → THINKING 时自动标记 permission block resolved
 - **AgentsWindow 固定到聊天上方**：Agent Tree 从消息流内移到滚动区域外固定位置，始终可见
+
+### Coding View 体验优化（v2026-06 Phase 15）
+- **灵犀主模式移除 task_plan**：主模式 system prompt 不再要求 AI 输出 task_plan JSON 块
+- **新建会话按钮**：WorkspacePanel expanded 模式左上角添加显眼的「新建会话」按钮
+- **会话-项目绑定**：切换工作目录后自动刷新会话列表并定位到对应项目的最近会话
+- **全局文件搜索**：后端 `GET /api/files/search`（内容搜索）+ `GET /api/files/search-names`（文件名搜索）；前端 WorkspacePanel 搜索 tab（Cmd+Shift+F）+ glob 过滤 + 按文件分组
+- **Agent Tree 自动清空**：done 事件自动清空 subAgents
+- **思考模式开关生效**：后端 DISABLE_THINKING env + SDK runner 双重检查
+- **Task 工具卡片默认折叠**：Task/TaskCreate 类型工具卡片默认不展开
+- **任务 tab 替换为变更 tab**：WorkspacePanel 从「文件/任务」改为「文件/搜索/变更」
+
+### Coding View 多媒体增强（v2026-06 Phase 16）
+- **语音识别输入**：CodingComposer 麦克风按钮（MediaRecorder + whisper.cpp 转写 + 录音脉冲指示）
+- **Finder 多选文件/目录**：Electron `select-files` IPC（openFile + openDirectory + multiSelections），`+` 按钮原生 Finder 多选
+- **桌面拖拽绝对路径**：拖拽非图片文件使用 `file.path` 绝对路径（不读取内容不上传）
+- **用户消息图片显示修复**：UserMessage 解析 JSON 消息中的 images 数组，渲染缩略图网格 + 点击全屏预览
+
+### Coding View 7 项修复（v2026-06 Phase 17）
+- **任务规划前置化**：system prompt 强化"先完整规划、再逐项执行"工作流，禁止边做边想
+- **Diff 弹窗修复**：剥离绝对路径前缀传相对路径给 git diff + DrawerPanel 自动切换 diff tab
+- **Markdown 预览**：CodePreview 支持 .md 文件渲染模式（ReactMarkdown + remarkGfm），预览/源码一键切换
+- **弹窗替代三栏**：DrawerPanel 从右侧分栏改为全屏居中弹窗（960px + Escape 关闭 + scale 动画）
+- **技能共享**：Coding 模式注入 buildSkillInventory，可使用灵犀主模式安装的全部技能
+- **Stop 崩溃修复**：codingAbort 原子清空流式状态 + WS 事件 guard 跳过残留事件 + done handler try-catch
+- **SubAgent 卡片精简**：默认收起，隐藏 tools 列表和 output 预览，只显示描述 + 状态
+
+### Coding View SDK 对齐（v2026-06 Phase 18）
+- **Task 管理策略**：`CLAUDE_CODE_ENABLE_TASKS=0` 强制 TodoWrite（前端管线基于此构建），避免 SDK 默认 TaskCreate/TaskUpdate 不兼容
+- **System Prompt 预设化**：从自定义 string 改为 `claude_code` 预设 + `append` 模式，继承内置工具指导/安全规则/编码规范
+- **SDK 文件检查点**：`fileCheckpointing: true` 启用 SDK 原生文件追踪，捕获 checkpoint UUID，后端推送 `sdk_checkpoint` WS 事件，前端记录+回滚
+- **Hooks 系统**：PreToolUse 拦截敏感文件路径（.env/.pem/.key/credentials.json/id_rsa），PostToolUse 审计日志所有工具调用
+- **自定义子代理模板**：`coding_agents` 表 CRUD + `GET/POST/DELETE /api/coding/agents` API + 自动注入 SDK `options.agents`
+- **会话 Fork**：`POST /api/sessions/:id/fork` 分叉会话（复制消息 + SDK fork 选项），尝试不同方案
+- **Plugin 加载**：`options.plugins` 支持加载本地 plugin 包（skills/agents/hooks/MCP），`GET/PUT /api/coding/plugins` 管理路径
+- **Per-Model 成本追踪**：从 SDK `result.modelUsage` 提取子代理不同模型的成本明细，前端 usage payload 包含 `model_usage` 字段
+
+### Coding View SDK 深度对齐（v2026-06 Phase 19）
+- **Task 管理迁移**：移除 `CLAUDE_CODE_ENABLE_TASKS=0`，启用原生 `TaskCreate`/`TaskUpdate` 工具体系；前端 `TaskTodoList` 兼容 `subject` 字段；后端 `emitTaskCreateAsUpdate`/`emitTaskStatusUpdate` 统一映射 `subject`→`content`
+- **CodingSettingsPage 设置页全面增强**：从 4 个 tab 扩展到 9 个 tab（模型/权限/用量/远程接入/子代理/系统提示词/Plugins/Hooks/Checkpoint）
+- **子代理配置 UI**：`coding_agents` 表 CRUD + `GET/POST/PUT/DELETE /api/coding/agents` API + CodingAgentsPanel 管理面板（名称/描述/prompt/模型/maxTurns 编辑）
+- **系统提示词配置 UI**：`CodingPromptPanel` 支持编辑 system prompt append 指令 + 查看/编辑项目 CLAUDE.md 文件（kv_store `coding_prompt_append` 持久化）
+- **Plugins 管理 UI**：`CodingPluginsPanel` 支持添加/移除本地 plugin 目录路径 + 加载状态指示（kv_store `coding_plugins` 持久化）
+- **Hooks 配置 UI**：`CodingHooksPanel` 支持管理自定义敏感文件阻止路径 + 内置 hook 模式可视化（PreToolUse 敏感文件拦截 + PostToolUse 审计日志）
+- **权限管控增强**：新增 `acceptEdits`（仅允许文件编辑）和 `plan`（仅规划不执行）模式；支持 `allowedTools`/`disallowedTools` 声明式工具白名单/黑名单配置
+- **Checkpoint 回滚 UI**：`CodingCheckpointPanel` 可视化 checkpoint 时间线（时间戳 + 文件修改数 + 工具来源）+ 一键回滚按钮
+- **后端 API 新增**：`GET/PUT /api/coding/hooks-config`、`GET/PUT /api/coding/prompt-config`、`GET/PUT /api/coding/perm-config` 统一配置管理端点
+- **System Prompt 动态加载**：`buildCodingSystemPrompt()` 从 kv_store 读取 `coding_prompt_append` 动态追加用户自定义指令
+- **Hooks Config 运行时注入**：`coding_chat.go` 从 kv_store 读取 `coding_hooks_config` 注入 SDK runner 配置
+
+### Coding View 稳定性修复（v2026-06 Phase 20）
+- **会话切换流式进度保留**：`setActiveSession`/`setAppMode` 切换前检测正在流式的 `codingLiveBlocks`，自动合并为 assistant 消息保留进度，避免切换后聊天记录消失
+- **DrawerPanel 弹窗布局修复**：从右侧 flex 分栏改为 `fixed` 全屏居中弹窗（dimmed backdrop + 960px + Escape + 最大化），解决文件预览/Diff 审查布局错乱
+- **DrawerPanel 移除 codingView 限制**：弹窗模式在任何子视图下都可打开
 
 ### 纯 Go 协议转换代理（v2026-05 Phase 3）
 - **替代 LiteLLM Bridge**：`backend-desktop/proxy/` 纯 Go 实现，启动零延迟、无 Python 依赖

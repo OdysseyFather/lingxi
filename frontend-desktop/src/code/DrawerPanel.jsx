@@ -1,13 +1,9 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X, FileText, GitCompareArrows, Maximize2, Minimize2 } from 'lucide-react';
 import { cn } from '../ui/cn';
 import { DiffReviewView } from './DiffReviewView';
 import { CodePreview } from './CodePreview';
-
-const MIN_WIDTH = 320;
-const MAX_WIDTH = 900;
-const DEFAULT_WIDTH = 480;
 
 export function DrawerPanel({
   activeFile,
@@ -20,62 +16,63 @@ export function DrawerPanel({
   onContentChange,
   onClose,
 }) {
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [activeTab, setActiveTab] = useState(activeDiff ? 'diff' : 'preview');
   const [maximized, setMaximized] = useState(false);
-  const resizingRef = useRef(false);
 
-  const handleResizeStart = useCallback((e) => {
-    e.preventDefault();
-    resizingRef.current = true;
-    const startX = e.clientX;
-    const startWidth = width;
-    const handleMove = (moveE) => {
-      if (!resizingRef.current) return;
-      const diff = startX - moveE.clientX;
-      setWidth(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, startWidth + diff)));
-    };
-    const handleUp = () => {
-      resizingRef.current = false;
-      document.removeEventListener('mousemove', handleMove);
-      document.removeEventListener('mouseup', handleUp);
-    };
-    document.addEventListener('mousemove', handleMove);
-    document.addEventListener('mouseup', handleUp);
-  }, [width]);
+  useEffect(() => {
+    if (activeDiff) setActiveTab('diff');
+  }, [activeDiff]);
 
-  const actualWidth = maximized ? '50vw' : `${width}px`;
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'Escape') onClose?.();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const modalWidth = maximized ? 'max-w-[90vw] w-[90vw]' : 'max-w-[960px] w-[90vw]';
 
   return (
     <motion.div
-      className="flex shrink-0 h-full"
-      initial={{ width: 0, opacity: 0 }}
-      animate={{ width: maximized ? '50vw' : width + 4, opacity: 1 }}
-      exit={{ width: 0, opacity: 0 }}
-      transition={{ duration: 0.2, ease: 'easeInOut' }}
+      className="fixed inset-0 z-50 flex items-center justify-center"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      transition={{ duration: 0.15 }}
     >
-      {/* 拖拽调整宽度 */}
+      {/* Backdrop */}
       <div
-        className="w-1 cursor-col-resize bg-[var(--coding-border)] hover:bg-[var(--accent)] transition shrink-0"
-        onMouseDown={handleResizeStart}
+        className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+        onClick={onClose}
       />
 
-      {/* Drawer 主体 */}
-      <div style={{ width: actualWidth }} className="flex flex-col h-full bg-[var(--coding-surface)] border-l border-[var(--coding-border)] overflow-hidden">
-        {/* 顶部 Tab 栏 */}
-        <div className="flex items-center justify-between px-2 py-1.5 border-b border-[var(--coding-border)] bg-[var(--coding-surface-raised)]">
-          <div className="flex items-center gap-1">
+      {/* Modal */}
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+        animate={{ opacity: 1, scale: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95, y: 10 }}
+        transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+        className={cn(
+          'relative flex flex-col bg-[var(--coding-surface,#faf8f5)] rounded-2xl shadow-2xl border border-[var(--coding-border,#e8e0d8)] overflow-hidden',
+          modalWidth,
+          'h-[80vh]'
+        )}
+      >
+        {/* Tab bar */}
+        <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--coding-border)] bg-[var(--coding-surface-raised,#f5f0eb)]">
+          <div className="flex items-center gap-1.5">
             {activeFile && (
               <button
                 onClick={() => setActiveTab('preview')}
                 className={cn(
-                  'flex items-center gap-1 px-2 py-1 text-[11px] rounded-md transition',
+                  'flex items-center gap-1.5 px-3 py-1.5 text-[12px] rounded-lg transition-all font-medium',
                   activeTab === 'preview'
                     ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
-                    : 'text-[var(--text-faint)] hover:text-[var(--text-soft)]'
+                    : 'text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--coding-surface)]/80'
                 )}
               >
-                <FileText size={11} />
+                <FileText size={13} />
                 预览
               </button>
             )}
@@ -83,36 +80,36 @@ export function DrawerPanel({
               <button
                 onClick={() => setActiveTab('diff')}
                 className={cn(
-                  'flex items-center gap-1 px-2 py-1 text-[11px] rounded-md transition',
+                  'flex items-center gap-1.5 px-3 py-1.5 text-[12px] rounded-lg transition-all font-medium',
                   activeTab === 'diff'
                     ? 'bg-[var(--accent-soft)] text-[var(--accent)]'
-                    : 'text-[var(--text-faint)] hover:text-[var(--text-soft)]'
+                    : 'text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--coding-surface)]/80'
                 )}
               >
-                <GitCompareArrows size={11} />
+                <GitCompareArrows size={13} />
                 Diff 审查
               </button>
             )}
           </div>
-          <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-1">
             <button
               onClick={() => setMaximized(v => !v)}
-              className="p-1 rounded text-[var(--text-faint)] hover:text-[var(--text-soft)] transition"
+              className="p-1.5 rounded-lg text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--coding-surface)] transition-all"
               title={maximized ? '还原' : '最大化'}
             >
-              {maximized ? <Minimize2 size={12} /> : <Maximize2 size={12} />}
+              {maximized ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
             </button>
             <button
               onClick={onClose}
-              className="p-1 rounded text-[var(--text-faint)] hover:text-[var(--text-soft)] transition"
-              title="关闭"
+              className="p-1.5 rounded-lg text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--coding-surface)] transition-all"
+              title="关闭 (Esc)"
             >
-              <X size={12} />
+              <X size={14} />
             </button>
           </div>
         </div>
 
-        {/* Tab 内容 */}
+        {/* Content */}
         <div className="flex-1 overflow-hidden">
           {activeTab === 'preview' && activeFile && (
             <CodePreview
@@ -139,7 +136,7 @@ export function DrawerPanel({
             />
           )}
         </div>
-      </div>
+      </motion.div>
     </motion.div>
   );
 }

@@ -568,6 +568,18 @@ func migrate() {
 		}
 		recordMigration(6, "coding checkpoints – atomic rollback with file+message+todo snapshots")
 	}
+	if v < 7 {
+		DB.Exec(`CREATE TABLE IF NOT EXISTS coding_agents (
+			id          INTEGER PRIMARY KEY AUTOINCREMENT,
+			name        TEXT    NOT NULL DEFAULT '',
+			description TEXT    NOT NULL DEFAULT '',
+			prompt      TEXT    NOT NULL DEFAULT '',
+			model       TEXT    NOT NULL DEFAULT '',
+			max_turns   INTEGER NOT NULL DEFAULT 0,
+			created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`)
+		recordMigration(7, "coding_agents – custom sub-agent templates for Coding View")
+	}
 }
 
 // seedBuiltinAgent 插入内置「通用助理」agent（id=1）

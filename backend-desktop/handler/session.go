@@ -9,9 +9,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"lingxi-agent/db"
 	"lingxi-agent/model"
+
+	"github.com/gin-gonic/gin"
 )
 
 // ListSessions GET /api/sessions?agent_id=N&mode=coding&project_path=/path
@@ -518,4 +519,39 @@ func revertGitChanges(workingDir string) string {
 	}
 	slog.Info("revertGitChanges", "dir", dir, "result", result)
 	return result
+}
+
+// ForkSession 分叉会话：复制消息历史到新会话
+func ForkSession(c *gin.Context) {
+	srcID, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	if srcID == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid session id"})
+		return
+	}
+
+	var src struct {
+		Title       string
+		AgentID     int64
+		Mode        string
+		ProjectPath string
+	}
+	err := db.DB.QueryRow(`SELECT COALESCE(title,''), COALESCE(agent_id,0), COALESCE(mode,''), COALESCE(project_path,'') FROM sessions WHERE id=?`, srcID).
+		Scan(&src.Title, &src.AgentID, &src.Mode, &src.ProjectPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
+
+	res, err := db.DB.Exec(`INSERT INTO sessions (title, agent_id, mode, project_path) VALUES (?, ?, ?, ?)`,
+		src.Title+" (fork)", src.AgentID, src.Mode, src.ProjectPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	newID, _ := res.LastInsertId()
+
+	_, _ = db.DB.Exec(`INSERT INTO messages (session_id, role, content, created_at)
+		SELECT ?, role, content, created_at FROM messages WHERE session_id=? ORDER BY id`, newID, srcID)
+
+	c.JSON(http.StatusOK, gin.H{"id": newID, "source_id": srcID})
 }

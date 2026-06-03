@@ -44,6 +44,7 @@ export const api = {
   deleteSession: (id) => req('DELETE', `/api/sessions/${id}`),
   batchDeleteSessions: (ids) => req('POST', '/api/sessions/batch-delete', { ids }),
   extractSessionKnowledge: (id) => req('POST', `/api/sessions/${id}/extract-knowledge`),
+  forkSession: (id) => req('POST', `/api/sessions/${id}/fork`),
   listMessages: (id) => req('GET', `/api/sessions/${id}/messages`),
   setSessionAgent: (id, agent_id) => req('POST', `/api/sessions/${id}/agent`, { agent_id }),
 
@@ -66,6 +67,30 @@ export const api = {
   createCheckpoint: (sessionId, messageId) => req('POST', '/api/coding/checkpoint', { sessionId: String(sessionId), messageId }),
   rollbackCheckpoint: (checkpointId) => req('POST', `/api/coding/rollback/${checkpointId}`),
   listCheckpoints: (sessionId) => req('GET', `/api/coding/checkpoints/${sessionId}`),
+
+  // coding custom agents (sub-agent templates)
+  listCodingAgents: () => req('GET', '/api/coding/agents'),
+  saveCodingAgent: (agent) => req('POST', '/api/coding/agents', agent),
+  deleteCodingAgent: (id) => req('DELETE', `/api/coding/agents/${id}`),
+
+  // coding custom agents update
+  updateCodingAgent: (id, agent) => req('PUT', `/api/coding/agents/${id}`, agent),
+
+  // coding plugins
+  getCodingPlugins: () => req('GET', '/api/coding/plugins'),
+  saveCodingPlugins: (paths) => req('PUT', '/api/coding/plugins', { paths }),
+
+  // coding hooks config
+  getCodingHooksConfig: () => req('GET', '/api/coding/hooks-config'),
+  saveCodingHooksConfig: (config) => req('PUT', '/api/coding/hooks-config', config),
+
+  // coding prompt config
+  getCodingPromptConfig: () => req('GET', '/api/coding/prompt-config'),
+  saveCodingPromptConfig: (body) => req('PUT', '/api/coding/prompt-config', body),
+
+  // coding permission config
+  getCodingPermConfig: () => req('GET', '/api/coding/perm-config'),
+  saveCodingPermConfig: (config) => req('PUT', '/api/coding/perm-config', config),
 
   // providers + profiles
   listProviders: () => req('GET', '/api/providers'),
@@ -245,6 +270,13 @@ export const api = {
   readFile: (filePath) => req('GET', `/api/files/read?path=${encodeURIComponent(filePath)}`),
   writeFile: (filePath, content) => req('PUT', '/api/files/write', { path: filePath, content }),
   getProjectInfo: (dirPath) => req('GET', `/api/files/project?path=${encodeURIComponent(dirPath || '')}`),
+  searchFiles: (dirPath, query, glob) => {
+    let url = `/api/files/search?path=${encodeURIComponent(dirPath || '')}&query=${encodeURIComponent(query)}`;
+    if (glob) url += `&glob=${encodeURIComponent(glob)}`;
+    return req('GET', url);
+  },
+  searchFileNames: (dirPath, query) =>
+    req('GET', `/api/files/search-names?path=${encodeURIComponent(dirPath || '')}&query=${encodeURIComponent(query)}`),
 
   // ── Coding 模式 ──────────────────────────────────────────────
   getCodingChanges: (dirPath) => req('GET', `/api/coding/changes?path=${encodeURIComponent(dirPath || '')}`),

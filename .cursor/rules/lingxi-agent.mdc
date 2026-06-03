@@ -742,3 +742,45 @@ PORT=3099 DB_PATH=/tmp/lingxi-instance2/smart-agent.db FRONTEND_DIST=../frontend
 - [x] **Permission Allow 修复**：修正 `CodingChatView.jsx` 中 `LiveBlock` 组件错误地访问 `activeSession?.id`（undefined），改为正确使用 `activeSessionId`，解决 Allow 后 agent 不继续的 bug
 - [x] **Permission 状态自动解除**：`codingHandleWSEvent` 检测 `agent_state` 从 `AWAITING_PERMISSION` → `THINKING` 时，自动标记最近的 permission block 为 `resolved: true`
 - [x] **AgentsWindow 固定到聊天上方**：将 Agent Tree 面板从消息滚动区域内部移到滚动区域外面固定位置（在 StickyTaskBar 下方、聊天内容上方），始终可见不随消息滚动
+
+### Coding View 体验优化（v2026-06 Phase 15）
+- [x] **灵犀主模式移除 task_plan**：主模式 system prompt 不再要求 AI 输出 task_plan JSON 块，保持简洁对话体验
+- [x] **新建会话按钮**：WorkspacePanel expanded 模式左上角添加显眼的「新建会话」按钮
+- [x] **会话-项目绑定**：切换工作目录后自动刷新会话列表并定位到对应项目的最近会话
+- [x] **全局文件搜索**：后端新增 `GET /api/files/search`（内容搜索）和 `GET /api/files/search-names`（文件名搜索）API；前端 WorkspacePanel 新增搜索 tab（Cmd+Shift+F 快捷键），支持关键词 + glob 过滤，结果按文件分组展示
+- [x] **Agent Tree 自动清空**：AI 回复自然完成后（done 事件）自动清空 subAgents，Agent Tree 面板消失
+- [x] **思考模式开关生效**：后端注入 `DISABLE_THINKING=1` 环境变量 + SDK runner 双重检查 `config.thinking === false || DISABLE_THINKING env`
+- [x] **Task 工具卡片默认折叠**：Task/TaskCreate 类型工具调用卡片默认不展开详情（避免暴露冗长的 subagent prompt）
+- [x] **任务 tab 替换为变更 tab**：WorkspacePanel 左侧面板从「文件/任务」改为「文件/搜索/变更」三功能，变更 tab 展示 git status 文件变更列表（自动刷新 + 状态颜色编码 + 增删统计）
+- [x] **目录浏览器弹窗**：非 Electron 环境（H5/手机端）选择工作目录时使用 DirectoryBrowserModal（后端 API 驱动的目录浏览器），替代 `prompt()` 手动输入
+- [x] **ModeSelector 视觉升级**：冷启动双模式选择页重新设计（暖色调渐变背景 + 装饰性光晕 + glassmorphism 卡片 + 顶部渐变指示条 + 功能标签 + 悬浮动效 + Sparkles 徽标）
+
+### Coding View 多媒体增强（v2026-06 Phase 16）
+- [x] **语音识别输入**：CodingComposer 新增麦克风按钮（Mic/MicOff/Loader2），复用主模式录音逻辑（MediaRecorder + api.transcribeAudio），录音中红色脉冲指示 + 识别中 Loader 状态
+- [x] **Finder 多选文件/目录**：Electron 新增 `select-files` IPC（openFile + openDirectory + multiSelections），`+` 按钮优先使用原生 Finder 多选，非 Electron 环境回退到文件浏览器
+- [x] **桌面拖拽绝对路径**：`handleDrop` 改为对非图片文件直接使用 `file.path` 绝对路径附加（不读取文件内容），避免上传到灵犀内部
+- [x] **用户消息图片显示修复**：UserMessage 新增 `parseUserContent` 解析 JSON 格式消息中的 images 数组，渲染网格缩略图 + 点击全屏预览弹窗
+
+### Coding View 7 项修复（v2026-06 Phase 17）
+- [x] **任务规划前置化**：`coding_prompt.go` 强化任务管理规则——严格要求先完整规划所有任务再逐项执行，禁止边做边想
+- [x] **Diff 弹窗修复**：`AgentMessageCard` 中 `handleViewDiff` 剥离项目路径前缀传相对路径给后端 git diff；`DrawerPanel` 新增 `useEffect` 自动切换到 diff tab
+- [x] **Markdown 预览**：`CodePreview.jsx` 支持 `.md` 文件渲染模式（ReactMarkdown + remarkGfm + 代码高亮），预览/源码一键切换
+- [x] **弹窗替代三栏**：`DrawerPanel` 从三栏右侧分栏改为全屏居中弹窗叠加层（dimmed backdrop + 960px max-width + Escape 关闭 + scale 动画），`CodingShell` 布局回归双栏
+- [x] **技能共享**：`coding_chat.go` 注入 `buildSkillInventory`，Coding 模式可使用灵犀主模式安装的全部技能
+- [x] **Stop 崩溃修复**：`codingAbort` 先 flush buffer 再原子清空所有流式状态（liveBlocks/tasks/subAgents/questions）；`codingHandleWSEvent` 新增流式事件 guard 跳过 abort 后的残留事件；`done` handler 加 try-catch + abort 检测
+- [x] **SubAgent 卡片精简**：`SubAgentCard` 默认收起，隐藏 tools 列表和 collapsed output 预览，只显示描述 + 状态标签
+
+### Coding View SDK 对齐（v2026-06 Phase 18）
+- [x] **Task 管理策略**：`CLAUDE_CODE_ENABLE_TASKS=0` 强制使用 TodoWrite（前端管线基于此构建），避免 SDK 默认 TaskCreate/TaskUpdate 不兼容
+- [x] **System Prompt 预设化**：从纯自定义 string 改为 `claude_code` 预设 + `append` 模式，`sdk-runner.js` 支持 `{type:"preset",preset:"claude_code",append:...}` 格式，继承内置工具指导/安全规则/编码规范
+- [x] **SDK 文件检查点**：`fileCheckpointing: true` 启用 SDK 原生文件修改追踪，捕获 `user` 消息中的 `checkpoint_id`，后端推送 `sdk_checkpoint` WS 事件，前端 `codingCheckpoints` 记录 + `rewindToCheckpoint`/`loadCheckpoints` 操作
+- [x] **Hooks 系统**：`sdk-runner.js` 新增 `options.hooks`——PreToolUse 拦截 Write/Edit/MultiEdit 对敏感文件（.env/.pem/.key/credentials.json/id_rsa/.ssh/config）的写入并阻止；PostToolUse 审计日志所有工具调用；`hook_event` 前端可接收
+- [x] **自定义子代理模板**：`db/coding_agents.go` 新增 `coding_agents` 表 CRUD；`handler/coding_agents.go` 新增 `GET/POST/DELETE /api/coding/agents` API；`buildSDKAgents()` 自动注入 SDK `options.agents`
+- [x] **会话 Fork**：`handler/session.go` 新增 `POST /api/sessions/:id/fork`（复制消息历史 + 保存 `fork:` 前缀 SDK session ID）；`sdk-runner.js` 检测 `fork:` 前缀使用 SDK `options.fork`
+- [x] **Plugin 加载**：`sdk-runner.js` 新增 `options.plugins` 支持（自动将字符串转 `{type:"local",path:...}`）；`handler/coding_agents.go` 新增 `GET/PUT /api/coding/plugins` API（kv_store 存储路径列表）；`coding_chat.go` 自动加载插件配置
+- [x] **Per-Model 成本追踪**：`sdk-runner.js` 从 `result.modelUsage` 提取并转发 `model_usage`；后端 `sdkEvent` 新增 `ModelUsage` 字段；`usagePayload` 包含 `model_usage` 明细供前端展示
+
+### Coding View 稳定性修复（v2026-06 Phase 20）
+- [x] **会话切换流式进度保留**：`setActiveSession` 和 `setAppMode` 在切换前检测正在流式输出的 `codingLiveBlocks`，自动合并为 assistant 消息保留进度，避免切换后聊天记录消失
+- [x] **DrawerPanel 弹窗布局修复**：`DrawerPanel` 从右侧 flex 分栏彻底改为 `fixed` 全屏居中弹窗叠加层（dimmed backdrop + 960px max-width + Escape 关闭 + scale 动画 + 最大化切换），解决点击文件预览/Diff审查时布局错乱的问题
+- [x] **DrawerPanel 移除 codingView 限制**：弹窗模式不再要求 `codingView === 'chat'` 才能显示，在任何子视图下都可打开文件预览和 Diff 审查

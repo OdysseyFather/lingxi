@@ -6,7 +6,8 @@ import {
   MessageSquare, CircuitBoard, Layers, Star, Flame, Box, Settings2,
   Smartphone, Copy, PowerOff, ExternalLink, Clock, QrCode, Check,
   Coins, BarChart3, RefreshCw, AlertTriangle, Bell, TrendingUp, ArrowUpRight,
-  ArrowDownRight,
+  ArrowDownRight, Users, FileText, Puzzle, BookOpen, Webhook, RotateCcw,
+  FolderOpen, X, Shield, FileCode, Lock,
 } from 'lucide-react';
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar,
@@ -75,6 +76,11 @@ const PROVIDER_MODELS = {
 const TABS = [
   { id: 'profiles',    label: '模型与接入点', icon: Cpu },
   { id: 'permissions', label: '权限管控',     icon: ShieldCheck },
+  { id: 'agents',      label: '子代理配置',   icon: Users },
+  { id: 'prompt',      label: '系统提示词',   icon: FileText },
+  { id: 'plugins',     label: 'Plugins',      icon: Puzzle },
+  { id: 'hooks',       label: 'Hooks 配置',   icon: Webhook },
+  { id: 'checkpoint',  label: 'Checkpoint',   icon: RotateCcw },
   { id: 'usage',       label: '用量统计',     icon: BarChart3 },
   { id: 'remote',      label: '远程访问',     icon: Smartphone },
 ];
@@ -112,6 +118,11 @@ export function CodingSettingsPage() {
       <div className="flex-1 overflow-y-auto scrollable">
         {tab === 'profiles'    && <CodingProfilesPanel />}
         {tab === 'permissions' && <CodingPermissionsPanel />}
+        {tab === 'agents'      && <CodingAgentsPanel />}
+        {tab === 'prompt'      && <CodingPromptPanel />}
+        {tab === 'plugins'     && <CodingPluginsPanel />}
+        {tab === 'hooks'       && <CodingHooksPanel />}
+        {tab === 'checkpoint'  && <CodingCheckpointPanel />}
         {tab === 'usage'       && <CodingUsagePanel />}
         {tab === 'remote'      && <CodingRemotePanel />}
       </div>
@@ -126,71 +137,63 @@ export function CodingSettingsPage() {
 function CodingPermissionsPanel() {
   const permMode = useStore((s) => s.codingPermissionMode);
   const setPermMode = useStore((s) => s.setCodingPermissionMode);
+  const [permConfig, setPermConfig] = useState({ allowedTools: [], disallowedTools: [] });
+  const [newAllowed, setNewAllowed] = useState('');
+  const [newDisallowed, setNewDisallowed] = useState('');
+
+  useEffect(() => {
+    api.getCodingPermConfig().then(c => {
+      if (c) setPermConfig({ allowedTools: c.allowedTools || [], disallowedTools: c.disallowedTools || [] });
+    }).catch(() => {});
+  }, []);
+
+  const savePermConfig = (updated) => {
+    setPermConfig(updated);
+    api.saveCodingPermConfig({ ...updated, mode: permMode }).catch(() => {});
+  };
+
+  const addTool = (list, value) => {
+    if (!value.trim()) return;
+    const updated = { ...permConfig, [list]: [...(permConfig[list] || []), value.trim()] };
+    savePermConfig(updated);
+    if (list === 'allowedTools') setNewAllowed(''); else setNewDisallowed('');
+  };
+
+  const removeTool = (list, idx) => {
+    const arr = [...(permConfig[list] || [])];
+    arr.splice(idx, 1);
+    savePermConfig({ ...permConfig, [list]: arr });
+  };
 
   const modes = [
-    {
-      id: 'trust',
-      title: '自动放行',
-      desc: 'Agent 自动执行所有工具调用，无需确认。适合信任的项目和快速开发。',
-      icon: Zap,
-      color: 'text-green-600',
-      bg: 'bg-green-50',
-      border: 'border-green-200',
-    },
-    {
-      id: 'managed',
-      title: '交互式确认',
-      desc: 'Agent 在执行写入/命令等操作前，需要你确认。适合敏感项目或生产环境。',
-      icon: ShieldCheck,
-      color: 'text-amber-600',
-      bg: 'bg-amber-50',
-      border: 'border-amber-200',
-    },
+    { id: 'trust', title: '自动放行 (bypass)', desc: 'Agent 自动执行所有工具调用，无需确认。适合信任的项目和快速开发。', icon: Zap, color: 'text-green-600', bg: 'bg-green-50', border: 'border-green-200' },
+    { id: 'managed', title: '交互式确认 (default)', desc: 'Agent 在执行写入/命令等操作前，需要你确认。适合敏感项目。', icon: ShieldCheck, color: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200' },
+    { id: 'acceptEdits', title: '允许编辑 (acceptEdits)', desc: '自动放行文件编辑操作（Write/Edit），但命令执行和其他工具仍需确认。', icon: FileCode, color: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200' },
+    { id: 'plan', title: '规划模式 (plan)', desc: 'Agent 只能规划和分析，不允许执行任何修改操作。适合代码审查场景。', icon: BookOpen, color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-200' },
   ];
 
   return (
     <div className="max-w-2xl mx-auto py-8 px-6">
       <h2 className="text-[18px] font-bold text-[#333] mb-1">权限管控</h2>
-      <p className="text-[13px] text-[#999] mb-6">
-        控制 Agent 执行工具调用时是否需要你的确认。新建会话时生效。
-      </p>
+      <p className="text-[13px] text-[#999] mb-6">控制 Agent 执行工具调用时的权限模式和工具白名单/黑名单。</p>
 
-      <div className="space-y-3">
+      <div className="space-y-3 mb-8">
         {modes.map((m) => {
           const Icon = m.icon;
           const active = permMode === m.id;
           return (
-            <button
-              key={m.id}
-              onClick={() => setPermMode(m.id)}
-              className={cn(
-                'w-full flex items-start gap-4 p-5 rounded-xl border-2 text-left transition-all',
-                active ? `${m.border} ${m.bg}` : 'border-[#e8e4e0] bg-white hover:bg-[#faf8f6]',
-              )}
-            >
-              <div className={cn(
-                'w-10 h-10 rounded-lg flex items-center justify-center shrink-0',
-                active ? m.bg : 'bg-gray-50',
-              )}>
+            <button key={m.id} onClick={() => setPermMode(m.id)} className={cn('w-full flex items-start gap-4 p-5 rounded-xl border-2 text-left transition-all', active ? `${m.border} ${m.bg}` : 'border-[#e8e4e0] bg-white hover:bg-[#faf8f6]')}>
+              <div className={cn('w-10 h-10 rounded-lg flex items-center justify-center shrink-0', active ? m.bg : 'bg-gray-50')}>
                 <Icon size={20} className={active ? m.color : 'text-gray-400'} />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className={cn('text-[14px] font-medium', active ? 'text-[#333]' : 'text-[#666]')}>
-                    {m.title}
-                  </span>
-                  {active && (
-                    <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full', m.color, m.bg)}>
-                      当前模式
-                    </span>
-                  )}
+                  <span className={cn('text-[14px] font-medium', active ? 'text-[#333]' : 'text-[#666]')}>{m.title}</span>
+                  {active && <span className={cn('text-[10px] font-bold px-2 py-0.5 rounded-full', m.color, m.bg)}>当前模式</span>}
                 </div>
                 <p className="text-[12px] text-[#999] leading-relaxed">{m.desc}</p>
               </div>
-              <div className={cn(
-                'w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5',
-                active ? `${m.border} ${m.bg}` : 'border-gray-300',
-              )}>
+              <div className={cn('w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5', active ? `${m.border} ${m.bg}` : 'border-gray-300')}>
                 {active && <div className={cn('w-2.5 h-2.5 rounded-full', m.color.replace('text-', 'bg-'))} />}
               </div>
             </button>
@@ -198,12 +201,531 @@ function CodingPermissionsPanel() {
         })}
       </div>
 
+      {/* Allowed/Disallowed Tools */}
+      <div className="space-y-5">
+        <ToolListEditor title="Allowed Tools（白名单）" desc="只有列表中的工具会被放行，为空则不限制" items={permConfig.allowedTools || []} inputValue={newAllowed} onInputChange={setNewAllowed} onAdd={() => addTool('allowedTools', newAllowed)} onRemove={(i) => removeTool('allowedTools', i)} color="emerald" />
+        <ToolListEditor title="Disallowed Tools（黑名单）" desc="列表中的工具将被禁止调用" items={permConfig.disallowedTools || []} inputValue={newDisallowed} onInputChange={setNewDisallowed} onAdd={() => addTool('disallowedTools', newDisallowed)} onRemove={(i) => removeTool('disallowedTools', i)} color="red" />
+      </div>
+
       <div className="mt-6 p-4 rounded-xl bg-[#faf8f6] border border-[#e8e4e0]">
         <p className="text-[12px] text-[#999] leading-relaxed">
           <strong className="text-[#777]">注意：</strong>
-          权限模式在创建新会话时生效。已有会话的权限模式不会改变。
-          在「交互式确认」模式下，Agent 执行 Bash、Write、Edit 等写入操作时会弹出确认卡片，
-          你可以选择「Allow」放行或「Deny」拒绝。只读操作（Read、Grep、Glob）不受影响。
+          权限模式在创建新会话时生效。常用工具名称：Bash, Read, Write, Edit, MultiEdit, Glob, Grep, LS, WebFetch, WebSearch, Agent, AskUserQuestion, Skill。
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function ToolListEditor({ title, desc, items, inputValue, onInputChange, onAdd, onRemove, color }) {
+  return (
+    <div className="rounded-xl border border-[#e8e4e0] bg-white p-4">
+      <div className="text-[13px] font-semibold text-[#333] mb-0.5">{title}</div>
+      <p className="text-[11px] text-[#bbb] mb-3">{desc}</p>
+      {items.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {items.map((t, i) => (
+            <span key={i} className={cn('inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[12px] font-mono', `bg-${color}-50 text-${color}-700`)}>
+              {t}
+              <button onClick={() => onRemove(i)} className={`text-${color}-400 hover:text-${color}-600`}><X size={11} /></button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <input value={inputValue} onChange={(e) => onInputChange(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && onAdd()} placeholder="工具名称，如 Bash" className="flex-1 px-3 py-2 rounded-lg border border-[#e8e4e0] text-[12px] text-[#333] placeholder-[#ccc] outline-none focus:border-[#c4a882] transition" />
+        <button onClick={onAdd} className="px-3 py-2 rounded-lg bg-[#f5f0eb] text-[#8b5e3c] text-[12px] font-medium hover:bg-[#ede5dc] transition"><Plus size={13} /></button>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  子代理配置
+// ══════════════════════════════════════════════════════════════════
+
+function CodingAgentsPanel() {
+  const [agents, setAgents] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api.listCodingAgents();
+      setAgents(r?.agents || []);
+    } catch {} finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleDelete = async (id) => {
+    if (!confirm('删除此子代理模板？')) return;
+    await api.deleteCodingAgent(id);
+    load();
+  };
+
+  const handleSave = async (agent) => {
+    if (agent.id) {
+      await api.updateCodingAgent(agent.id, agent);
+    } else {
+      await api.saveCodingAgent(agent);
+    }
+    setEditing(null);
+    load();
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto py-8 px-6">
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-[18px] font-bold text-[#333] mb-1">子代理配置</h2>
+          <p className="text-[13px] text-[#999]">自定义子代理模板，Agent 可使用 Agent 工具调度这些子代理并行处理任务。</p>
+        </div>
+        <button onClick={() => setEditing({ name: '', description: '', prompt: '', model: '', maxTurns: 0 })} className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#c4a882] text-white text-[13px] font-medium hover:bg-[#b09670] transition">
+          <Plus size={14} /> 新建
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="py-16 text-center"><Loader2 size={20} className="animate-spin text-[#c4a882] mx-auto" /></div>
+      ) : agents.length === 0 ? (
+        <div className="flex flex-col items-center py-16 text-center">
+          <div className="w-14 h-14 rounded-2xl bg-[#f5f0eb] flex items-center justify-center mb-4"><Users size={26} className="text-[#c4a882]" /></div>
+          <div className="text-[15px] font-bold text-[#333] mb-1">尚无自定义子代理</div>
+          <p className="text-[13px] text-[#999] mb-4">SDK 内置通用 Agent 可直接使用，这里可添加专用子代理模板。</p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {agents.map(a => (
+            <div key={a.id} className="group p-4 rounded-xl border border-[#e8e4e0] bg-white hover:shadow-sm transition-all">
+              <div className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-lg bg-[#f5f0eb] flex items-center justify-center text-[#c4a882] shrink-0"><Bot size={18} /></div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[14px] font-medium text-[#333]">{a.name}</div>
+                  <div className="text-[12px] text-[#999] mt-0.5 line-clamp-2">{a.description || '无描述'}</div>
+                  <div className="flex items-center gap-3 mt-2 text-[11px] text-[#bbb]">
+                    {a.model && <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-mono">{a.model}</span>}
+                    {a.maxTurns > 0 && <span>最大轮次: {a.maxTurns}</span>}
+                  </div>
+                </div>
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition shrink-0">
+                  <button onClick={() => setEditing(a)} className="p-1.5 rounded-lg text-[#bbb] hover:text-[#666] hover:bg-[#f5f0eb]"><Pencil size={13} /></button>
+                  <button onClick={() => handleDelete(a.id)} className="p-1.5 rounded-lg text-red-300 hover:text-red-500 hover:bg-red-50"><Trash2 size={13} /></button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {editing && (
+        <CModal title={editing.id ? '编辑子代理' : '新建子代理'} onClose={() => setEditing(null)} width={520} footer={
+          <div className="flex gap-2">
+            <button onClick={() => setEditing(null)} className="px-4 py-2 rounded-lg text-[13px] text-[#888] hover:bg-[#f0ebe6] transition">取消</button>
+            <button onClick={() => handleSave(editing)} className="px-4 py-2 rounded-lg bg-[#c4a882] text-white text-[13px] font-medium hover:bg-[#b09670] transition">保存</button>
+          </div>
+        }>
+          <div className="space-y-4">
+            <CField label="名称"><CInput value={editing.name} onChange={(e) => setEditing(v => ({ ...v, name: e.target.value }))} placeholder="如：code-reviewer" /></CField>
+            <CField label="描述"><CInput value={editing.description} onChange={(e) => setEditing(v => ({ ...v, description: e.target.value }))} placeholder="负责代码审查和安全扫描" /></CField>
+            <CField label="System Prompt">
+              <textarea value={editing.prompt} onChange={(e) => setEditing(v => ({ ...v, prompt: e.target.value }))} placeholder="你是一个专业的代码审查员..." rows={6} className="w-full px-4 py-2.5 rounded-xl border border-[#e8e4e0] text-[13px] text-[#333] placeholder-[#ccc] outline-none focus:border-[#c4a882] transition resize-none font-mono" />
+            </CField>
+            <div className="grid grid-cols-2 gap-3">
+              <CField label="模型（留空使用默认）"><CInput value={editing.model || ''} onChange={(e) => setEditing(v => ({ ...v, model: e.target.value }))} placeholder="claude-sonnet-4-..." /></CField>
+              <CField label="最大轮次（0=不限）"><CInput type="number" value={editing.maxTurns || 0} onChange={(e) => setEditing(v => ({ ...v, maxTurns: parseInt(e.target.value) || 0 }))} /></CField>
+            </div>
+          </div>
+        </CModal>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  系统提示词
+// ══════════════════════════════════════════════════════════════════
+
+function CodingPromptPanel() {
+  const [defaultPrompt, setDefaultPrompt] = useState('');
+  const [appendText, setAppendText] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [showDefault, setShowDefault] = useState(false);
+  const [claudeMd, setClaudeMd] = useState('');
+  const [claudeMdPath, setClaudeMdPath] = useState('');
+  const codingProjectPath = useStore((s) => s.codingProjectPath);
+
+  useEffect(() => {
+    api.getCodingPromptConfig().then(r => {
+      if (r) {
+        setDefaultPrompt(r.default || '');
+        setAppendText(r.append || '');
+      }
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!codingProjectPath) return;
+    const path = codingProjectPath + '/CLAUDE.md';
+    setClaudeMdPath(path);
+    api.readFile(path).then(r => {
+      if (r?.content != null) setClaudeMd(r.content);
+      else setClaudeMd('');
+    }).catch(() => setClaudeMd(''));
+  }, [codingProjectPath]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.saveCodingPromptConfig({ append: appendText });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {} finally { setSaving(false); }
+  };
+
+  const handleSaveClaudeMd = async () => {
+    if (!claudeMdPath) return;
+    try {
+      await api.writeFile(claudeMdPath, claudeMd);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {}
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto py-8 px-6 space-y-6">
+      <div>
+        <h2 className="text-[18px] font-bold text-[#333] mb-1">系统提示词</h2>
+        <p className="text-[13px] text-[#999]">使用 <code className="text-[11px] px-1 py-0.5 rounded bg-[#f5f0eb] text-[#8b5e3c]">claude_code</code> 预设 + append 模式。下方可编辑追加到默认 prompt 之后的自定义指令。</p>
+      </div>
+
+      {/* Default prompt (readonly) */}
+      <div className="rounded-xl border border-[#e8e4e0] bg-white overflow-hidden">
+        <button onClick={() => setShowDefault(!showDefault)} className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-[#faf8f6] transition">
+          <span className="text-[13px] font-medium text-[#555]">默认 System Prompt（只读）</span>
+          {showDefault ? <ChevronDown size={14} className="text-[#bbb]" /> : <ChevronRight size={14} className="text-[#bbb]" />}
+        </button>
+        {showDefault && (
+          <div className="px-4 pb-4 border-t border-[#f0ebe6]">
+            <pre className="text-[11px] text-[#888] font-mono whitespace-pre-wrap leading-relaxed max-h-64 overflow-y-auto scrollable mt-3">{defaultPrompt}</pre>
+          </div>
+        )}
+      </div>
+
+      {/* Append editor */}
+      <div className="rounded-xl border border-[#e8e4e0] bg-white p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-[13px] font-semibold text-[#333]">自定义追加指令</div>
+          <button onClick={handleSave} disabled={saving} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#c4a882] text-white text-[12px] font-medium hover:bg-[#b09670] disabled:opacity-60 transition">
+            {saving ? <Loader2 size={12} className="animate-spin" /> : saved ? <CheckCircle2 size={12} /> : null}
+            {saved ? '已保存' : '保存'}
+          </button>
+        </div>
+        <textarea value={appendText} onChange={(e) => setAppendText(e.target.value)} rows={10} placeholder="在此输入追加到 system prompt 之后的自定义指令..." className="w-full px-4 py-3 rounded-xl border border-[#e8e4e0] text-[13px] text-[#333] font-mono placeholder-[#ccc] outline-none focus:border-[#c4a882] transition resize-none leading-relaxed" />
+        <p className="text-[11px] text-[#bbb] mt-2">追加的指令会在每次对话中附加到默认 prompt 之后，新建会话时生效。</p>
+      </div>
+
+      {/* CLAUDE.md viewer/editor */}
+      {codingProjectPath && (
+        <div className="rounded-xl border border-[#e8e4e0] bg-white p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <div className="text-[13px] font-semibold text-[#333] flex items-center gap-1.5"><FileCode size={14} className="text-[#c4a882]" /> CLAUDE.md</div>
+              <div className="text-[11px] text-[#bbb] mt-0.5 font-mono">{claudeMdPath}</div>
+            </div>
+            <button onClick={handleSaveClaudeMd} className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-[#f5f0eb] text-[#8b5e3c] text-[12px] font-medium hover:bg-[#ede5dc] transition">保存 CLAUDE.md</button>
+          </div>
+          <textarea value={claudeMd} onChange={(e) => setClaudeMd(e.target.value)} rows={8} placeholder="SDK 会自动加载此文件作为项目级指令..." className="w-full px-4 py-3 rounded-xl border border-[#e8e4e0] text-[13px] text-[#333] font-mono placeholder-[#ccc] outline-none focus:border-[#c4a882] transition resize-none leading-relaxed" />
+          <p className="text-[11px] text-[#bbb] mt-2">CLAUDE.md 是 SDK 自动加载的项目级指令文件。位于项目根目录。</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  Plugins 管理
+// ══════════════════════════════════════════════════════════════════
+
+function CodingPluginsPanel() {
+  const [paths, setPaths] = useState([]);
+  const [newPath, setNewPath] = useState('');
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    try {
+      const r = await api.getCodingPlugins();
+      setPaths(r?.paths || []);
+    } catch {} finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleAdd = async () => {
+    if (!newPath.trim()) return;
+    const updated = [...paths, newPath.trim()];
+    await api.saveCodingPlugins(updated);
+    setPaths(updated);
+    setNewPath('');
+  };
+
+  const handleRemove = async (idx) => {
+    const updated = paths.filter((_, i) => i !== idx);
+    await api.saveCodingPlugins(updated);
+    setPaths(updated);
+  };
+
+  const handleBrowse = async () => {
+    if (!electron?.selectFiles) return;
+    try {
+      const selected = await electron.selectFiles({ directory: true });
+      if (selected?.length > 0) {
+        const updated = [...paths, ...selected];
+        await api.saveCodingPlugins(updated);
+        setPaths(updated);
+      }
+    } catch {}
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto py-8 px-6 space-y-6">
+      <div>
+        <h2 className="text-[18px] font-bold text-[#333] mb-1">Plugins 管理</h2>
+        <p className="text-[13px] text-[#999]">加载本地 Plugin 目录，每个 Plugin 可包含 skills、agents、hooks 和 MCP servers。</p>
+      </div>
+
+      <div className="rounded-xl border border-[#e8e4e0] bg-white p-4">
+        <div className="text-[13px] font-semibold text-[#333] mb-3">已加载的 Plugin 路径</div>
+        {loading ? (
+          <div className="py-8 text-center"><Loader2 size={18} className="animate-spin text-[#c4a882] mx-auto" /></div>
+        ) : paths.length === 0 ? (
+          <div className="py-8 text-center">
+            <Puzzle size={24} className="text-[#ddd] mx-auto mb-2" />
+            <p className="text-[12px] text-[#bbb]">暂无 Plugin，添加本地 Plugin 目录路径即可加载</p>
+          </div>
+        ) : (
+          <div className="space-y-2 mb-4">
+            {paths.map((p, i) => (
+              <div key={i} className="flex items-center gap-2 p-2.5 rounded-lg bg-[#faf8f6] border border-[#e8e4e0] group">
+                <FolderOpen size={14} className="text-[#c4a882] shrink-0" />
+                <span className="flex-1 text-[12px] font-mono text-[#555] truncate">{p}</span>
+                <button onClick={() => handleRemove(i)} className="p-1 rounded text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><X size={12} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2">
+          <input value={newPath} onChange={(e) => setNewPath(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleAdd()} placeholder="/path/to/plugin-directory" className="flex-1 px-3 py-2 rounded-lg border border-[#e8e4e0] text-[12px] text-[#333] font-mono placeholder-[#ccc] outline-none focus:border-[#c4a882] transition" />
+          {electron?.selectFiles && (
+            <button onClick={handleBrowse} className="px-3 py-2 rounded-lg bg-[#f5f0eb] text-[#8b5e3c] text-[12px] font-medium hover:bg-[#ede5dc] transition">浏览</button>
+          )}
+          <button onClick={handleAdd} className="px-3 py-2 rounded-lg bg-[#c4a882] text-white text-[12px] font-medium hover:bg-[#b09670] transition"><Plus size={13} /></button>
+        </div>
+      </div>
+
+      <div className="p-4 rounded-xl bg-[#faf8f6] border border-[#e8e4e0] text-[12px] text-[#999] space-y-1.5">
+        <p><strong className="text-[#777]">Plugin 目录结构：</strong></p>
+        <pre className="text-[11px] font-mono text-[#888] leading-relaxed">{`my-plugin/
+├── .claude-plugin/plugin.json
+├── skills/
+│   └── my-skill/SKILL.md
+├── agents/
+│   └── my-agent.md
+├── hooks/
+│   └── pre-tool.js
+└── .mcp.json`}</pre>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  Hooks 配置
+// ══════════════════════════════════════════════════════════════════
+
+function CodingHooksPanel() {
+  const [config, setConfig] = useState({ blockedPaths: [] });
+  const [newPattern, setNewPattern] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    api.getCodingHooksConfig().then(c => {
+      if (c) setConfig({ blockedPaths: c.blockedPaths || [] });
+    }).catch(() => {}).finally(() => setLoading(false));
+  }, []);
+
+  const save = async (updated) => {
+    setConfig(updated);
+    try {
+      await api.saveCodingHooksConfig(updated);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {}
+  };
+
+  const addPattern = () => {
+    if (!newPattern.trim()) return;
+    save({ ...config, blockedPaths: [...config.blockedPaths, newPattern.trim()] });
+    setNewPattern('');
+  };
+
+  const removePattern = (idx) => {
+    save({ ...config, blockedPaths: config.blockedPaths.filter((_, i) => i !== idx) });
+  };
+
+  const builtinPatterns = [
+    '.env(.|$)', 'credentials.json$', '.pem$', '.key$', 'id_rsa', '.ssh/config$',
+  ];
+
+  return (
+    <div className="max-w-2xl mx-auto py-8 px-6 space-y-6">
+      <div>
+        <h2 className="text-[18px] font-bold text-[#333] mb-1">Hooks 配置</h2>
+        <p className="text-[13px] text-[#999]">配置 PreToolUse / PostToolUse hooks，管理敏感文件保护规则。</p>
+      </div>
+
+      {/* Built-in hooks */}
+      <div className="rounded-xl border border-[#e8e4e0] bg-white p-4">
+        <div className="text-[13px] font-semibold text-[#333] mb-1 flex items-center gap-1.5"><Shield size={14} className="text-emerald-500" /> 内置 Hooks（始终启用）</div>
+        <p className="text-[11px] text-[#bbb] mb-3">以下 hooks 由系统内置，无法禁用。</p>
+        <div className="space-y-2">
+          <div className="p-3 rounded-lg bg-[#faf8f6]">
+            <div className="text-[12px] font-medium text-[#555]">PreToolUse: 敏感文件保护</div>
+            <p className="text-[11px] text-[#999] mt-0.5">拦截 Write/Edit/MultiEdit 对敏感文件路径的写入操作</p>
+          </div>
+          <div className="p-3 rounded-lg bg-[#faf8f6]">
+            <div className="text-[12px] font-medium text-[#555]">PostToolUse: 审计日志</div>
+            <p className="text-[11px] text-[#999] mt-0.5">记录所有工具调用的完成事件</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Built-in blocked patterns */}
+      <div className="rounded-xl border border-[#e8e4e0] bg-white p-4">
+        <div className="text-[13px] font-semibold text-[#333] mb-3">内置保护路径模式</div>
+        <div className="flex flex-wrap gap-1.5">
+          {builtinPatterns.map((p, i) => (
+            <span key={i} className="px-2 py-1 rounded-lg bg-gray-100 text-[11px] font-mono text-[#888]"><Lock size={9} className="inline mr-1" />{p}</span>
+          ))}
+        </div>
+      </div>
+
+      {/* Custom blocked patterns */}
+      <div className="rounded-xl border border-[#e8e4e0] bg-white p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div>
+            <div className="text-[13px] font-semibold text-[#333]">自定义保护路径</div>
+            <p className="text-[11px] text-[#bbb]">添加额外的正则表达式，匹配的文件路径将被阻止写入</p>
+          </div>
+          {saved && <span className="text-[11px] text-emerald-500 flex items-center gap-1"><CheckCircle2 size={11} /> 已保存</span>}
+        </div>
+        {loading ? (
+          <div className="py-6 text-center"><Loader2 size={16} className="animate-spin text-[#c4a882] mx-auto" /></div>
+        ) : (
+          <>
+            {config.blockedPaths.length > 0 && (
+              <div className="space-y-1.5 mb-3">
+                {config.blockedPaths.map((p, i) => (
+                  <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-red-50 border border-red-100 group">
+                    <span className="flex-1 text-[12px] font-mono text-red-700">{p}</span>
+                    <button onClick={() => removePattern(i)} className="p-1 rounded text-red-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><X size={12} /></button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input value={newPattern} onChange={(e) => setNewPattern(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addPattern()} placeholder="正则表达式，如 secret\\.yaml$" className="flex-1 px-3 py-2 rounded-lg border border-[#e8e4e0] text-[12px] text-[#333] font-mono placeholder-[#ccc] outline-none focus:border-[#c4a882] transition" />
+              <button onClick={addPattern} className="px-3 py-2 rounded-lg bg-[#c4a882] text-white text-[12px] font-medium hover:bg-[#b09670] transition"><Plus size={13} /></button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════
+//  Checkpoint 回滚
+// ══════════════════════════════════════════════════════════════════
+
+function CodingCheckpointPanel() {
+  const checkpoints = useStore((s) => s.codingCheckpoints);
+  const rewindToCheckpoint = useStore((s) => s.rewindToCheckpoint);
+  const activeSessionId = useStore((s) => s.activeSessionId);
+  const loadCheckpoints = useStore((s) => s.loadCheckpoints);
+  const [rewinding, setRewinding] = useState(null);
+
+  useEffect(() => {
+    if (activeSessionId) loadCheckpoints(activeSessionId);
+  }, [activeSessionId]);
+
+  const handleRewind = async (cp) => {
+    if (!confirm(`回滚到此检查点？文件将恢复到该时间点的状态。`)) return;
+    setRewinding(cp.id);
+    try {
+      await rewindToCheckpoint(cp.id);
+    } finally { setRewinding(null); }
+  };
+
+  const sorted = [...(checkpoints || [])].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  return (
+    <div className="max-w-2xl mx-auto py-8 px-6 space-y-6">
+      <div>
+        <h2 className="text-[18px] font-bold text-[#333] mb-1">Checkpoint 回滚</h2>
+        <p className="text-[13px] text-[#999]">SDK 在每次文件修改后自动创建检查点，你可以将文件回滚到任意检查点。</p>
+      </div>
+
+      {!activeSessionId ? (
+        <div className="rounded-xl border border-[#e8e4e0] bg-white p-8 text-center">
+          <RotateCcw size={24} className="text-[#ddd] mx-auto mb-2" />
+          <p className="text-[12px] text-[#bbb]">请先选择一个会话以查看该会话的检查点</p>
+        </div>
+      ) : sorted.length === 0 ? (
+        <div className="rounded-xl border border-[#e8e4e0] bg-white p-8 text-center">
+          <RotateCcw size={24} className="text-[#ddd] mx-auto mb-2" />
+          <p className="text-[12px] text-[#bbb]">当前会话暂无检查点。Agent 修改文件后会自动创建检查点。</p>
+        </div>
+      ) : (
+        <div className="relative">
+          {/* Timeline line */}
+          <div className="absolute left-5 top-0 bottom-0 w-px bg-[#e8e4e0]" />
+          <div className="space-y-3">
+            {sorted.map((cp, i) => (
+              <div key={cp.id || i} className="relative pl-12">
+                {/* Timeline dot */}
+                <div className={cn('absolute left-3.5 top-4 w-3 h-3 rounded-full border-2 bg-white z-10', i === 0 ? 'border-emerald-500' : 'border-[#c4a882]')} />
+                <div className="group rounded-xl border border-[#e8e4e0] bg-white p-4 hover:shadow-sm transition-all">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <div className="text-[13px] font-medium text-[#333] flex items-center gap-2">
+                        {cp.sdk_checkpoint ? 'SDK Checkpoint' : `Checkpoint #${cp.id}`}
+                        {i === 0 && <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-50 text-emerald-600">最新</span>}
+                      </div>
+                      <div className="text-[11px] text-[#bbb] mt-1 flex items-center gap-2">
+                        <Clock size={10} />
+                        {new Date(cp.created_at).toLocaleString('zh-CN')}
+                      </div>
+                    </div>
+                    <button onClick={() => handleRewind(cp)} disabled={rewinding === cp.id || i === 0} className={cn('flex items-center gap-1 px-3 py-1.5 rounded-lg text-[12px] font-medium transition opacity-0 group-hover:opacity-100', i === 0 ? 'text-[#bbb] cursor-not-allowed' : 'bg-amber-50 text-amber-700 hover:bg-amber-100')}>
+                      {rewinding === cp.id ? <Loader2 size={12} className="animate-spin" /> : <RotateCcw size={12} />}
+                      回滚到此
+                    </button>
+                  </div>
+                  {cp.files_count > 0 && <div className="text-[11px] text-[#999] mt-2">{cp.files_count} 个文件快照</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="p-4 rounded-xl bg-[#faf8f6] border border-[#e8e4e0]">
+        <p className="text-[12px] text-[#999] leading-relaxed">
+          <strong className="text-[#777]">注意：</strong>
+          回滚操作会将工作目录中的文件恢复到选定检查点的状态。只影响 Agent 修改过的文件（Write/Edit 工具），不会影响你手动修改的文件。
         </p>
       </div>
     </div>

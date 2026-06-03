@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ─── 目录选择（Coding View）──────────────────────────────────
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
+  selectFiles: () => ipcRenderer.invoke('select-files'),
 
   // ─── Spotlight 悬浮窗 ──────────────────────────────────────
   showSpotlight: () => ipcRenderer.invoke('show-spotlight'),

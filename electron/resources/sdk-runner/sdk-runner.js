@@ -170,11 +170,14 @@ async function main() {
     allowedTools: [
       "Bash", "Read", "Write", "Edit", "MultiEdit",
       "Glob", "Grep", "LS", "WebFetch", "WebSearch",
-      "Agent", "AskUserQuestion",
+      "Agent", "AskUserQuestion", "Skill",
+      "TaskCreate", "TaskUpdate", "TaskGet", "TaskList",
     ],
     includePartialMessages: true,
     forwardSubagentText: true,
-    settingSources: [],
+    settingSources: ["user", "project"],
+    skills: "all",
+    fileCheckpointing: true,
   };
 
   // Always use 'default' permissionMode + canUseTool callback.
@@ -228,8 +231,14 @@ async function main() {
   };
   log(isInteractive ? "interactive permission mode" : "bypass mode (AskUserQuestion still blocks)");
 
+  // systemPrompt: 支持字符串（自定义）和对象（preset+append）两种格式
   if (config.systemPrompt) {
-    options.systemPrompt = config.systemPrompt;
+    if (typeof config.systemPrompt === "object" && config.systemPrompt.type === "preset") {
+      options.systemPrompt = config.systemPrompt;
+      log("using preset systemPrompt:", config.systemPrompt.preset, "with append length:", (config.systemPrompt.append || "").length);
+    } else {
+      options.systemPrompt = config.systemPrompt;
+    }
   }
 
   if (config.workingDir) {
@@ -237,20 +246,105 @@ async function main() {
   }
 
   if (config.sessionId) {
-    options.resume = config.sessionId;
+    if (config.sessionId.startsWith("fork:")) {
+      options.fork = config.sessionId.slice(5);
+      log("forking from session:", options.fork);
+    } else {
+      options.resume = config.sessionId;
+    }
   }
 
   if (config.env && typeof config.env === "object") {
     options.env = { ...process.env, ...config.env };
   }
 
-  if (config.thinking === false) {
+  if (config.thinking === false || process.env.DISABLE_THINKING === "1") {
     options.thinking = { type: "disabled" };
+    log("thinking disabled");
   }
 
   if (config.agents) {
     options.agents = config.agents;
   }
+
+  // 插件加载：用户可通过配置指定本地 plugin 包路径
+  if (config.plugins && Array.isArray(config.plugins)) {
+    options.plugins = config.plugins.map((p) => {
+      if (typeof p === "string") {
+        return { type: "local", path: p };
+      }
+      return p;
+    });
+    log("plugins configured:", options.plugins.length);
+  }
+
+  // ─── Hooks 系统 ────────────────────────────────────────────
+  // PreToolUse: 拦截敏感文件路径（.env、密钥文件、系统配置）
+  // PostToolUse: 审计日志——记录所有工具调用的完成事件
+  //
+  // SDK hooks 格式：{ EventType: [{ matcher?: string, hooks: [asyncFn] }] }
+  // 回调签名：async (inputData, toolUseId, context) => ({ hookSpecificOutput? })
+  const blockedPatterns = [
+    /\.env(\.|$)/i,
+    /credentials\.json$/i,
+    /\.pem$/i,
+    /\.key$/i,
+    /id_rsa/i,
+    /\.ssh\/config$/i,
+  ];
+
+  const hooksConfig = config.hooksConfig || {};
+  const extraBlockedPaths = hooksConfig.blockedPaths || [];
+  if (extraBlockedPaths.length > 0) {
+    for (const p of extraBlockedPaths) {
+      try { blockedPatterns.push(new RegExp(p, "i")); } catch {}
+    }
+  }
+
+  const protectSensitiveFiles = async (inputData, toolUseId) => {
+    const toolInput = inputData?.tool_input || {};
+    const filePath = toolInput?.file_path || toolInput?.path || "";
+    for (const pat of blockedPatterns) {
+      if (pat.test(filePath)) {
+        log("PreToolUse BLOCKED:", filePath, "matched", pat.toString());
+        emit({
+          type: "hook_event",
+          hook: "PreToolUse",
+          action: "blocked",
+          tool: inputData?.tool_name || "Write/Edit",
+          path: filePath,
+          pattern: pat.toString(),
+        });
+        return {
+          hookSpecificOutput: {
+            hookEventName: inputData?.hook_event_name || "PreToolUse",
+            permissionDecision: "deny",
+            permissionDecisionReason: `File blocked by security policy: ${filePath}`,
+          },
+        };
+      }
+    }
+    return {};
+  };
+
+  const auditToolUse = async (inputData, toolUseId) => {
+    emit({
+      type: "hook_event",
+      hook: "PostToolUse",
+      tool: inputData?.tool_name || "",
+      tool_use_id: toolUseId,
+    });
+    return {};
+  };
+
+  options.hooks = {
+    PreToolUse: [
+      { matcher: "Write|Edit|MultiEdit", hooks: [protectSensitiveFiles] },
+    ],
+    PostToolUse: [
+      { hooks: [auditToolUse] },
+    ],
+  };
 
   log("calling startup(options)...");
   let warmQuery;
@@ -320,6 +414,17 @@ function processMessage(msg) {
           cache_creation_input_tokens: u.cache_creation_input_tokens || 0,
           cache_read_input_tokens: u.cache_read_input_tokens || 0,
         });
+      }
+      break;
+
+    case "user":
+      // SDK 文件检查点：UserMessage 中包含 checkpoint UUID
+      if (msg.message && msg.message.checkpoint_id) {
+        emit({
+          type: "checkpoint",
+          checkpoint_id: msg.message.checkpoint_id,
+        });
+        log("checkpoint:", msg.message.checkpoint_id);
       }
       break;
 
@@ -400,7 +505,7 @@ function handleSystem(msg) {
 }
 
 function handleResult(msg) {
-  emit({
+  const resultEvent = {
     type: "result",
     subtype: msg.subtype || "",
     cost_usd: msg.total_cost_usd || 0,
@@ -417,7 +522,22 @@ function handleResult(msg) {
           cache_read_input_tokens: msg.usage.cache_read_input_tokens || 0,
         }
       : null,
-  });
+  };
+
+  // 提取 per-model 成本明细（子代理可能使用不同模型）
+  if (msg.modelUsage || msg.model_usage) {
+    const mu = msg.modelUsage || msg.model_usage;
+    resultEvent.model_usage = {};
+    for (const [model, data] of Object.entries(mu)) {
+      resultEvent.model_usage[model] = {
+        input_tokens: data.input_tokens || 0,
+        output_tokens: data.output_tokens || 0,
+        cost_usd: data.cost_usd || data.total_cost_usd || 0,
+      };
+    }
+  }
+
+  emit(resultEvent);
 }
 
 main().catch((err) => {

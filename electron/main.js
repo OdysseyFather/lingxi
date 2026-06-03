@@ -723,6 +723,15 @@ ipcMain.handle('select-directory', async () => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('select-files', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile', 'openDirectory', 'multiSelections'],
+    title: '选择文件或目录',
+  });
+  if (result.canceled || !result.filePaths.length) return [];
+  return result.filePaths;
+});
+
 ipcMain.handle('encrypt-secret', (_e, plain) => encryptSecretBase64(plain));
 ipcMain.handle('decrypt-secret', (_e, cipher) => decryptSecretBase64(cipher));
 ipcMain.handle('is-encryption-available', () => {

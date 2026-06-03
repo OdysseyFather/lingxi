@@ -294,6 +294,22 @@ function SystemMessage({ msg }) {
   );
 }
 
+function parseUserContent(content) {
+  if (!content) return { text: '', images: [], files: [], qaReply: null };
+  if (content[0] === '{') {
+    try {
+      const obj = JSON.parse(content);
+      if (obj?.type === 'ask_question_reply' && Array.isArray(obj.items)) {
+        return { text: '', images: [], files: [], qaReply: obj.items };
+      }
+      if (obj && (obj.text != null || Array.isArray(obj.images) || Array.isArray(obj.files))) {
+        return { text: obj.text || '', images: obj.images || [], files: [], qaReply: null };
+      }
+    } catch { /* fallthrough */ }
+  }
+  return { text: String(content), images: [], files: [], qaReply: null };
+}
+
 function UserMessage({ msg }) {
   const [hover, setHover] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -303,13 +319,11 @@ function UserMessage({ msg }) {
   const activeSessionId = useStore((s) => s.activeSessionId);
   const codingProjectPath = useStore((s) => s.codingProjectPath);
   const [copied, setCopied] = useState(false);
+  const [showFullImg, setShowFullImg] = useState(null);
 
-  let text = msg.content;
+  const { text: rawText, images: parsedImages, qaReply } = parseUserContent(msg.content);
+  let text = rawText;
   let fileRefs = [];
-  try {
-    const parsed = JSON.parse(msg.content);
-    if (parsed.text) text = parsed.text;
-  } catch {}
 
   const refPattern = /(@\S+|\[目录:\s*\S+\])/g;
   const matches = text.match(refPattern);
@@ -429,9 +443,32 @@ function UserMessage({ msg }) {
             ))}
           </div>
         )}
-        <div className="px-4 py-3 rounded-2xl bg-[var(--coding-user-bubble)] text-[14px] text-[var(--text)] leading-relaxed whitespace-pre-wrap shadow-sm">
-          {text}
-        </div>
+        {parsedImages.length > 0 && (
+          <div className={`grid gap-2 mb-2 justify-items-end ${parsedImages.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+            {parsedImages.map((src, i) => (
+              <div key={i} className="relative rounded-xl overflow-hidden border border-[var(--coding-border)]/50 shadow-sm max-w-[240px] cursor-pointer" onClick={() => setShowFullImg(src)}>
+                <img
+                  src={src}
+                  className="w-full h-auto max-h-[180px] object-cover"
+                  alt=""
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+        {showFullImg && (
+          <div className="fixed inset-0 z-[9999] bg-black/70 flex items-center justify-center" onClick={() => setShowFullImg(null)}>
+            <img src={showFullImg} className="max-w-[90vw] max-h-[90vh] rounded-xl shadow-2xl" alt="" />
+          </div>
+        )}
+        {qaReply ? (
+          <QAReplyCard items={qaReply} />
+        ) : (
+          <div className="px-4 py-3 rounded-2xl bg-gradient-to-br from-[var(--coding-user-bubble)] to-[var(--coding-user-bubble)]/90 text-[14px] text-[var(--text)] leading-relaxed whitespace-pre-wrap shadow-sm border border-[var(--coding-border)]/20">
+            {text}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -441,6 +478,52 @@ function FileIcon({ size = 14, className }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" /><polyline points="14,2 14,8 20,8" />
   </svg>;
+}
+
+function QAReplyCard({ items }) {
+  return (
+    <div className="rounded-2xl bg-[var(--coding-user-bubble)] border border-[var(--coding-border)]/40 shadow-sm overflow-hidden">
+      <div className="px-4 py-2 bg-[var(--accent-soft)]/30 border-b border-[var(--coding-border)]/30 flex items-center gap-2">
+        <CheckCircle2 size={13} className="text-emerald-500" />
+        <span className="text-[12px] font-semibold text-[var(--text-soft)]">Answered {items.length} question{items.length > 1 ? 's' : ''}</span>
+      </div>
+      <div className="divide-y divide-[var(--coding-border)]/30">
+        {items.map((item, i) => (
+          <div key={i} className="px-4 py-3">
+            <div className="text-[12px] text-[var(--text-faint)] font-medium mb-1">Q{i + 1}. {item.question}</div>
+            {item.options?.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-1.5">
+                {item.options.map((opt, oi) => {
+                  const optLabel = typeof opt === 'string' ? opt : opt?.label || opt?.value || '';
+                  const optValue = typeof opt === 'string' ? opt : opt?.value || opt?.label || '';
+                  const isSelected = item.answer === optValue || item.answer === optLabel;
+                  return (
+                    <span
+                      key={oi}
+                      className={cn(
+                        'inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium transition-colors',
+                        isSelected
+                          ? 'bg-[var(--accent)] text-white shadow-sm'
+                          : 'bg-[var(--coding-surface)]/80 text-[var(--text-faint)] border border-[var(--coding-border)]/50'
+                      )}
+                    >
+                      {isSelected && <Check size={10} />}
+                      {optLabel}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            {(!item.options || item.options.length === 0) && (
+              <div className="px-3 py-2 rounded-lg bg-[var(--accent)]/10 text-[13px] text-[var(--accent)] font-medium">
+                {item.answer}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function TextBlock({ text, isLive }) {
@@ -785,34 +868,44 @@ function ThinkingIndicator() {
     return () => clearInterval(timer);
   }, [startedAt]);
 
-  const stateLabel = {
-    THINKING: 'Thinking',
-    CHECKING: 'Reading',
-    EXECUTING: 'Executing',
-    WAITING_FOR_USER: 'Waiting for input',
-    WAITING_FOR_INPUT: 'Waiting for input',
-    AWAITING_PERMISSION: 'Awaiting approval',
-    WAITING_FOR_BATCH_ANSWER: 'Waiting for answers',
-    DONE: 'Done',
-  }[agentState] || 'Thinking';
+  const stateConfig = {
+    THINKING: { label: 'Thinking', color: 'var(--accent)', icon: Brain },
+    CHECKING: { label: 'Reading files', color: '#3b82f6', icon: Brain },
+    EXECUTING: { label: 'Running command', color: '#f59e0b', icon: Zap },
+    WAITING_FOR_USER: { label: 'Waiting for input', color: '#eab308', icon: Clock },
+    WAITING_FOR_INPUT: { label: 'Waiting for input', color: '#eab308', icon: Clock },
+    AWAITING_PERMISSION: { label: 'Awaiting approval', color: '#f97316', icon: Clock },
+    WAITING_FOR_BATCH_ANSWER: { label: 'Waiting for answers', color: '#eab308', icon: Clock },
+    DONE: { label: 'Done', color: '#10b981', icon: CheckCircle2 },
+  }[agentState] || { label: 'Thinking', color: 'var(--accent)', icon: Brain };
+
+  const StateIcon = stateConfig.icon;
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className="flex items-center gap-3 py-5"
+      className="flex items-center gap-3 py-4 px-4 my-2 rounded-xl bg-gradient-to-r from-[var(--accent-soft)]/30 to-transparent"
     >
       <div className="relative">
-        <div className="w-8 h-8 rounded-xl bg-[var(--accent)]/10 flex items-center justify-center">
-          <Loader2 size={15} className="text-[var(--accent)] animate-spin" />
-        </div>
-        <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-[var(--accent)] animate-pulse border-2 border-[var(--coding-surface)]" />
+        <motion.div
+          animate={{ boxShadow: [`0 0 0 0 ${stateConfig.color}33`, `0 0 0 8px ${stateConfig.color}00`] }}
+          transition={{ duration: 1.5, repeat: Infinity }}
+          className="w-9 h-9 rounded-xl flex items-center justify-center"
+          style={{ background: `${stateConfig.color}15` }}
+        >
+          {agentState === 'DONE' ? (
+            <StateIcon size={16} style={{ color: stateConfig.color }} />
+          ) : (
+            <Loader2 size={16} style={{ color: stateConfig.color }} className="animate-spin" />
+          )}
+        </motion.div>
       </div>
-      <div>
-        <span className="text-[13px] font-semibold text-[var(--text)]">{stateLabel}</span>
+      <div className="flex items-center gap-2">
+        <span className="text-[13px] font-semibold text-[var(--text)]">{stateConfig.label}</span>
         {elapsed > 0 && (
-          <span className="ml-2 text-[11px] text-[var(--text-faint)] font-mono">
-            {elapsed}s
+          <span className="text-[11px] text-[var(--text-faint)] font-mono tabular-nums px-1.5 py-0.5 rounded-md bg-[var(--coding-surface-raised)] border border-[var(--coding-border)]/30">
+            {Math.floor(elapsed / 60) > 0 ? `${Math.floor(elapsed / 60)}m ` : ''}{elapsed % 60}s
           </span>
         )}
       </div>
@@ -821,37 +914,85 @@ function ThinkingIndicator() {
 }
 
 function WelcomeScreen({ projectPath, onChangeProject }) {
+  const suggestions = [
+    { icon: '🔍', text: 'Analyze this project structure' },
+    { icon: '🐛', text: 'Find and fix bugs in my code' },
+    { icon: '✨', text: 'Refactor for better performance' },
+    { icon: '📝', text: 'Write tests for this module' },
+  ];
+
   return (
-    <div className="flex flex-col items-center justify-center py-20 text-center">
+    <div className="flex-1 flex flex-col items-center justify-center text-center px-6">
       <motion.div
-        initial={{ opacity: 0, scale: 0.9 }}
-        animate={{ opacity: 1, scale: 1 }}
-        transition={{ type: 'spring', damping: 20 }}
-        className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[var(--accent)]/20 to-[var(--accent)]/5 flex items-center justify-center mb-6 border border-[var(--accent)]/20"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: 'spring', damping: 25, delay: 0.1 }}
       >
-        <Sparkles size={28} className="text-[var(--accent)]" />
-      </motion.div>
-      <h2 className="text-xl font-bold text-[var(--text)] mb-2">New session</h2>
-      <p className="text-sm text-[var(--text-faint)] max-w-md leading-relaxed mb-4">
-        Start a fresh coding session. AI is ready to help you build, debug, and architect your project.
-      </p>
-      {!projectPath && onChangeProject && (
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          onClick={onChangeProject}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[var(--accent-soft)] border border-[var(--coding-border)]/50 text-[13px] text-[var(--accent)] font-medium hover:shadow-sm transition-all"
-        >
-          <FolderOpen size={15} />
-          Choose working directory
-        </motion.button>
-      )}
-      {projectPath && (
-        <div className="text-[12px] text-[var(--text-faint)] flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[var(--coding-surface-raised)] border border-[var(--coding-border)]/50">
-          <FolderOpen size={12} />
-          <span className="font-mono">{projectPath.split('/').pop()}</span>
+        <div className="relative mb-8">
+          <motion.div
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={{ type: 'spring', damping: 15, delay: 0.2 }}
+            className="w-20 h-20 rounded-3xl bg-gradient-to-br from-[var(--accent)] to-[var(--accent)]/60 flex items-center justify-center shadow-lg shadow-[var(--accent)]/20 mx-auto"
+          >
+            <Sparkles size={32} className="text-white" />
+          </motion.div>
+          <motion.div
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ delay: 0.5, type: 'spring' }}
+            className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-emerald-400 border-2 border-[var(--bg)] flex items-center justify-center"
+          >
+            <Check size={10} className="text-white" />
+          </motion.div>
         </div>
-      )}
+
+        <h2 className="text-2xl font-bold text-[var(--text)] mb-2">What can I help you build?</h2>
+        <p className="text-sm text-[var(--text-faint)] max-w-sm leading-relaxed mb-8">
+          I can read, write, and execute code in your project. Just describe what you need.
+        </p>
+
+        <div className="grid grid-cols-2 gap-2.5 max-w-md mb-8">
+          {suggestions.map((s, i) => (
+            <motion.div
+              key={i}
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 + i * 0.08 }}
+              className="flex items-center gap-2.5 px-4 py-3 rounded-xl bg-[var(--coding-surface-raised)]/80 border border-[var(--coding-border)]/40 text-[12px] text-[var(--text-soft)] hover:border-[var(--accent)]/40 hover:bg-[var(--accent-soft)]/20 transition-all cursor-default select-none"
+            >
+              <span className="text-base">{s.icon}</span>
+              <span>{s.text}</span>
+            </motion.div>
+          ))}
+        </div>
+
+        {!projectPath && onChangeProject && (
+          <motion.button
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.6 }}
+            whileHover={{ scale: 1.02, y: -1 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={onChangeProject}
+            className="flex items-center gap-2 px-5 py-3 rounded-xl bg-[var(--accent)] text-white text-[13px] font-medium shadow-md shadow-[var(--accent)]/30 hover:shadow-lg transition-all"
+          >
+            <FolderOpen size={15} />
+            Open a project
+          </motion.button>
+        )}
+        {projectPath && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+            className="text-[12px] text-[var(--text-faint)] flex items-center gap-2 px-4 py-2 rounded-xl bg-[var(--coding-surface-raised)] border border-[var(--coding-border)]/50"
+          >
+            <FolderOpen size={13} className="text-[var(--accent)]" />
+            <span className="font-mono">{projectPath.split('/').pop()}</span>
+          </motion.div>
+        )}
+      </motion.div>
     </div>
   );
 }

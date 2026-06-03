@@ -226,19 +226,22 @@ func clearSessionPermissions(sessionID int64) {
 type sdkRunnerConfig struct {
 	Prompt         string            `json:"prompt"`
 	SessionID      string            `json:"sessionId,omitempty"`
-	SystemPrompt   string            `json:"systemPrompt,omitempty"`
+	SystemPrompt   interface{}       `json:"systemPrompt,omitempty"` // string 或 {type,preset,append} 对象
 	WorkingDir     string            `json:"workingDir,omitempty"`
 	Thinking       bool              `json:"thinking"`
 	ImagePaths     []string          `json:"imagePaths,omitempty"`
 	Env            map[string]string `json:"env,omitempty"`
 	PermissionMode string            `json:"permissionMode,omitempty"` // "bypass" | "interactive"
+	Agents         []interface{}     `json:"agents,omitempty"`         // 自定义子代理模板 (SDK AgentDefinition)
+	Plugins        []interface{}     `json:"plugins,omitempty"`        // SDK 插件 ({type:"local",path:"..."})
+	HooksConfig    interface{}       `json:"hooksConfig,omitempty"`    // hooks 配置（blockedPaths 等）
 }
 
 // ─── SDK 事件结构 ────────────────────────────────────────────────
 
 type sdkEvent struct {
-	Type    string          `json:"type"`
-	Subtype string          `json:"subtype,omitempty"`
+	Type    string `json:"type"`
+	Subtype string `json:"subtype,omitempty"`
 
 	// system/init
 	Session string `json:"session_id,omitempty"`
@@ -263,12 +266,13 @@ type sdkEvent struct {
 	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
 
 	// task_event
-	TaskID      string          `json:"task_id,omitempty"`
-	ToolUseID   string          `json:"tool_use_id,omitempty"`
-	Description string          `json:"description,omitempty"`
-	Status      string          `json:"status,omitempty"`
-	Summary     string          `json:"summary,omitempty"`
-	Patch       json.RawMessage `json:"patch,omitempty"`
+	TaskID       string          `json:"task_id,omitempty"`
+	ToolUseID    string          `json:"tool_use_id,omitempty"`
+	Description  string          `json:"description,omitempty"`
+	Status       string          `json:"status,omitempty"`
+	Summary      string          `json:"summary,omitempty"`
+	Patch        json.RawMessage `json:"patch,omitempty"`
+	LastToolName string          `json:"last_tool_name,omitempty"`
 
 	// sdk_error
 	Error string `json:"error,omitempty"`
@@ -278,6 +282,12 @@ type sdkEvent struct {
 	Input     json.RawMessage `json:"input,omitempty"`
 	IsAskUser bool            `json:"isAskUser,omitempty"`
 	ID        string          `json:"id,omitempty"`
+
+	// checkpoint（SDK 文件检查点 UUID）
+	CheckpointID string `json:"checkpoint_id,omitempty"`
+
+	// model_usage（per-model 成本明细）
+	ModelUsage json.RawMessage `json:"model_usage,omitempty"`
 }
 
 // ─── Coding Claude 独立执行（SDK 模式） ─────────────────────────────
@@ -288,6 +298,11 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 
 	// 重置 TaskCreate 计数器，确保每次新对话从 1 开始
 	taskCreateCounter.Store(0)
+	// 清空 subagent 描述更新标记
+	_subAgentDescUpdated.Range(func(k, v any) bool {
+		_subAgentDescUpdated.Delete(k)
+		return true
+	})
 
 	// 终止同一会话中可能还在运行的旧进程
 	if prev, ok := activeChats.Load(sessionID); ok {
@@ -301,32 +316,81 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 
 	claudeSessionID := getClaudeSessionID(sessionID)
 
-	// 构建 system prompt
-	prompt := buildCodingSystemPrompt()
+	// 构建 system prompt（claude_code 预设 + append 模式）
+	appendPrompt := buildCodingSystemPrompt()
 	agentID := db.GetSessionAgentID(sessionID)
 	if agentID > 0 {
 		if a, err := db.GetAgent(agentID); err == nil && !a.Builtin && strings.TrimSpace(a.SystemPrompt) != "" {
-			prompt = applyAgentPersona(prompt, a.Name, a.SystemPrompt)
+			appendPrompt += fmt.Sprintf("\n\n# Agent 人设\n\n你的名字是「%s」。\n%s", a.Name, a.SystemPrompt)
 		}
 	}
 	if workingDir != "" {
-		prompt += fmt.Sprintf("\n\n# 【当前工作目录】\n\n你当前正在操作的项目目录是：`%s`\n所有文件操作、终端命令、代码搜索都应该在这个目录下进行。不要去其他目录寻找文件。\n如果用户提到相对路径，请基于此目录解析。", workingDir)
+		appendPrompt += fmt.Sprintf("\n\n# 【当前工作目录】\n\n你当前正在操作的项目目录是：`%s`\n所有文件操作、终端命令、代码搜索都应该在这个目录下进行。不要去其他目录寻找文件。\n如果用户提到相对路径，请基于此目录解析。", workingDir)
 	}
+
+	// 使用 claude_code 预设 + append 模式：
+	// 继承 Claude Code 内置的工具指导、安全规则、编码规范，
+	// 同时追加灵犀特有的行为准则和任务管理规则。
+	systemPromptObj := map[string]interface{}{
+		"type":   "preset",
+		"preset": "claude_code",
+		"append": appendPrompt,
+	}
+
+	// 技能通过 SDK 的 settingSources + skills: "all" 自动发现，无需手动注入
 
 	// 构建 SDK 环境变量
 	sdkEnv := buildSDKEnv(cfg)
 
+	// SDK 0.3.142+ 使用 TaskCreate/TaskUpdate 原生任务管理工具。
+	// 后端 emitTaskToolUpdate 统一将 TaskCreate/TaskUpdate/TodoWrite 转换为
+	// task_update WS 事件，前端 codingChatSlice 使用 Map 模式增量合并。
+
+	if !thinkingEnabled {
+		sdkEnv["DISABLE_THINKING"] = "1"
+	}
+
 	// 读取权限模式设置
 	permMode := getCodingPermissionMode(sessionID)
+
+	// 构建自定义子代理定义（SDK options.agents）
+	customAgents := buildSDKAgents()
 
 	// 构建 SDK runner stdin 配置
 	runnerCfg := sdkRunnerConfig{
 		Prompt:         message,
-		SystemPrompt:   prompt,
+		SystemPrompt:   systemPromptObj,
 		Thinking:       thinkingEnabled,
 		ImagePaths:     imagePaths,
 		Env:            sdkEnv,
 		PermissionMode: permMode,
+	}
+	if len(customAgents) > 0 {
+		agentsDefs := make([]interface{}, len(customAgents))
+		for i, a := range customAgents {
+			agentsDefs[i] = a
+		}
+		runnerCfg.Agents = agentsDefs
+	}
+
+	// 加载 hooks 配置（用户自定义的敏感文件路径等）
+	var hooksRaw string
+	_ = db.DB.QueryRow(`SELECT value FROM kv_store WHERE key='coding_hooks_config'`).Scan(&hooksRaw)
+	if hooksRaw != "" {
+		var hooksObj interface{}
+		if json.Unmarshal([]byte(hooksRaw), &hooksObj) == nil {
+			runnerCfg.HooksConfig = hooksObj
+		}
+	}
+
+	// 加载已配置的插件路径
+	pluginPaths := loadPluginPaths()
+	if len(pluginPaths) > 0 {
+		plugins := make([]interface{}, len(pluginPaths))
+		for i, p := range pluginPaths {
+			plugins[i] = map[string]string{"type": "local", "path": p}
+		}
+		runnerCfg.Plugins = plugins
 	}
 	if claudeSessionID != "" {
 		runnerCfg.SessionID = claudeSessionID
@@ -414,6 +478,7 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 		modelUsed          string
 		pendingQuestions   []json.RawMessage
 		subAgents          []subAgentInfo
+		perModelUsage      map[string]map[string]interface{}
 	)
 
 	appendBlock := func(typ, name, chunk string) {
@@ -539,11 +604,15 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 					toolName := inner.ContentBlock.Name
 					slog.Info("coding tool_use detected", "tool", toolName, "blockID", inner.ContentBlock.ID, "session", sessionID, "subagent", isSubagent)
 					if !isAskUserTool(toolName) {
-						payload, _ := json.Marshal(map[string]any{
+						toolStartPayload := map[string]any{
 							"id":    inner.ContentBlock.ID,
 							"name":  toolName,
 							"label": toolDisplayLabel(toolName),
-						})
+						}
+						if isSubagent {
+							toolStartPayload["parent_tool_use_id"] = *ev.ParentToolUseID
+						}
+						payload, _ := json.Marshal(toolStartPayload)
 						hub.Send(sessionID, "tool_start", string(payload))
 						if isReadTool(toolName) {
 							hub.Send(sessionID, "agent_state", `{"state":"CHECKING"}`)
@@ -551,13 +620,38 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 							hub.Send(sessionID, "agent_state", `{"state":"EXECUTING"}`)
 						}
 					}
-					// Agent 工具：不在此处创建 subagent，由 SDK 原生 task_event 处理
-				// 避免重复创建（content_block_start + task_started 双重触发）
+					// Agent/Task 工具：从 content_block_start 创建 subagent 条目（兜底），
+					// SDK 原生 task_started 事件到达后会更新描述。这样即使 SDK 不发
+					// task_started，前端 AgentsWindow 也能看到 subagent。
+					if toolName == "Agent" || toolName == "Task" || toolName == "task" {
+						saID := fmt.Sprintf("sa_%s", inner.ContentBlock.ID)
+						exists := false
+						for _, sa := range subAgents {
+							if sa.ID == saID {
+								exists = true
+								break
+							}
+						}
+					if !exists {
+						info := subAgentInfo{
+							ID:          saID,
+							Description: "Sub-agent",
+							Status:      "working",
+						}
+						subAgents = append(subAgents, info)
+						payload, _ := json.Marshal(info)
+						hub.Send(sessionID, "subagent_start", string(payload))
+					}
+					}
 					b := msgBlock{
-						Type:  "tool",
-						Name:  toolName,
-						Label: toolDisplayLabel(toolName),
-						Ms:    time.Now().UnixMilli(),
+						Type:    "tool",
+						Name:    toolName,
+						Label:   toolDisplayLabel(toolName),
+						Ms:      time.Now().UnixMilli(),
+						BlockID: inner.ContentBlock.ID,
+					}
+					if isSubagent {
+						b.ParentToolUseID = *ev.ParentToolUseID
 					}
 					blocks = append(blocks, b)
 				} else if inner.ContentBlock.Type == "thinking" {
@@ -582,13 +676,18 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 							appendBlock("text", "", cleanText)
 						}
 					}
-				case "input_json_delta":
-					if d.PartialJSON != "" && len(blocks) > 0 {
-						last := &blocks[len(blocks)-1]
-						if last.Type == "tool" {
-							last.Input += d.PartialJSON
+			case "input_json_delta":
+				if d.PartialJSON != "" && len(blocks) > 0 {
+					last := &blocks[len(blocks)-1]
+					if last.Type == "tool" {
+						last.Input += d.PartialJSON
+						// Agent/Task 工具：尝试从累积的 JSON 中实时提取 description，
+						// 在 content_block_stop 之前就更新 AgentsWindow 的显示
+						if (last.Name == "Agent" || last.Name == "Task" || last.Name == "task") && last.BlockID != "" {
+							tryUpdateSubAgentDesc(hub, sessionID, last.BlockID, last.Input, &subAgents)
 						}
 					}
+				}
 				default:
 					if d.ReasoningContent != "" || d.Reasoning != "" {
 						r := d.ReasoningContent
@@ -613,18 +712,18 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 						}
 						// 子代理生命周期由 SDK 原生 task_event 管理，不再从文本中检测
 					}
-				if last.Type == "tool" {
-					if isAskUserTool(last.Name) {
-						// AskUserQuestion 现在通过 canUseTool → permission_request
-						// 阻塞流程处理，content stream 中的工具块直接隐藏即可，
-						// 不再提取 pendingQuestions（避免重复弹出向导）。
-						blocks = blocks[:len(blocks)-1]
-						endPayload, _ := json.Marshal(map[string]any{
-							"done": true, "name": last.Name, "label": "提问",
-							"input": "", "ms": 0, "status": "ok", "hidden": true,
-						})
-						hub.Send(sessionID, "tool_end", string(endPayload))
-					} else {
+					if last.Type == "tool" {
+						if isAskUserTool(last.Name) {
+							// AskUserQuestion 现在通过 canUseTool → permission_request
+							// 阻塞流程处理，content stream 中的工具块直接隐藏即可，
+							// 不再提取 pendingQuestions（避免重复弹出向导）。
+							blocks = blocks[:len(blocks)-1]
+							endPayload, _ := json.Marshal(map[string]any{
+								"done": true, "name": last.Name, "label": "提问",
+								"input": "", "ms": 0, "status": "ok", "hidden": true,
+							})
+							hub.Send(sessionID, "tool_end", string(endPayload))
+						} else {
 							last.Done = true
 							startedMs := last.Ms
 							elapsed := time.Now().UnixMilli() - startedMs
@@ -641,14 +740,38 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 								emitFileDiff(hub, sessionID, last.Name, fullInput, workingDir)
 							}
 							if last.Name == "Agent" || last.Name == "Task" || last.Name == "task" {
-								// 尝试更新 SDK 原生 task 事件创建的 subagent 描述
-								updateSubAgentDescriptionOnly(fullInput, &subAgents)
+								saID := fmt.Sprintf("sa_%s", last.BlockID)
+								for i := range subAgents {
+									if subAgents[i].ID == saID || subAgents[i].ID == last.BlockID {
+										type taskInput struct {
+											Description string `json:"description"`
+											Prompt      string `json:"prompt"`
+										}
+										var ti taskInput
+										if json.Unmarshal([]byte(fullInput), &ti) == nil {
+											desc := ti.Description
+											if desc == "" {
+												desc = ti.Prompt
+												if len(desc) > 100 {
+													desc = desc[:100] + "..."
+												}
+											}
+											if desc != "" {
+												subAgents[i].Description = desc
+											}
+										}
+										subAgents[i].Status = "done"
+										p, _ := json.Marshal(subAgents[i])
+										hub.Send(sessionID, "subagent_done", string(p))
+										break
+									}
+								}
 							}
 
 							last.Input = summary
 							last.Ms = elapsed
 							last.Status = "ok"
-							endPayload, _ := json.Marshal(map[string]any{
+							endMap := map[string]any{
 								"done":      true,
 								"name":      last.Name,
 								"label":     last.Label,
@@ -656,7 +779,11 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 								"fullInput": fullInput,
 								"ms":        elapsed,
 								"status":    "ok",
-							})
+							}
+							if last.ParentToolUseID != "" {
+								endMap["parent_tool_use_id"] = last.ParentToolUseID
+							}
+							endPayload, _ := json.Marshal(endMap)
 							hub.Send(sessionID, "tool_end", string(endPayload))
 							hub.Send(sessionID, "agent_state", `{"state":"THINKING"}`)
 						}
@@ -704,6 +831,14 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 			if ev.Session != "" && newClaudeSessionID == "" {
 				newClaudeSessionID = ev.Session
 			}
+			// per-model 成本明细（子代理可能使用不同模型）
+			if ev.ModelUsage != nil {
+				var mu map[string]map[string]interface{}
+				if json.Unmarshal(ev.ModelUsage, &mu) == nil {
+					perModelUsage = mu
+					slog.Info("per-model usage", "models", len(mu), "session", sessionID)
+				}
+			}
 
 		case "sdk_error":
 			errMsg := "AI 引擎执行异常"
@@ -713,6 +848,21 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 			slog.Warn("sdk-runner error", "error", ev.Error, "session", sessionID)
 			hub.Send(sessionID, "text", jsonStr(errMsg))
 			appendBlock("text", "", errMsg)
+
+		case "hook_event":
+			slog.Info("sdk hook event", "data", line[:min(200, len(line))], "session", sessionID)
+			hub.Send(sessionID, "hook_event", line)
+
+		case "checkpoint":
+			if ev.CheckpointID != "" {
+				slog.Info("sdk checkpoint received", "checkpoint_id", ev.CheckpointID, "session", sessionID)
+				cpPayload, _ := json.Marshal(map[string]any{
+					"checkpoint_id": ev.CheckpointID,
+					"session_id":    sessionID,
+					"created_at":    time.Now().UTC().Format(time.RFC3339),
+				})
+				hub.Send(sessionID, "sdk_checkpoint", string(cpPayload))
+			}
 
 		case "sdk_done":
 			slog.Info("sdk-runner done signal", "session", sessionID)
@@ -760,6 +910,9 @@ func runCodingClaude(sessionID int64, message string, imagePaths []string, worki
 	usagePayload := buildUsagePayload(modelUsed, profileID, durationMs, aggCostUSD, aggUsage)
 	if costEstimated {
 		usagePayload["estimated"] = true
+	}
+	if perModelUsage != nil {
+		usagePayload["model_usage"] = perModelUsage
 	}
 
 	var savedMsgID int64
@@ -821,14 +974,39 @@ func handleSDKTaskEvent(hub *Hub, sessionID int64, ev *sdkEvent, subAgents *[]su
 
 	switch ev.Subtype {
 	case "task_started":
-		info := subAgentInfo{
-			ID:          ev.TaskID,
-			Description: ev.Description,
-			Status:      "working",
+		// 检查是否已经从 content_block_start 创建了对应的 subagent（通过 tool_use_id）
+		fallbackID := fmt.Sprintf("sa_%s", ev.ToolUseID)
+		updated := false
+		for i := range *subAgents {
+			if (*subAgents)[i].ID == fallbackID {
+				oldID := (*subAgents)[i].ID
+				(*subAgents)[i].ID = ev.TaskID
+				if ev.Description != "" {
+					(*subAgents)[i].Description = ev.Description
+				}
+				// 发送带 previous_id 的更新，让前端可以匹配到旧 ID
+				updatePayload := map[string]any{
+					"id":          ev.TaskID,
+					"previous_id": oldID,
+					"description": (*subAgents)[i].Description,
+					"status":      (*subAgents)[i].Status,
+				}
+				payload, _ := json.Marshal(updatePayload)
+				hub.Send(sessionID, "subagent_update", string(payload))
+				updated = true
+				break
+			}
 		}
-		*subAgents = append(*subAgents, info)
-		payload, _ := json.Marshal(info)
-		hub.Send(sessionID, "subagent_start", string(payload))
+		if !updated {
+			info := subAgentInfo{
+				ID:          ev.TaskID,
+				Description: ev.Description,
+				Status:      "working",
+			}
+			*subAgents = append(*subAgents, info)
+			payload, _ := json.Marshal(info)
+			hub.Send(sessionID, "subagent_start", string(payload))
+		}
 
 	case "task_progress":
 		found := false
@@ -836,6 +1014,12 @@ func handleSDKTaskEvent(hub *Hub, sessionID int64, ev *sdkEvent, subAgents *[]su
 			if (*subAgents)[i].ID == ev.TaskID {
 				if ev.Description != "" {
 					(*subAgents)[i].Description = ev.Description
+				}
+				if ev.LastToolName != "" {
+					(*subAgents)[i].LastToolName = ev.LastToolName
+				}
+				if ev.Summary != "" {
+					(*subAgents)[i].Summary = ev.Summary
 				}
 				payload, _ := json.Marshal((*subAgents)[i])
 				hub.Send(sessionID, "subagent_update", string(payload))
@@ -1166,6 +1350,11 @@ func buildSDKEnv(cfg *config.Config) map[string]string {
 	}
 	env["CLAUDE_CODE_DISABLE_AUTOUPDATER"] = "1"
 	env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+	// 强制使用 TodoWrite 而非 TaskCreate/TaskUpdate。
+	// TodoWrite 每次调用发送完整的 todos 数组，前端 codingChatSlice 使用 Map 模式合并，
+	// 不需要跨工具调用匹配 task ID。TaskCreate 的 ID 在 tool_result 中分配（我们不捕获），
+	// 导致后续 TaskUpdate 的 taskId 无法匹配 → 任务状态不更新。
+	env["CLAUDE_CODE_ENABLE_TASKS"] = "0"
 
 	maskedKey := authToken
 	if len(maskedKey) > 10 {
@@ -1244,13 +1433,59 @@ func getGitChangedFiles(dir string) []string {
 	return result
 }
 
+// tryUpdateSubAgentDesc 尝试从 Agent/Task 工具的累积 JSON 输入中提取 description，
+// 实时更新 AgentsWindow 中的 subagent 描述（不等到 content_block_stop）。
+// 使用 _descUpdated 标记避免重复发送更新。
+var _subAgentDescUpdated sync.Map
+
+func tryUpdateSubAgentDesc(hub *Hub, sessionID int64, blockID, partialInput string, subAgents *[]subAgentInfo) {
+	key := fmt.Sprintf("%d_%s", sessionID, blockID)
+	if _, loaded := _subAgentDescUpdated.Load(key); loaded {
+		return
+	}
+	var obj struct {
+		Description string `json:"description"`
+		Prompt      string `json:"prompt"`
+	}
+	if json.Unmarshal([]byte(partialInput), &obj) != nil {
+		return
+	}
+	desc := obj.Description
+	if desc == "" {
+		desc = obj.Prompt
+		if len(desc) > 120 {
+			desc = desc[:120] + "..."
+		}
+	}
+	if desc == "" {
+		return
+	}
+	_subAgentDescUpdated.Store(key, true)
+	saID := fmt.Sprintf("sa_%s", blockID)
+	for i := range *subAgents {
+		if (*subAgents)[i].ID == saID || (*subAgents)[i].ID == blockID {
+			(*subAgents)[i].Description = desc
+			payload, _ := json.Marshal(map[string]any{
+				"id":          (*subAgents)[i].ID,
+				"description": desc,
+				"status":      (*subAgents)[i].Status,
+			})
+			hub.Send(sessionID, "subagent_update", string(payload))
+			return
+		}
+	}
+}
+
 // ─── Coding 专属辅助函数 ────────────────────────────────────────────
 
 type subAgentInfo struct {
-	ID          string `json:"id"`
-	Description string `json:"description"`
-	Status      string `json:"status"`
-	Error       string `json:"error,omitempty"`
+	ID           string `json:"id"`
+	Description  string `json:"description"`
+	Status       string `json:"status"`
+	Error        string `json:"error,omitempty"`
+	LastToolName string `json:"last_tool_name,omitempty"`
+	Summary      string `json:"summary,omitempty"`
+	TaskSubject  string `json:"task_subject,omitempty"`
 }
 
 func extractQuestionsBatch(text string) []json.RawMessage {
@@ -1435,6 +1670,35 @@ func detectSubAgentEvents(hub *Hub, sessionID int64, text string, agents *[]subA
 			hub.Send(sessionID, "subagent_done", string(payload))
 		}
 	}
+}
+
+// loadPluginPaths 读取用户配置的 SDK 插件路径
+func loadPluginPaths() []string {
+	var raw string
+	_ = db.DB.QueryRow(`SELECT value FROM kv_store WHERE key='coding_plugin_paths'`).Scan(&raw)
+	if raw == "" {
+		return nil
+	}
+	var paths []string
+	if err := json.Unmarshal([]byte(raw), &paths); err != nil {
+		return nil
+	}
+	return paths
+}
+
+// getBlockedPaths 返回用户或会话配置的额外阻止路径模式（正则）
+func getBlockedPaths(sessionID int64) []string {
+	// 从 sessions 表读取自定义阻止路径（如果有），否则返回默认空列表
+	var raw string
+	_ = db.DB.QueryRow(`SELECT COALESCE(blocked_paths, '') FROM sessions WHERE id=?`, sessionID).Scan(&raw)
+	if raw == "" {
+		return nil
+	}
+	var paths []string
+	if err := json.Unmarshal([]byte(raw), &paths); err != nil {
+		return nil
+	}
+	return paths
 }
 
 func min(a, b int) int {

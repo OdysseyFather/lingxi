@@ -5,10 +5,30 @@ export const createSessionSlice = (set, get) => ({
   activeSessionId: null,
   setActiveSession: async (id) => {
     const isCoding = get().appMode === 'coding';
+
+    if (isCoding) {
+      // 切换会话前：如果当前有正在流式输出的内容，先把 liveBlocks 合并为 assistant 消息保留
+      const prevLive = get().codingLiveBlocks;
+      const prevStreaming = get().codingIsStreaming;
+      const prevSid = get().activeSessionId;
+      if (prevStreaming && prevLive.length > 0 && prevSid) {
+        const remaining = prevLive.filter((b) => b.text || b.type === 'tool');
+        if (remaining.length > 0) {
+          const partialMsg = {
+            id: -Date.now(),
+            session_id: prevSid,
+            role: 'assistant',
+            content: JSON.stringify(remaining),
+            created_at: new Date().toISOString(),
+          };
+          set({ codingMessages: [...get().codingMessages, partialMsg] });
+        }
+      }
+    }
+
     set({
       activeSessionId: id,
       messages: [], liveBlocks: [], codingTasks: [], liveDiffs: [],
-      // 清空 Coding 独立状态
       codingMessages: [], codingLiveBlocks: [],
       codingIsStreaming: false, codingAgentState: 'IDLE',
       codingPendingQuestions: [], codingCurrentQuestionIdx: 0,

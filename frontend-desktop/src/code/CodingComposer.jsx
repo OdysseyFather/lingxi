@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, forwardRef, useImperativeHandle, useMemo } from 'react';
-import { Send, Square, Plus, ChevronDown, ChevronUp, FileText, X, Folder, ArrowRight, Bot, Clock, MessageSquare, Search, Trash2, ImagePlus, Brain } from 'lucide-react';
+import { Send, Square, Plus, ChevronDown, ChevronUp, FileText, X, Folder, ArrowRight, Bot, Clock, MessageSquare, Search, Trash2, ImagePlus, Brain, Mic, MicOff, Loader2 } from 'lucide-react';
 import { cn } from '../ui/cn';
 import { useStore } from '../state/useStore';
 import { api } from '../api/client';
@@ -14,9 +14,15 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
   const [fileBrowserEntries, setFileBrowserEntries] = useState([]);
   const [fileBrowserLoading, setFileBrowserLoading] = useState(false);
   const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const [transcribing, setTranscribing] = useState(false);
+  const [recordDuration, setRecordDuration] = useState(0);
   const textareaRef = useRef(null);
   const composingRef = useRef(false);
   const composingEndTsRef = useRef(0);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordTimerRef = useRef(null);
   const isStreaming = useStore((s) => s.codingIsStreaming);
   const abort = useStore((s) => s.codingAbort);
   const profiles = useStore((s) => s.profiles);
@@ -38,6 +44,7 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
   const setCodingThinkingEnabled = useStore((s) => s.setCodingThinkingEnabled);
   const codingMode = useStore((s) => s.codingMode);
   const setCodingMode = useStore((s) => s.setCodingMode);
+  const pushNotification = useStore((s) => s.pushNotification);
 
   useImperativeHandle(ref, () => ({
     insertText: (str) => {
@@ -91,36 +98,6 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
     e.dataTransfer.dropEffect = 'copy';
   }, []);
 
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    const filePath = e.dataTransfer.getData('text/plain');
-    const isDir = e.dataTransfer.getData('application/x-is-dir') === 'true';
-    if (filePath) {
-      const name = filePath.split('/').pop();
-      setAttachedFiles(prev => [...prev, { path: filePath, name, isDir }]);
-      setTimeout(() => textareaRef.current?.focus(), 0);
-      return;
-    }
-    const droppedFiles = Array.from(e.dataTransfer.files || []);
-    if (droppedFiles.length > 0) {
-      const imgFiles = droppedFiles.filter(f => f.type.startsWith('image/'));
-      const txtFiles = droppedFiles.filter(f => !f.type.startsWith('image/'));
-      if (imgFiles.length > 0) pickImageFiles(imgFiles);
-      if (txtFiles.length > 0) {
-        Promise.all(txtFiles.map(async f => {
-          const ext = f.name.split('.').pop() || 'txt';
-          const content = await f.text();
-          return { name: f.name, ext, content, size: f.size };
-        })).then((parsed) => {
-          for (const pf of parsed) {
-            setAttachedFiles(prev => [...prev, { path: pf.name, name: pf.name, isDir: false, content: pf.content, ext: pf.ext }]);
-          }
-        });
-      }
-      setTimeout(() => textareaRef.current?.focus(), 0);
-    }
-  }, []);
-
   const arrayBufferToBase64 = useCallback((buffer) => {
     const bytes = new Uint8Array(buffer);
     let binary = '';
@@ -140,6 +117,30 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
     if (arr.length > 0) setImages(prev => [...prev, ...arr]);
   }, [arrayBufferToBase64]);
 
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    const filePath = e.dataTransfer.getData('text/plain');
+    const isDir = e.dataTransfer.getData('application/x-is-dir') === 'true';
+    if (filePath) {
+      const name = filePath.split('/').pop();
+      setAttachedFiles(prev => [...prev, { path: filePath, name, isDir }]);
+      setTimeout(() => textareaRef.current?.focus(), 0);
+      return;
+    }
+    const droppedFiles = Array.from(e.dataTransfer.files || []);
+    if (droppedFiles.length > 0) {
+      const imgFiles = droppedFiles.filter(f => f.type.startsWith('image/'));
+      const nonImgFiles = droppedFiles.filter(f => !f.type.startsWith('image/'));
+      if (imgFiles.length > 0) pickImageFiles(imgFiles);
+      for (const f of nonImgFiles) {
+        const absPath = f.path || f.name;
+        const name = absPath.split('/').pop() || f.name;
+        setAttachedFiles(prev => [...prev, { path: absPath, name, isDir: false }]);
+      }
+      setTimeout(() => textareaRef.current?.focus(), 0);
+    }
+  }, [pickImageFiles]);
+
   const handlePaste = useCallback((e) => {
     const items = e.clipboardData?.items || [];
     const pastedFiles = [];
@@ -155,7 +156,67 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
     }
   }, [pickImageFiles]);
 
-  const openFileBrowser = useCallback(async () => {
+  const startRecording = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream, {
+        mimeType: MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm',
+      });
+      audioChunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      recorder.onstop = async () => {
+        stream.getTracks().forEach((t) => t.stop());
+        clearInterval(recordTimerRef.current);
+        const blob = new Blob(audioChunksRef.current, { type: recorder.mimeType || 'audio/webm' });
+        if (blob.size < 1000) { setRecording(false); return; }
+        setTranscribing(true);
+        try {
+          const result = await api.transcribeAudio(blob);
+          if (result) {
+            setText((prev) => prev + (prev && !prev.endsWith('\n') ? ' ' : '') + result);
+            requestAnimationFrame(() => {
+              const el = textareaRef.current;
+              if (el) { el.focus(); autoResize(el); }
+            });
+          }
+        } catch (err) {
+          pushNotification({ title: '语音识别失败', body: err.message || '请重试' });
+        } finally {
+          setTranscribing(false);
+          setRecording(false);
+        }
+      };
+      mediaRecorderRef.current = recorder;
+      recorder.start(250);
+      setRecording(true);
+      setRecordDuration(0);
+      recordTimerRef.current = setInterval(() => setRecordDuration((d) => d + 1), 1000);
+    } catch (err) {
+      pushNotification({ title: '无法录音', body: err.message || '请检查麦克风权限' });
+    }
+  }, [pushNotification]);
+
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
+    clearInterval(recordTimerRef.current);
+  }, []);
+
+  const openFilePicker = useCallback(async () => {
+    if (window.electronAPI?.selectFiles) {
+      const paths = await window.electronAPI.selectFiles();
+      if (paths && paths.length > 0) {
+        for (const p of paths) {
+          const name = p.split('/').pop() || p;
+          const isDir = !name.includes('.') || p.endsWith('/');
+          setAttachedFiles(prev => [...prev, { path: p, name, isDir }]);
+        }
+      }
+      return;
+    }
     const dir = projectPath || '';
     setFileBrowserPath(dir);
     setShowFileBrowser(true);
@@ -301,6 +362,26 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
           onDragOver={handleDragOver}
           onDrop={handleDrop}
         >
+          {/* 录音状态指示条 */}
+          {(recording || transcribing) && (
+            <div className="flex items-center gap-2 mx-4 mt-3 mb-1 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20">
+              {recording ? (
+                <>
+                  <span className="voice-pulse w-2.5 h-2.5 rounded-full bg-red-500" />
+                  <span className="text-xs text-red-600 font-medium">录音中 {recordDuration}s</span>
+                  <button onClick={stopRecording} className="ml-auto text-xs text-red-500 hover:text-red-700 font-medium transition">
+                    点击停止并识别
+                  </button>
+                </>
+              ) : (
+                <>
+                  <Loader2 size={14} className="animate-spin text-[var(--accent)]" />
+                  <span className="text-xs text-[var(--accent)] font-medium">语音识别中...</span>
+                </>
+              )}
+            </div>
+          )}
+
           {/* 粘贴的图片预览 */}
           {images.length > 0 && (
             <div className="flex gap-2 flex-wrap px-4 pt-3">
@@ -338,9 +419,9 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
           {/* 工具栏 */}
           <div className="flex items-center gap-1.5 px-3 pb-2.5 flex-wrap">
             <button
-              onClick={openFileBrowser}
+              onClick={openFilePicker}
               className="p-1.5 rounded-lg text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)] transition shrink-0"
-              title="附加文件"
+              title="附加文件/目录"
             >
               <Plus size={16} />
             </button>
@@ -355,6 +436,29 @@ export const CodingComposer = forwardRef(function CodingComposer({ onSend, disab
                 <ImagePlus size={16} />
               </span>
             </label>
+
+            {/* 语音输入 */}
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                if (transcribing) return;
+                if (recording) stopRecording();
+                else startRecording();
+              }}
+              disabled={transcribing}
+              className={cn(
+                'p-1.5 rounded-lg transition shrink-0',
+                recording
+                  ? 'text-red-500 bg-red-50 hover:bg-red-100 animate-pulse'
+                  : transcribing
+                    ? 'text-[var(--text-faint)] cursor-wait'
+                    : 'text-[var(--text-faint)] hover:text-[var(--text-soft)] hover:bg-[var(--accent-soft)]'
+              )}
+              title={recording ? '点击停止' : transcribing ? '识别中...' : '语音输入'}
+            >
+              {transcribing ? <Loader2 size={16} className="animate-spin" /> :
+               recording ? <MicOff size={16} /> : <Mic size={16} />}
+            </button>
 
             {/* 模式切换器 */}
             <ModeSwitcher value={codingMode} onChange={setCodingMode} />

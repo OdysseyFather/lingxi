@@ -292,32 +292,6 @@ App -> User : 返回结果
 
 ---
 
-# 【任务计划 — 编码/操作任务必须输出】
-
-**凡是涉及多步骤编码、文件操作、配置修改、调试排查等任务（≥2 步），你必须在开始工作前先输出一个任务计划 JSON 块。**
-
-格式：
-
-` + "```json" + `
-{"type":"task_plan","tasks":[{"id":"1","content":"描述第一步","status":"pending"},{"id":"2","content":"描述第二步","status":"pending"},{"id":"3","content":"描述第三步","status":"pending"}]}
-` + "```" + `
-
-规则：
-1. **每次多步骤任务开始前必须输出**，让用户能看到工作计划
-2. 每个 task 的 status 初始为 "pending"
-3. **每完成一步，立即输出一个更新后的 task_plan**，将已完成步骤标记为 "completed"，当前进行中的步骤标记为 "in_progress"
-4. content 用简洁的中文描述每步要做什么
-5. 任务数量通常 3-8 个，太多则合并
-6. 所有步骤完成后，输出最终的 task_plan，所有 status 设为 "completed"
-
-示例 — 完成第一步后：
-
-` + "```json" + `
-{"type":"task_plan","tasks":[{"id":"1","content":"读取配置文件","status":"completed"},{"id":"2","content":"修改数据库连接参数","status":"in_progress"},{"id":"3","content":"重启服务验证","status":"pending"}]}
-` + "```" + `
-
----
-
 # 【绝对禁止清单】
 
 1. ❌ 输出 {"state":"..."} 这类 JSON 状态串到回答里——状态由后端自动推断
@@ -522,15 +496,17 @@ func firstLine(s string) string {
 // ─── 事件结构 ────────────────────────────────────────────────────
 
 type msgBlock struct {
-	Type   string `json:"type"`
-	Name   string `json:"name,omitempty"`
-	Text   string `json:"text"`
-	Done   bool   `json:"done,omitempty"`
-	Label  string `json:"label,omitempty"`
-	Input  string `json:"input,omitempty"`  // 工具输入摘要（已 redact 截断）
-	Output string `json:"output,omitempty"` // 工具输出摘要（保留前 N 字符）
-	Status string `json:"status,omitempty"` // ok | failed
-	Ms     int64  `json:"ms,omitempty"`     // 工具耗时（毫秒）
+	Type             string `json:"type"`
+	Name             string `json:"name,omitempty"`
+	Text             string `json:"text"`
+	Done             bool   `json:"done,omitempty"`
+	Label            string `json:"label,omitempty"`
+	Input            string `json:"input,omitempty"`  // 工具输入摘要（已 redact 截断）
+	Output           string `json:"output,omitempty"` // 工具输出摘要（保留前 N 字符）
+	Status           string `json:"status,omitempty"` // ok | failed
+	Ms               int64  `json:"ms,omitempty"`     // 工具耗时（毫秒）
+	BlockID          string `json:"blockId,omitempty"`
+	ParentToolUseID  string `json:"parent_tool_use_id,omitempty"`
 }
 
 type claudeEvent struct {
@@ -623,6 +599,17 @@ func isNonExistentTool(name string) bool {
 		"askquestion", "ask_question",
 		"todowrite", "todoread",
 		"todo_write", "todo_read":
+		return true
+	}
+	return false
+}
+
+// isCodingOnlyTool 判断工具是否为 Coding View 专属工具，
+// 主模式不应向前端推送这些工具的 tool_start 事件
+func isCodingOnlyTool(name string) bool {
+	switch name {
+	case "Agent", "TaskCreate", "TaskUpdate", "TaskGet", "TaskList",
+		"TodoWrite", "TodoRead", "Workflow":
 		return true
 	}
 	return false
@@ -1847,34 +1834,35 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 						aggUsage.OutputTokens = inner.Usage.OutputTokens
 					}
 				}
-			case "content_block_start":
-				if inner.ContentBlock.Type == "tool_use" {
-					toolName := inner.ContentBlock.Name
-					// AskUser 类工具不向前端推送 tool_start（最终会转为文本块）
-					if !isAskUserTool(toolName) {
-						payload, _ := json.Marshal(map[string]any{
-							"id":    inner.ContentBlock.ID,
-							"name":  toolName,
-							"label": toolDisplayLabel(toolName),
-						})
-						hub.Send(sessionID, "tool_start", string(payload))
+		case "content_block_start":
+			if inner.ContentBlock.Type == "tool_use" {
+				toolName := inner.ContentBlock.Name
+				// AskUser 类工具不向前端推送 tool_start（最终会转为文本块）
+				// Coding 专属工具（Agent/TaskCreate/TaskUpdate 等）在主模式中不显示
+				if !isAskUserTool(toolName) && !isCodingOnlyTool(toolName) {
+					payload, _ := json.Marshal(map[string]any{
+						"id":    inner.ContentBlock.ID,
+						"name":  toolName,
+						"label": toolDisplayLabel(toolName),
+					})
+					hub.Send(sessionID, "tool_start", string(payload))
 
-						if isReadTool(toolName) {
-							hub.Send(sessionID, "agent_state", `{"state":"CHECKING"}`)
-						} else {
-							hub.Send(sessionID, "agent_state", `{"state":"EXECUTING"}`)
-						}
+					if isReadTool(toolName) {
+						hub.Send(sessionID, "agent_state", `{"state":"CHECKING"}`)
+					} else {
+						hub.Send(sessionID, "agent_state", `{"state":"EXECUTING"}`)
 					}
-					b := msgBlock{
-						Type:  "tool",
-						Name:  toolName,
-						Label: toolDisplayLabel(toolName),
-						Ms:    time.Now().UnixMilli(),
-					}
-					blocks = append(blocks, b)
-				} else if inner.ContentBlock.Type == "thinking" {
-					appendBlock("thinking", "", "")
 				}
+				b := msgBlock{
+					Type:  "tool",
+					Name:  toolName,
+					Label: toolDisplayLabel(toolName),
+					Ms:    time.Now().UnixMilli(),
+				}
+				blocks = append(blocks, b)
+			} else if inner.ContentBlock.Type == "thinking" {
+				appendBlock("thinking", "", "")
+			}
 
 			case "content_block_delta":
 				d := inner.Delta
@@ -1986,16 +1974,17 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 						last.Input = summary
 						last.Ms = elapsed
 						last.Status = "ok"
-						// 推送富 tool_end 事件
-						endPayload, _ := json.Marshal(map[string]any{
-							"done":   true,
-							"name":   last.Name,
-							"label":  last.Label,
-							"input":  summary,
-							"ms":     elapsed,
-							"status": "ok",
-						})
-						hub.Send(sessionID, "tool_end", string(endPayload))
+						if !isCodingOnlyTool(last.Name) {
+							endPayload, _ := json.Marshal(map[string]any{
+								"done":   true,
+								"name":   last.Name,
+								"label":  last.Label,
+								"input":  summary,
+								"ms":     elapsed,
+								"status": "ok",
+							})
+							hub.Send(sessionID, "tool_end", string(endPayload))
+						}
 						hub.Send(sessionID, "agent_state", `{"state":"THINKING"}`)
 					}
 					}
@@ -2260,8 +2249,10 @@ func emitTaskCreateAsUpdate(hub *Hub, sessionID int64, rawInput string) {
 // emitTaskStatusUpdate 将 TaskUpdate 输入转换为 task_update 格式推送
 func emitTaskStatusUpdate(hub *Hub, sessionID int64, rawInput string) {
 	var parsed struct {
-		TaskID string `json:"taskId"`
-		Status string `json:"status"`
+		TaskID      string `json:"taskId"`
+		Status      string `json:"status"`
+		Subject     string `json:"subject"`
+		Description string `json:"description"`
 	}
 	if err := json.Unmarshal([]byte(rawInput), &parsed); err != nil {
 		return
@@ -2269,14 +2260,19 @@ func emitTaskStatusUpdate(hub *Hub, sessionID int64, rawInput string) {
 	if parsed.TaskID == "" {
 		return
 	}
-	status := parsed.Status
-	if status == "" {
-		status = "in_progress"
+	todo := map[string]any{"id": parsed.TaskID}
+	if parsed.Status != "" {
+		todo["status"] = parsed.Status
+	} else {
+		todo["status"] = "in_progress"
+	}
+	if parsed.Subject != "" {
+		todo["content"] = parsed.Subject
+	} else if parsed.Description != "" {
+		todo["content"] = parsed.Description
 	}
 	payload, _ := json.Marshal(map[string]any{
-		"todos": []map[string]any{
-			{"id": parsed.TaskID, "status": status},
-		},
+		"todos": []map[string]any{todo},
 		"title": "Tasks",
 		"merge": true,
 	})
@@ -3053,26 +3049,26 @@ func RunA2AStreamingTurn(sessionID int64, message string, agentID int64, forward
 						aggUsage.OutputTokens = inner.Usage.OutputTokens
 					}
 				}
-			case "content_block_start":
-				if inner.ContentBlock.Type == "tool_use" {
-					toolName := inner.ContentBlock.Name
-					if !isAskUserTool(toolName) {
-						payload, _ := json.Marshal(map[string]any{
-							"id":    inner.ContentBlock.ID,
-							"name":  toolName,
-							"label": toolDisplayLabel(toolName),
-						})
-						hub.Send(sessionID, "tool_start", string(payload))
-					}
-					blocks = append(blocks, msgBlock{
-						Type:  "tool",
-						Name:  toolName,
-						Label: toolDisplayLabel(toolName),
-						Ms:    time.Now().UnixMilli(),
+		case "content_block_start":
+			if inner.ContentBlock.Type == "tool_use" {
+				toolName := inner.ContentBlock.Name
+				if !isAskUserTool(toolName) && !isCodingOnlyTool(toolName) {
+					payload, _ := json.Marshal(map[string]any{
+						"id":    inner.ContentBlock.ID,
+						"name":  toolName,
+						"label": toolDisplayLabel(toolName),
 					})
-				} else if inner.ContentBlock.Type == "thinking" {
-					appendBlock("thinking", "", "")
+					hub.Send(sessionID, "tool_start", string(payload))
 				}
+				blocks = append(blocks, msgBlock{
+					Type:  "tool",
+					Name:  toolName,
+					Label: toolDisplayLabel(toolName),
+					Ms:    time.Now().UnixMilli(),
+				})
+			} else if inner.ContentBlock.Type == "thinking" {
+				appendBlock("thinking", "", "")
+			}
 			case "content_block_delta":
 				d := inner.Delta
 				switch d.Type {
@@ -3132,15 +3128,17 @@ func RunA2AStreamingTurn(sessionID int64, message string, agentID int64, forward
 							last.Input = summary
 							last.Ms = elapsed
 							last.Status = "ok"
-							endPayload, _ := json.Marshal(map[string]any{
-								"done":   true,
-								"name":   last.Name,
-								"label":  last.Label,
-								"input":  summary,
-								"ms":     elapsed,
-								"status": "ok",
-							})
-							hub.Send(sessionID, "tool_end", string(endPayload))
+							if !isCodingOnlyTool(last.Name) {
+								endPayload, _ := json.Marshal(map[string]any{
+									"done":   true,
+									"name":   last.Name,
+									"label":  last.Label,
+									"input":  summary,
+									"ms":     elapsed,
+									"status": "ok",
+								})
+								hub.Send(sessionID, "tool_end", string(endPayload))
+							}
 						}
 					}
 				}

@@ -340,11 +340,28 @@ function ChangeSummaryLayer({ changes }) {
   if (filePaths.length === 0) return null;
 
   const handleViewDiff = async (fp) => {
+    if (!codingProjectPath) {
+      setCodingActiveDiff({ filePath: fp, diffText: '// 未设置工作目录，无法获取 diff' });
+      return;
+    }
+    let relativePath = fp;
+    if (relativePath.startsWith(codingProjectPath)) {
+      relativePath = relativePath.slice(codingProjectPath.length);
+      if (relativePath.startsWith('/')) relativePath = relativePath.slice(1);
+    }
     try {
-      const res = await api.getCodingDiff(codingProjectPath, fp);
-      setCodingActiveDiff({ filePath: fp, diffText: res.diff || '' });
+      const res = await api.getCodingDiff(codingProjectPath, relativePath);
+      const diffContent = res?.diff || '';
+      if (!diffContent && res?.is_new && res?.new_content) {
+        const lines = res.new_content.split('\n').map(l => '+' + l).join('\n');
+        setCodingActiveDiff({ filePath: fp, diffText: `@@ -0,0 +1,${res.new_content.split('\n').length} @@\n${lines}` });
+      } else if (!diffContent) {
+        setCodingActiveDiff({ filePath: fp, diffText: '// 该文件当前没有未提交的变更' });
+      } else {
+        setCodingActiveDiff({ filePath: fp, diffText: diffContent });
+      }
     } catch {
-      setCodingActiveDiff({ filePath: fp, diffText: '// Failed to load diff' });
+      setCodingActiveDiff({ filePath: fp, diffText: '// 获取 diff 失败' });
     }
   };
 
@@ -376,6 +393,11 @@ function ChangeSummaryLayer({ changes }) {
             <div className="px-3.5 pb-2.5 space-y-0.5">
               {filePaths.map((fp, i) => {
                 const shortName = fp.split('/').pop();
+                let displayPath = fp;
+                if (codingProjectPath && fp.startsWith(codingProjectPath)) {
+                  displayPath = fp.slice(codingProjectPath.length);
+                  if (displayPath.startsWith('/')) displayPath = displayPath.slice(1);
+                }
                 return (
                   <motion.div
                     key={i}
@@ -386,7 +408,7 @@ function ChangeSummaryLayer({ changes }) {
                   >
                     <FileText size={11} className="text-[var(--accent)] shrink-0" />
                     <span className="text-[var(--text-soft)] truncate font-medium" title={fp}>{shortName}</span>
-                    <span className="text-[var(--text-faint)] truncate text-[10px] hidden sm:block flex-1 font-mono">{fp}</span>
+                    <span className="text-[var(--text-faint)] truncate text-[10px] hidden sm:block flex-1 font-mono">{displayPath}</span>
                     <button
                       onClick={() => handleViewDiff(fp)}
                       className="opacity-0 group-hover:opacity-100 text-[10px] text-[var(--accent)] hover:text-[var(--text)] font-semibold px-2 py-0.5 rounded-md border border-[var(--coding-border)]/60 bg-[var(--coding-surface-raised)]/80 hover:bg-[var(--accent-soft)] transition-all shrink-0"

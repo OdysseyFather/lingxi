@@ -89,6 +89,7 @@ func main() {
 	api.PATCH("/sessions/:id", handler.UpdateSession)
 	api.DELETE("/sessions/:id", handler.DeleteSession)
 	api.POST("/sessions/batch-delete", handler.BatchDeleteSessions)
+	api.POST("/sessions/:id/fork", handler.ForkSession)
 	api.POST("/sessions/:id/extract-knowledge", handler.ExtractSessionKnowledge)
 	api.GET("/sessions/:id/messages", handler.ListMessages)
 	api.GET("/messages/search", handler.SearchMessages)
@@ -337,6 +338,8 @@ func main() {
 	api.GET("/files/read", handler.ReadFileContent)
 	api.PUT("/files/write", handler.WriteFileContent)
 	api.GET("/files/project", handler.GetProjectInfo)
+	api.GET("/files/search", handler.SearchFiles)
+	api.GET("/files/search-names", handler.SearchFileNames)
 
 	// Coding 模式专用 API
 	api.GET("/coding/changes", handler.GetWorkspaceChanges)
@@ -348,6 +351,18 @@ func main() {
 	api.POST("/coding/checkpoint", handler.CreateCheckpoint)
 	api.POST("/coding/rollback/:id", handler.RollbackCheckpoint)
 	api.GET("/coding/checkpoints/:sessionId", handler.ListCheckpoints)
+	api.GET("/coding/agents", handler.ListCodingAgents)
+	api.POST("/coding/agents", handler.SaveCodingAgent)
+	api.DELETE("/coding/agents/:id", handler.DeleteCodingAgent)
+	api.PUT("/coding/agents/:id", handler.UpdateCodingAgent)
+	api.GET("/coding/plugins", handler.GetCodingPlugins)
+	api.PUT("/coding/plugins", handler.SaveCodingPlugins)
+	api.GET("/coding/hooks-config", handler.GetCodingHooksConfigHandler)
+	api.PUT("/coding/hooks-config", handler.UpdateCodingHooksConfigHandler)
+	api.GET("/coding/prompt-config", handler.GetCodingPromptConfigHandler)
+	api.PUT("/coding/prompt-config", handler.UpdateCodingPromptConfigHandler)
+	api.GET("/coding/perm-config", handler.GetCodingPermConfigHandler)
+	api.PUT("/coding/perm-config", handler.UpdateCodingPermConfigHandler)
 
 	// Electron 启动时下发激活档案明文 token
 	api.POST("/runtime/active-secret", handler.SetActiveSecret)

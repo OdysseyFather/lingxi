@@ -17,13 +17,13 @@ export function AgentsWindow() {
   const codingTasks = useStore((s) => s.codingTasks);
   const [collapsed, setCollapsed] = useState(false);
 
-  const hasContent = subAgents.length > 0 || isStreaming;
-  if (!hasContent) return null;
-
   const workingCount = subAgents.filter(a => a.status === 'working').length;
   const doneCount = subAgents.filter(a => a.status === 'done').length;
   const errorCount = subAgents.filter(a => a.status === 'error').length;
   const agentTree = useMemo(() => buildAgentTree(subAgents), [subAgents]);
+
+  const hasContent = subAgents.length > 0 || isStreaming;
+  if (!hasContent) return null;
 
   return (
     <motion.div
@@ -42,7 +42,7 @@ export function AgentsWindow() {
           <div className="w-7 h-7 rounded-lg bg-[var(--accent)]/10 flex items-center justify-center">
             <GitBranch size={14} className="text-[var(--accent)]" />
           </div>
-          <span className="text-[14px] font-bold text-[var(--text)]">Agent Tree</span>
+          <span className="text-[14px] font-bold text-[var(--text)]">Multi-Agent Tree</span>
           {subAgents.length > 0 && (
             <span className="text-[11px] text-[var(--text-faint)] font-mono">
               {subAgents.length} agent{subAgents.length > 1 ? 's' : ''}
@@ -174,9 +174,11 @@ function MainAgentCard({ agentState, isStreaming, tasks }) {
 }
 
 function SubAgentCard({ agent, depth, isLast }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const hasChildren = agent.children && agent.children.length > 0;
-  const hasOutput = Boolean(agent.output);
+  const activities = agent.toolActivities || [];
+  const activeTools = activities.filter(t => !t.done);
+  const doneTools = activities.filter(t => t.done);
 
   return (
     <>
@@ -224,27 +226,40 @@ function SubAgentCard({ agent, depth, isLast }) {
             <div className="text-[12px] font-medium text-[var(--text)] truncate">
               {agent.description || `Sub-agent ${agent.id}`}
             </div>
-            {agent.tools && agent.tools.length > 0 && (
+            {/* Task assignment info */}
+            {agent.task_subject && (
               <div className="flex items-center gap-1 mt-0.5">
-                <Wrench size={9} className="text-[var(--text-faint)]" />
-                <span className="text-[10px] text-[var(--text-faint)] truncate">{agent.tools.join(', ')}</span>
+                <Eye size={9} className="text-[var(--text-faint)]" />
+                <span className="text-[10px] text-[var(--text-faint)] truncate">{agent.task_subject}</span>
+              </div>
+            )}
+            {/* Done summary */}
+            {agent.status === 'done' && agent.summary && (
+              <div className="flex items-center gap-1 mt-0.5">
+                <MessageSquare size={9} className="text-emerald-500/70" />
+                <span className="text-[10px] text-emerald-600/80 truncate">{agent.summary.slice(0, 80)}</span>
               </div>
             )}
           </div>
 
-          {/* Status */}
-          <AgentStatusPill status={agent.status} />
+          {/* Status + tool count */}
+          <div className="flex items-center gap-2">
+            {activities.length > 0 && (
+              <span className="text-[10px] text-[var(--text-faint)] font-mono">
+                {doneTools.length}/{activities.length}
+              </span>
+            )}
+            <AgentStatusPill status={agent.status} />
+          </div>
 
-          {(hasOutput || hasChildren) && (
-            <span className="text-[var(--text-faint)]">
-              {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-            </span>
-          )}
+          <span className="text-[var(--text-faint)]">
+            {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+          </span>
         </button>
 
-        {/* Expanded output */}
+        {/* Tool activity feed — always visible when expanded */}
         <AnimatePresence>
-          {expanded && hasOutput && (
+          {expanded && (activities.length > 0 || agent.summary) && (
             <motion.div
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
@@ -253,25 +268,39 @@ function SubAgentCard({ agent, depth, isLast }) {
               className="overflow-hidden"
               style={{ paddingLeft: 52 + depth * 24 }}
             >
-              <div className="pr-5 pb-3">
-                <div className="bg-[var(--coding-surface)] rounded-lg p-3 text-[11px] text-[var(--text-soft)] font-mono leading-relaxed max-h-40 overflow-auto scrollable border border-[var(--coding-border)]/50">
-                  {agent.output}
-                </div>
+              <div className="pr-5 pb-2 space-y-0.5">
+                {activities.map((tool, ti) => (
+                  <motion.div
+                    key={`${tool.name}-${tool.ts}-${ti}`}
+                    initial={{ opacity: 0, x: -4 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    className="flex items-center gap-2 py-0.5"
+                  >
+                    {tool.done ? (
+                      <CheckCircle2 size={10} className="text-emerald-500 shrink-0" />
+                    ) : (
+                      <Loader2 size={10} className="text-[var(--accent)] animate-spin shrink-0" />
+                    )}
+                    <span className={cn(
+                      'text-[10px] font-mono truncate',
+                      tool.done ? 'text-[var(--text-faint)]' : 'text-[var(--accent)] font-semibold'
+                    )}>
+                      {tool.name}
+                    </span>
+                    {tool.done && tool.endedAt && tool.ts && (
+                      <span className="text-[9px] text-[var(--text-faint)] ml-auto shrink-0">
+                        {Math.max(1, Math.round((tool.endedAt - tool.ts) / 1000))}s
+                      </span>
+                    )}
+                    {!tool.done && (
+                      <span className="text-[9px] text-[var(--accent)]/70 ml-auto shrink-0">running</span>
+                    )}
+                  </motion.div>
+                ))}
               </div>
             </motion.div>
           )}
         </AnimatePresence>
-
-        {/* Collapsed output preview */}
-        {!expanded && agent.status === 'done' && hasOutput && (
-          <div
-            className="flex items-center gap-1.5 text-[11px] text-emerald-600/80 pb-2"
-            style={{ paddingLeft: 52 + depth * 24 }}
-          >
-            <MessageSquare size={9} />
-            <span className="truncate max-w-[280px]">{agent.output.slice(0, 80)}</span>
-          </div>
-        )}
       </motion.div>
 
       {/* Recursive children */}

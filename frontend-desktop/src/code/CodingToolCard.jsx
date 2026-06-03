@@ -58,7 +58,8 @@ export function CodingToolCard({ name, label, done, input, fullInput, status, ms
   const actualFileDiff = block?.fileDiff || fileDiff;
   const actualLabel = block?.label || label;
 
-  const [detailOpen, setDetailOpen] = useState(defaultExpanded || false);
+  const isSubAgentTool = actualName === 'Task' || actualName === 'TaskCreate';
+  const [detailOpen, setDetailOpen] = useState(isSubAgentTool ? false : (defaultExpanded || false));
   const [copied, setCopied] = useState(false);
   const meta = getMeta(actualName);
   const Icon = meta.icon;

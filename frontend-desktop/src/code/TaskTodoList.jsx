@@ -47,15 +47,16 @@ export function StickyTaskBar({ tasks }) {
   const codingSendMessage = useStore((s) => s.codingSendMessage);
   const codingProjectPath = useStore((s) => s.codingProjectPath);
 
-  if (!tasks || tasks.length === 0) return null;
-
-  const flatTasks = flattenTasks(tasks);
+  const hasTasks = tasks && tasks.length > 0;
+  const flatTasks = hasTasks ? flattenTasks(tasks) : [];
   const completed = flatTasks.filter(t => t.status === 'completed').length;
   const total = flatTasks.length;
   const progress = total > 0 ? (completed / total) * 100 : 0;
   const allDone = completed === total && total > 0;
   const current = flatTasks.find(t => t.status === 'in_progress');
-  const elapsed = useElapsed(startedAt, !allDone);
+  const elapsed = useElapsed(startedAt, hasTasks && !allDone);
+
+  if (!hasTasks) return null;
 
   const handleSkip = useCallback(() => {
     if (current) {
@@ -109,7 +110,7 @@ export function StickyTaskBar({ tasks }) {
             <>
               <span className="text-[var(--coding-border)] text-[10px]">|</span>
               <span className="text-[12px] text-[var(--accent)] truncate max-w-[240px] font-medium">
-                {current.content || current.title || 'Running...'}
+                {current.content || current.subject || current.title || 'Running...'}
               </span>
             </>
           )}
@@ -209,7 +210,7 @@ function TaskRow({ task, index }) {
         task.status === 'pending' && 'text-[var(--text-soft)]',
         task.status === 'cancelled' && 'text-[var(--text-faint)] line-through'
       )}>
-        {task.content || task.title}
+        {task.content || task.subject || task.title}
       </span>
     </motion.div>
   );
@@ -263,7 +264,7 @@ export function TaskTodoList({ embedded }) {
                 task.status === 'pending' && 'text-[var(--text-soft)]',
                 task.status === 'cancelled' && 'text-[var(--text-faint)] line-through'
               )}>
-                {task.content || task.title}
+                {task.content || task.subject || task.title}
               </span>
             </motion.div>
           ))}

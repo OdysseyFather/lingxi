@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef, lazy, Suspense } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeftRight, Plus, FolderOpen, Search, Menu, Terminal, Settings, X } from 'lucide-react';
+import { ArrowLeftRight, Plus, FolderOpen, Search, Menu, Terminal, Settings, X, ChevronRight, Home, Folder, ArrowLeft } from 'lucide-react';
 import { cn } from '../ui/cn';
 import { useStore, initStore } from '../state/useStore';
 import { CodingTabBar } from './CodingTabBar';
@@ -14,6 +14,109 @@ import { TerminalPanel } from './TerminalPanel';
 import { CodingErrorBoundary } from './CodingErrorBoundary';
 import { ToastStack } from '../ui/primitives';
 import { api } from '../api/client';
+
+function DirectoryBrowserModal({ open, onClose, onSelect, initialPath }) {
+  const [currentPath, setCurrentPath] = useState(initialPath || '');
+  const [entries, setEntries] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [manualInput, setManualInput] = useState('');
+
+  const loadDir = useCallback(async (dirPath) => {
+    setLoading(true);
+    try {
+      const res = await api.listDirectory(dirPath || '');
+      setCurrentPath(res.path || dirPath);
+      setManualInput(res.path || dirPath);
+      setEntries((res.entries || []).filter((e) => e.is_dir));
+    } catch {
+      setEntries([]);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    if (open) loadDir(initialPath || '');
+  }, [open, initialPath, loadDir]);
+
+  if (!open) return null;
+
+  const parentPath = currentPath ? currentPath.split('/').slice(0, -1).join('/') || '/' : '/';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={onClose}>
+      <motion.div
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        onClick={(e) => e.stopPropagation()}
+        className="bg-[var(--bg-elev,#fff)] rounded-2xl shadow-2xl w-[90vw] max-w-lg max-h-[70vh] flex flex-col overflow-hidden border border-[var(--line)]"
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--line)]">
+          <h3 className="text-[15px] font-bold text-[var(--text)]">选择项目目录</h3>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-[var(--bg-soft)] text-[var(--text-faint)]">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="flex items-center gap-1 px-3 py-2 border-b border-[var(--line)]">
+          <button
+            onClick={() => loadDir(parentPath)}
+            className="p-1.5 rounded-lg hover:bg-[var(--bg-soft)] text-[var(--text-faint)] shrink-0"
+            title="上级目录"
+          >
+            <ArrowLeft size={14} />
+          </button>
+          <button
+            onClick={() => loadDir('')}
+            className="p-1.5 rounded-lg hover:bg-[var(--bg-soft)] text-[var(--text-faint)] shrink-0"
+            title="用户主目录"
+          >
+            <Home size={14} />
+          </button>
+          <input
+            value={manualInput}
+            onChange={(e) => setManualInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') loadDir(manualInput); }}
+            className="flex-1 px-2 py-1 text-[12px] rounded-md border border-[var(--line)] bg-[var(--bg)] text-[var(--text)] focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+            placeholder="输入路径后回车"
+          />
+        </div>
+
+        <div className="flex-1 overflow-y-auto">
+          {loading ? (
+            <div className="flex items-center justify-center py-10">
+              <div className="w-5 h-5 border-2 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : entries.length === 0 ? (
+            <div className="text-center py-10 text-[13px] text-[var(--text-faint)]">无子目录</div>
+          ) : (
+            entries.map((e) => (
+              <button
+                key={e.path}
+                onClick={() => loadDir(e.path)}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-[var(--accent-soft)] transition-colors border-b border-[var(--line)]/50"
+              >
+                <Folder size={16} className="text-[var(--accent)] shrink-0" />
+                <span className="text-[13px] text-[var(--text)] truncate flex-1">{e.name}</span>
+                <ChevronRight size={14} className="text-[var(--text-faint)] shrink-0" />
+              </button>
+            ))
+          )}
+        </div>
+
+        <div className="px-4 py-3 border-t border-[var(--line)] flex items-center justify-between gap-3">
+          <div className="text-[11px] text-[var(--text-faint)] truncate flex-1">{currentPath}</div>
+          <button
+            onClick={() => { onSelect(currentPath); onClose(); }}
+            className="px-4 py-1.5 rounded-lg bg-[var(--accent)] text-white text-[13px] font-medium hover:opacity-90 transition-opacity shrink-0"
+          >
+            选择此目录
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
 
 const ScheduledTasksPage = lazy(() => import('../ScheduledTasksPage'));
 
@@ -38,6 +141,7 @@ export function CodingShell() {
   const authChecked = useStore((s) => s.authChecked);
   const setCodingProjectPath = useStore((s) => s.setCodingProjectPath);
   const refreshSessions = useStore((s) => s.refreshSessions);
+  const setActiveSession = useStore((s) => s.setActiveSession);
   const projectPath = useStore((s) => s.codingProjectPath);
   const [workspaceChanges, setWorkspaceChanges] = useState([]);
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
@@ -48,6 +152,7 @@ export function CodingShell() {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [openFiles, setOpenFiles] = useState([]);
+  const [dirBrowserOpen, setDirBrowserOpen] = useState(false);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -55,20 +160,26 @@ export function CodingShell() {
     return () => window.removeEventListener('resize', check);
   }, []);
 
-  const handleChangeProject = useCallback(async () => {
-    let newPath = '';
-    if (window.electronAPI?.selectDirectory) {
-      const selected = await window.electronAPI.selectDirectory();
-      if (selected) newPath = selected;
-    } else {
-      const fallback = prompt('请输入项目目录路径：', projectPath || '');
-      if (fallback?.trim()) newPath = fallback.trim();
-    }
+  const applyNewProject = useCallback(async (newPath) => {
     if (newPath && newPath !== projectPath) {
       setCodingProjectPath(newPath);
-      await refreshSessions();
+      const sessions = await refreshSessions();
+      if (sessions && sessions.length > 0) {
+        await setActiveSession(sessions[0].id);
+      } else {
+        await setActiveSession(null);
+      }
     }
-  }, [projectPath, setCodingProjectPath, refreshSessions]);
+  }, [projectPath, setCodingProjectPath, refreshSessions, setActiveSession]);
+
+  const handleChangeProject = useCallback(async () => {
+    if (window.electronAPI?.selectDirectory) {
+      const selected = await window.electronAPI.selectDirectory();
+      if (selected) await applyNewProject(selected);
+    } else {
+      setDirBrowserOpen(true);
+    }
+  }, [applyNewProject]);
 
   const fetchChanges = useCallback(async () => {
     if (!projectPath) return;
@@ -187,21 +298,13 @@ export function CodingShell() {
         <div className="flex-1 flex flex-col min-h-0">
           <div className="flex-1 flex flex-col min-h-0">
             <Suspense fallback={<PageFallback />}>
+              {/* Chat view always mounted, hidden when not active (preserves scroll + streaming state) */}
+              <div className={cn('flex-1 flex flex-col min-h-0', codingView !== 'chat' && 'hidden')}>
+                <CodingErrorBoundary title="对话视图发生错误">
+                  <CodingChatView projectPath={projectPath} onChangeProject={handleChangeProject} />
+                </CodingErrorBoundary>
+              </div>
               <AnimatePresence mode="wait">
-                {codingView === 'chat' && (
-                  <motion.div
-                    key="coding-chat"
-                    className="flex-1 flex flex-col min-h-0"
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.15 }}
-                  >
-                    <CodingErrorBoundary title="对话视图发生错误">
-                      <CodingChatView projectPath={projectPath} onChangeProject={handleChangeProject} />
-                    </CodingErrorBoundary>
-                  </motion.div>
-                )}
                 {codingView === 'settings' && (
                   <motion.div
                     key="coding-settings"
@@ -239,57 +342,58 @@ export function CodingShell() {
           )}
         </div>
 
-        {/* 右栏：Drawer Panel（代码预览 + Diff 审查） */}
-        <AnimatePresence>
-          {(previewFile || codingActiveDiff) && codingView === 'chat' && !isMobile && (
-            <DrawerPanel
-              key="drawer-panel"
-              activeFile={previewFile}
-              activeDiff={codingActiveDiff}
-              fileContent={previewContent}
-              fileLoading={previewLoading}
-              openFiles={openFiles}
-              onFileSelect={handleFileSelect}
-              onCloseFile={handleCloseFile}
-              onContentChange={(newContent) => setPreviewContent(newContent)}
-              onClose={() => { setPreviewFile(null); setOpenFiles([]); clearCodingActiveDiff(); }}
-            />
-          )}
-        </AnimatePresence>
-
-        {/* Workspace Changes 抽屉（覆盖式） */}
-        <AnimatePresence>
-          {!isMobile && codingChangesOpen && (
-            <>
-              <motion.div
-                className="fixed inset-0 bg-black/10 z-30"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={toggleCodingChanges}
-              />
-              <motion.div
-                className="fixed right-0 top-0 bottom-0 z-40 w-[320px] shadow-xl"
-                initial={{ x: 320 }}
-                animate={{ x: 0 }}
-                exit={{ x: 320 }}
-                transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              >
-                <WorkspaceChanges
-                  changes={workspaceChanges}
-                  onClose={toggleCodingChanges}
-                  onSelectFile={(change) => {
-                    const fullPath = projectPath ? `${projectPath}/${change.path}` : change.path;
-                    handleFileSelect(fullPath);
-                    toggleCodingChanges();
-                  }}
-                  onRefresh={fetchChanges}
-                />
-              </motion.div>
-            </>
-          )}
-        </AnimatePresence>
       </div>
+
+      {/* Drawer Panel 弹窗（代码预览 + Diff 审查） */}
+      <AnimatePresence>
+        {(previewFile || codingActiveDiff) && !isMobile && (
+          <DrawerPanel
+            key="drawer-panel"
+            activeFile={previewFile}
+            activeDiff={codingActiveDiff}
+            fileContent={previewContent}
+            fileLoading={previewLoading}
+            openFiles={openFiles}
+            onFileSelect={handleFileSelect}
+            onCloseFile={handleCloseFile}
+            onContentChange={(newContent) => setPreviewContent(newContent)}
+            onClose={() => { setPreviewFile(null); setOpenFiles([]); clearCodingActiveDiff(); }}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* Workspace Changes 抽屉（覆盖式） */}
+      <AnimatePresence>
+        {!isMobile && codingChangesOpen && (
+          <>
+            <motion.div
+              className="fixed inset-0 bg-black/10 z-30"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={toggleCodingChanges}
+            />
+            <motion.div
+              className="fixed right-0 top-0 bottom-0 z-40 w-[320px] shadow-xl"
+              initial={{ x: 320 }}
+              animate={{ x: 0 }}
+              exit={{ x: 320 }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+            >
+              <WorkspaceChanges
+                changes={workspaceChanges}
+                onClose={toggleCodingChanges}
+                onSelectFile={(change) => {
+                  const fullPath = projectPath ? `${projectPath}/${change.path}` : change.path;
+                  handleFileSelect(fullPath);
+                  toggleCodingChanges();
+                }}
+                onRefresh={fetchChanges}
+              />
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
 
       {/* 移动端侧边抽屉 */}
       <AnimatePresence>
@@ -352,6 +456,17 @@ export function CodingShell() {
       )}
 
       <ToastStack items={notifications} />
+
+      <AnimatePresence>
+        {dirBrowserOpen && (
+          <DirectoryBrowserModal
+            open={dirBrowserOpen}
+            onClose={() => setDirBrowserOpen(false)}
+            onSelect={applyNewProject}
+            initialPath={projectPath || ''}
+          />
+        )}
+      </AnimatePresence>
     </div>
     </CodingErrorBoundary>
   );

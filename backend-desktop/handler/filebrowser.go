@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"bufio"
 	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -193,6 +195,170 @@ func GetProjectInfo(c *gin.Context) {
 		"total_files": totalFiles,
 		"total_dirs":  totalDirs,
 		"languages":  languages,
+	})
+}
+
+// SearchFiles GET /api/files/search?path=xxx&query=xxx&glob=xxx
+// 在项目目录中递归搜索文件内容，返回匹配行
+func SearchFiles(c *gin.Context) {
+	dirPath := c.Query("path")
+	query := c.Query("query")
+	glob := c.Query("glob")
+	if dirPath == "" || query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path and query are required"})
+		return
+	}
+	dirPath = expandHome(dirPath)
+
+	info, err := os.Stat(dirPath)
+	if err != nil || !info.IsDir() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效目录路径"})
+		return
+	}
+
+	queryLower := strings.ToLower(query)
+	const maxResults = 200
+	type searchResult struct {
+		File       string `json:"file"`
+		Line       int    `json:"line"`
+		Content    string `json:"content"`
+		RelPath    string `json:"relPath"`
+	}
+	var results []searchResult
+
+	isBinaryExt := func(ext string) bool {
+		bin := map[string]bool{
+			".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".ico": true,
+			".svg": true, ".woff": true, ".woff2": true, ".ttf": true, ".eot": true,
+			".mp3": true, ".mp4": true, ".avi": true, ".mov": true, ".pdf": true,
+			".zip": true, ".tar": true, ".gz": true, ".rar": true, ".7z": true,
+			".exe": true, ".dll": true, ".so": true, ".dylib": true, ".bin": true,
+			".wasm": true, ".o": true, ".a": true, ".pyc": true, ".class": true,
+		}
+		return bin[strings.ToLower(ext)]
+	}
+
+	matchGlob := func(name string) bool {
+		if glob == "" {
+			return true
+		}
+		matched, err := filepath.Match(glob, name)
+		return err == nil && matched
+	}
+
+	filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || len(results) >= maxResults {
+			return nil
+		}
+		name := d.Name()
+		if strings.HasPrefix(name, ".") || shouldSkipEntry(name) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if isBinaryExt(filepath.Ext(name)) {
+			return nil
+		}
+		if !matchGlob(name) {
+			return nil
+		}
+		fi, ferr := d.Info()
+		if ferr != nil || fi.Size() > 1024*1024 {
+			return nil
+		}
+		f, ferr := os.Open(path)
+		if ferr != nil {
+			return nil
+		}
+		defer f.Close()
+
+		rel, _ := filepath.Rel(dirPath, path)
+		scanner := bufio.NewScanner(f)
+		lineNum := 0
+		for scanner.Scan() && len(results) < maxResults {
+			lineNum++
+			line := scanner.Text()
+			if strings.Contains(strings.ToLower(line), queryLower) {
+				content := line
+				runes := []rune(content)
+				if len(runes) > 200 {
+					content = string(runes[:200]) + "..."
+				}
+				results = append(results, searchResult{
+					File:    path,
+					Line:    lineNum,
+					Content: content,
+					RelPath: rel,
+				})
+			}
+		}
+		return nil
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"results": results,
+		"total":   len(results),
+		"query":   query,
+		"truncated": len(results) >= maxResults,
+	})
+}
+
+// SearchFileNames GET /api/files/search-names?path=xxx&query=xxx
+// 按文件名搜索
+func SearchFileNames(c *gin.Context) {
+	dirPath := c.Query("path")
+	query := c.Query("query")
+	if dirPath == "" || query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "path and query are required"})
+		return
+	}
+	dirPath = expandHome(dirPath)
+
+	queryLower := strings.ToLower(query)
+	maxStr := c.DefaultQuery("limit", "100")
+	maxResults, _ := strconv.Atoi(maxStr)
+	if maxResults <= 0 {
+		maxResults = 100
+	}
+
+	type nameResult struct {
+		Name    string `json:"name"`
+		Path    string `json:"path"`
+		RelPath string `json:"relPath"`
+		IsDir   bool   `json:"isDir"`
+	}
+	var results []nameResult
+
+	filepath.WalkDir(dirPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || len(results) >= maxResults {
+			return nil
+		}
+		name := d.Name()
+		if strings.HasPrefix(name, ".") || shouldSkipEntry(name) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if strings.Contains(strings.ToLower(name), queryLower) {
+			rel, _ := filepath.Rel(dirPath, path)
+			results = append(results, nameResult{
+				Name:    name,
+				Path:    path,
+				RelPath: rel,
+				IsDir:   d.IsDir(),
+			})
+		}
+		return nil
+	})
+
+	c.JSON(http.StatusOK, gin.H{
+		"results": results,
+		"total":   len(results),
 	})
 }
 

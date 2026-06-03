@@ -52,6 +52,8 @@ export const createCodingChatSlice = (set, get) => ({
 
   // ─── Sub-agent 状态 ─────────────────────────────────────────
   subAgents: [],
+  _codingAborted: false,
+  _subAgentIdMap: {},
 
   // ─── Checkpoint 状态 ────────────────────────────────────────
   codingCheckpoints: [],
@@ -65,6 +67,21 @@ export const createCodingChatSlice = (set, get) => ({
       if (event === 'profile_changed') {
         state.refreshProfiles();
       }
+      return;
+    }
+
+    // Guard: skip ALL streaming events after abort to prevent stale state updates and crashes
+    const streamEvents = [
+      'text', 'thinking', 'tool_start', 'tool_end', 'file_diff', 'message_usage',
+      'subagent_start', 'subagent_update', 'subagent_done',
+      'task_update', 'ask_question', 'ask_questions_batch',
+      'permission_request', 'sdk_checkpoint',
+    ];
+    if (!state.codingIsStreaming && streamEvents.includes(event)) {
+      return;
+    }
+    // Also guard agent_state after abort (but not when starting a new session)
+    if (event === 'agent_state' && !state.codingIsStreaming && state._codingAborted) {
       return;
     }
 
@@ -194,13 +211,36 @@ export const createCodingChatSlice = (set, get) => ({
       case 'tool_start': {
         flushCodingNow(set, get);
         const blocks = [...get().codingLiveBlocks];
-        blocks.push({
+        const toolBlock = {
           type: 'tool',
           name: payload?.name || '',
           label: payload?.label || '执行技能',
           startedAt: Date.now(),
           done: false,
-        });
+        };
+        if (payload?.parent_tool_use_id) {
+          toolBlock.parent_tool_use_id = payload.parent_tool_use_id;
+          const agents = [...get().subAgents];
+          const idMap = get()._subAgentIdMap || {};
+          const mappedId = idMap[payload.parent_tool_use_id];
+          const saFallback = `sa_${payload.parent_tool_use_id}`;
+          const idx = agents.findIndex(a =>
+            a.id === mappedId || a.id === saFallback || a.id === payload.parent_tool_use_id
+          );
+          if (idx >= 0) {
+            const toolName = payload.name || '';
+            agents[idx] = {
+              ...agents[idx],
+              last_tool_name: toolName,
+              toolActivities: [
+                ...(agents[idx].toolActivities || []).slice(-9),
+                { name: toolName, ts: Date.now(), done: false },
+              ],
+            };
+            set({ subAgents: agents });
+          }
+        }
+        blocks.push(toolBlock);
         set({ codingLiveBlocks: blocks });
         // Track active file for glow effect
         const toolPath = payload?.input?.path || payload?.input?.file_path;
@@ -223,6 +263,31 @@ export const createCodingChatSlice = (set, get) => ({
               if (payload.label) blocks[i].label = payload.label;
               if (payload.ms != null) blocks[i].ms = payload.ms;
               if (payload.status) blocks[i].status = payload.status;
+              if (payload.parent_tool_use_id && !blocks[i].parent_tool_use_id) {
+                blocks[i].parent_tool_use_id = payload.parent_tool_use_id;
+              }
+            }
+            // Mark tool activity done in the sub-agent
+            if (blocks[i].parent_tool_use_id) {
+              const pId = blocks[i].parent_tool_use_id;
+              const agents = [...get().subAgents];
+              const idMap = get()._subAgentIdMap || {};
+              const mappedId = idMap[pId];
+              const saFallback = `sa_${pId}`;
+              const saIdx = agents.findIndex(a =>
+                a.id === mappedId || a.id === saFallback || a.id === pId
+              );
+              if (saIdx >= 0) {
+                const activities = [...(agents[saIdx].toolActivities || [])];
+                for (let j = activities.length - 1; j >= 0; j--) {
+                  if (!activities[j].done && activities[j].name === blocks[i].name) {
+                    activities[j] = { ...activities[j], done: true, endedAt: Date.now() };
+                    break;
+                  }
+                }
+                agents[saIdx] = { ...agents[saIdx], toolActivities: activities };
+                set({ subAgents: agents });
+              }
             }
             // Remove from active files after delay
             const toolPath = payload?.input?.path || payload?.input?.file_path || blocks[i]?.input?.path;
@@ -249,23 +314,58 @@ export const createCodingChatSlice = (set, get) => ({
         set({ codingCheckpoints: cps });
         break;
       }
+      case 'sdk_checkpoint': {
+        const cps = [...get().codingCheckpoints];
+        cps.push({
+          id: payload?.checkpoint_id,
+          sdk_checkpoint: true,
+          session_id: payload?.session_id,
+          created_at: payload?.created_at || new Date().toISOString(),
+        });
+        set({ codingCheckpoints: cps });
+        break;
+      }
+      case 'checkpoint_rolled_back': {
+        const sid = get().activeSessionId;
+        if (sid) get().loadCodingMessages(sid);
+        set({ codingTasks: [], codingLiveBlocks: [] });
+        break;
+      }
       case 'subagent_start': {
         const agents = [...get().subAgents];
+        const saId = payload?.id || `sa_${Date.now()}`;
         agents.push({
-          id: payload?.id || `sa_${Date.now()}`,
+          id: saId,
           description: payload?.description || '',
           status: 'working',
           parent_id: payload?.parent_id || null,
           message_id: payload?.message_id || null,
+          toolActivities: [],
         });
+        // Track sa_xxx -> id mapping for parent_tool_use_id lookup
+        if (saId.startsWith('sa_')) {
+          const toolUseId = saId.slice(3);
+          set({ _subAgentIdMap: { ...get()._subAgentIdMap, [toolUseId]: saId } });
+        }
         set({ subAgents: agents });
         break;
       }
       case 'subagent_update': {
         const agents = [...get().subAgents];
-        const idx = agents.findIndex(a => a.id === payload?.id);
+        // Try to match by current id, or by previous_id (when task_started renames sa_xxx → task_id)
+        let idx = agents.findIndex(a => a.id === payload?.id);
+        if (idx < 0 && payload?.previous_id) {
+          idx = agents.findIndex(a => a.id === payload.previous_id);
+        }
         if (idx >= 0) {
-          agents[idx] = { ...agents[idx], ...payload };
+          const oldId = agents[idx].id;
+          const { previous_id: _prev, ...rest } = payload || {};
+          agents[idx] = { ...agents[idx], ...rest, toolActivities: agents[idx].toolActivities || [] };
+          // Update the ID mapping for parent_tool_use_id lookup
+          if (oldId !== rest.id && oldId.startsWith('sa_')) {
+            const toolUseId = oldId.slice(3);
+            set({ _subAgentIdMap: { ...get()._subAgentIdMap, [toolUseId]: rest.id } });
+          }
           set({ subAgents: agents });
         }
         break;
@@ -274,7 +374,7 @@ export const createCodingChatSlice = (set, get) => ({
         const agents = [...get().subAgents];
         const idx = agents.findIndex(a => a.id === payload?.id);
         if (idx >= 0) {
-          agents[idx].status = 'done';
+          agents[idx] = { ...agents[idx], ...payload, status: 'done' };
           set({ subAgents: agents });
         }
         break;
@@ -300,23 +400,29 @@ export const createCodingChatSlice = (set, get) => ({
         break;
       }
       case 'done': {
-        flushCodingNow(set, get);
-        // 如果没有 message_usage 事件但有 liveBlocks，合并为消息
-        const remaining = get().codingLiveBlocks.filter((b) => b.text || b.type === 'tool');
-        if (remaining.length > 0) {
-          const newMsg = {
-            id: -Date.now(),
-            session_id: state.activeSessionId,
-            role: 'assistant',
-            content: JSON.stringify(remaining),
-            created_at: new Date().toISOString(),
-          };
-          set({
-            codingMessages: [...get().codingMessages, newMsg],
-            codingLiveBlocks: [],
-          });
+        try {
+          // Skip if already aborted
+          if (!get().codingIsStreaming) break;
+          flushCodingNow(set, get);
+          const remaining = get().codingLiveBlocks.filter((b) => b.text || b.type === 'tool');
+          if (remaining.length > 0) {
+            const newMsg = {
+              id: -Date.now(),
+              session_id: get().activeSessionId,
+              role: 'assistant',
+              content: JSON.stringify(remaining),
+              created_at: new Date().toISOString(),
+            };
+            set({
+              codingMessages: [...get().codingMessages, newMsg],
+              codingLiveBlocks: [],
+            });
+          }
+          set({ codingIsStreaming: false, codingAgentState: 'IDLE', subAgents: [] });
+        } catch (e) {
+          console.warn('[codingChat] done handler error:', e);
+          set({ codingIsStreaming: false, codingAgentState: 'IDLE', codingLiveBlocks: [], subAgents: [] });
         }
-        set({ codingIsStreaming: false, codingAgentState: 'IDLE' });
         break;
       }
       default:
@@ -364,6 +470,9 @@ export const createCodingChatSlice = (set, get) => ({
       codingQuestionsSubmitted: false,
       codingQuestionsPermissionId: null,
       subAgents: [],
+      _subAgentIdMap: {},
+      codingTasks: [],
+      _codingAborted: false,
     });
     try {
       const payload = { message, sessionId: String(sid), images, files };
@@ -401,20 +510,21 @@ export const createCodingChatSlice = (set, get) => ({
       updatedMessages.push(assistantMsg);
     }
 
-    // 将问答记录作为用户消息添加到聊天历史中
-    const qaLines = questions.map((q, i) => {
+    // 将问答记录作为结构化用户消息添加到聊天历史中
+    const qaItems = questions.map((q, i) => {
       const parsed = typeof q === 'string' ? (() => { try { return JSON.parse(q); } catch { return q; } })() : q;
       const qText = parsed?.title || parsed?.question || parsed?.prompt || `Question ${i + 1}`;
       const qId = parsed?.id || `q_${i}`;
+      const opts = parsed?.options || [];
       const ans = answers[qId] || '';
-      return `**Q:** ${qText}\n**A:** ${ans}`;
-    }).join('\n\n');
-    if (qaLines) {
+      return { question: qText, answer: ans, options: opts };
+    });
+    if (qaItems.length > 0) {
       const qaMsg = {
         id: -Date.now(),
         session_id: sid,
         role: 'user',
-        content: qaLines,
+        content: JSON.stringify({ type: 'ask_question_reply', items: qaItems }),
         created_at: new Date().toISOString(),
       };
       updatedMessages.push(qaMsg);
@@ -476,6 +586,41 @@ export const createCodingChatSlice = (set, get) => ({
     }
   },
 
+  // ─── Rewind to checkpoint ────────────────────────────────
+  rewindToCheckpoint: async (checkpointId) => {
+    try {
+      const result = await api.rollbackCheckpoint(checkpointId);
+      const sid = get().activeSessionId;
+      if (sid) {
+        await get().loadCodingMessages(sid);
+      }
+      const cps = get().codingCheckpoints.filter(cp => {
+        if (typeof cp.id === 'number' && typeof checkpointId === 'number') return cp.id <= checkpointId;
+        return true;
+      });
+      set({ codingCheckpoints: cps, codingTasks: [], codingLiveBlocks: [] });
+      if (result?.todo_snapshot) {
+        try {
+          const todos = JSON.parse(result.todo_snapshot);
+          if (Array.isArray(todos)) set({ codingTasks: todos });
+        } catch {}
+      }
+      get().pushNotification?.({ title: '回滚成功', body: `已恢复 ${result?.files_restored || 0} 个文件` });
+    } catch (e) {
+      get().pushNotification?.({ title: '回滚失败', body: e.message });
+    }
+  },
+
+  // ─── Load checkpoints for session ──────────────────────
+  loadCheckpoints: async (sessionId) => {
+    try {
+      const cps = await api.listCheckpoints(sessionId);
+      set({ codingCheckpoints: cps || [] });
+    } catch {
+      set({ codingCheckpoints: [] });
+    }
+  },
+
   // ─── 清空 Coding 对话状态 ─────────────────────────────────
   clearCodingChat: () => {
     set({
@@ -510,7 +655,34 @@ export const createCodingChatSlice = (set, get) => ({
   codingAbort: async () => {
     const sid = get().activeSessionId;
     if (!sid) return;
+    // Flush pending token buffer before clearing state
+    flushCodingNow(set, get);
+    // Merge any remaining live blocks into a message before clearing
+    const remaining = get().codingLiveBlocks.filter((b) => b.text || b.type === 'tool');
+    if (remaining.length > 0) {
+      const newMsg = {
+        id: -Date.now(),
+        session_id: sid,
+        role: 'assistant',
+        content: JSON.stringify(remaining),
+        created_at: new Date().toISOString(),
+      };
+      set({ codingMessages: [...get().codingMessages, newMsg] });
+    }
+    // Clear all streaming state atomically to prevent stale renders
+    set({
+      codingIsStreaming: false,
+      codingAgentState: 'IDLE',
+      codingLiveBlocks: [],
+      codingTasks: [],
+      subAgents: [],
+      _subAgentIdMap: {},
+      codingPendingQuestions: [],
+      codingCurrentQuestionIdx: 0,
+      codingAnswers: {},
+      codingQuestionsSubmitted: false,
+      _codingAborted: true,
+    });
     await api.abortChat(sid).catch(() => {});
-    set({ codingIsStreaming: false, codingAgentState: 'IDLE' });
   },
 });

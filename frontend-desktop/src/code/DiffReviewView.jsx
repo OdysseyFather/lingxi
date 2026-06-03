@@ -76,10 +76,12 @@ export function DiffReviewView({ filePath, diffText, onClose, onAcceptAll, onRej
     setExpandedHunks(prev => ({ ...prev, [index]: !prev[index] }));
   }, []);
 
-  if (!diffText) {
+  if (!diffText || hunks.length === 0) {
+    const isMessage = diffText && diffText.startsWith('//');
     return (
-      <div className="h-full flex items-center justify-center text-[13px] text-[var(--text-faint)]">
-        选择一个文件查看变更
+      <div className="h-full flex flex-col items-center justify-center gap-2 text-[13px] text-[var(--text-faint)] p-6">
+        <FileText size={24} className="opacity-40" />
+        <span>{isMessage ? diffText.replace(/^\/\/\s*/, '') : '该文件没有可审查的变更'}</span>
       </div>
     );
   }
