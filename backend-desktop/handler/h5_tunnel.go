@@ -26,6 +26,7 @@ var tunnelClient = &H5TunnelClient{}
 type H5TunnelClient struct {
 	mu        sync.RWMutex
 	conn      *websocket.Conn
+	writeMu   sync.Mutex // 保护 WebSocket 写操作（gorilla 不支持并发写）
 	token     string
 	serverURL string
 	localPort string
@@ -38,6 +39,19 @@ type tunnelSignalMsg struct {
 	From string          `json:"from,omitempty"`
 	To   string          `json:"to,omitempty"`
 	Data json.RawMessage `json:"data,omitempty"`
+}
+
+// safeWriteJSON 串行化所有 WS 写操作
+func (tc *H5TunnelClient) safeWriteJSON(msg interface{}) error {
+	tc.mu.RLock()
+	conn := tc.conn
+	tc.mu.RUnlock()
+	if conn == nil {
+		return fmt.Errorf("not connected")
+	}
+	tc.writeMu.Lock()
+	defer tc.writeMu.Unlock()
+	return conn.WriteJSON(msg)
 }
 
 type tunnelReqPayload struct {
@@ -128,10 +142,16 @@ func (tc *H5TunnelClient) connectLoop() {
 		default:
 		}
 
-		err := tc.connect()
-		if err != nil {
-			slog.Warn("[h5-tunnel] connection failed, retrying in 5s", "err", err)
-		}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("[h5-tunnel] recovered panic in connect", "panic", r)
+				}
+			}()
+			if err := tc.connect(); err != nil {
+				slog.Warn("[h5-tunnel] connection failed, retrying in 5s", "err", err)
+			}
+		}()
 
 		select {
 		case <-tc.stopCh:
@@ -154,6 +174,20 @@ func (tc *H5TunnelClient) connect() error {
 		return fmt.Errorf("dial: %w", err)
 	}
 
+	// 自动响应 Ping 帧（信令服务器每 30s 发 Ping，90s 无 Pong 则断开）
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+		return nil
+	})
+	conn.SetPingHandler(func(appData string) error {
+		conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+		tc.writeMu.Lock()
+		err := conn.WriteControl(websocket.PongMessage, []byte(appData), time.Now().Add(5*time.Second))
+		tc.writeMu.Unlock()
+		return err
+	})
+	conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+
 	tc.mu.Lock()
 	tc.conn = conn
 	tc.connected = true
@@ -167,14 +201,14 @@ func (tc *H5TunnelClient) connect() error {
 		"platform":    "desktop",
 		"device_name": "lingxi-tunnel",
 	})
-	conn.WriteJSON(tunnelSignalMsg{
+	tc.safeWriteJSON(tunnelSignalMsg{
 		Type: "register",
 		Data: json.RawMessage(peerRegData),
 	})
 
 	// 注册隧道 token
 	regData, _ := json.Marshal(map[string]string{"token": token})
-	conn.WriteJSON(tunnelSignalMsg{
+	tc.safeWriteJSON(tunnelSignalMsg{
 		Type: "tunnel_register",
 		Data: json.RawMessage(regData),
 	})
@@ -188,12 +222,7 @@ func (tc *H5TunnelClient) connect() error {
 			case <-tc.stopCh:
 				return
 			case <-ticker.C:
-				tc.mu.RLock()
-				c := tc.conn
-				tc.mu.RUnlock()
-				if c != nil {
-					c.WriteJSON(tunnelSignalMsg{Type: "heartbeat"})
-				}
+				tc.safeWriteJSON(tunnelSignalMsg{Type: "heartbeat"})
 			}
 		}
 	}()
@@ -216,6 +245,7 @@ func (tc *H5TunnelClient) connect() error {
 			BroadcastWSEvent("h5_tunnel_status", `{"connected":false}`)
 			return err
 		}
+		conn.SetReadDeadline(time.Now().Add(120 * time.Second))
 
 		var msg tunnelSignalMsg
 		if json.Unmarshal(msgBytes, &msg) != nil {
@@ -240,6 +270,12 @@ func (tc *H5TunnelClient) connect() error {
 }
 
 func (tc *H5TunnelClient) handleRequest(data json.RawMessage) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("[h5-tunnel] recovered panic in handleRequest", "panic", r)
+		}
+	}()
+
 	var req tunnelReqPayload
 	if json.Unmarshal(data, &req) != nil {
 		return
@@ -307,18 +343,10 @@ func (tc *H5TunnelClient) sendResponse(reqID string, status int, headers map[str
 	}
 
 	respData, _ := json.Marshal(resp)
-	msg := tunnelSignalMsg{
+	tc.safeWriteJSON(tunnelSignalMsg{
 		Type: "tunnel_response",
 		Data: json.RawMessage(respData),
-	}
-
-	tc.mu.RLock()
-	conn := tc.conn
-	tc.mu.RUnlock()
-
-	if conn != nil {
-		conn.WriteJSON(msg)
-	}
+	})
 }
 
 // ─── WebSocket 隧道桥接 ──────────────────────────────────────────
@@ -327,6 +355,12 @@ func (tc *H5TunnelClient) sendResponse(reqID string, status int, headers map[str
 var localWsConns sync.Map
 
 func (tc *H5TunnelClient) handleWsOpen(data json.RawMessage) {
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("[h5-tunnel] recovered panic in handleWsOpen", "panic", r)
+		}
+	}()
+
 	var payload struct {
 		WsID string `json:"ws_id"`
 		Path string `json:"path"`
@@ -409,28 +443,18 @@ func (tc *H5TunnelClient) sendWsMessage(wsID string, msg []byte) {
 		"ws_id":   wsID,
 		"message": base64.StdEncoding.EncodeToString(msg),
 	})
-	tc.mu.RLock()
-	conn := tc.conn
-	tc.mu.RUnlock()
-	if conn != nil {
-		conn.WriteJSON(tunnelSignalMsg{
-			Type: "tunnel_ws_message",
-			Data: json.RawMessage(fwdData),
-		})
-	}
+	tc.safeWriteJSON(tunnelSignalMsg{
+		Type: "tunnel_ws_message",
+		Data: json.RawMessage(fwdData),
+	})
 }
 
 func (tc *H5TunnelClient) sendWsClose(wsID string) {
 	closeData, _ := json.Marshal(map[string]string{"ws_id": wsID})
-	tc.mu.RLock()
-	conn := tc.conn
-	tc.mu.RUnlock()
-	if conn != nil {
-		conn.WriteJSON(tunnelSignalMsg{
-			Type: "tunnel_ws_close",
-			Data: json.RawMessage(closeData),
-		})
-	}
+	tc.safeWriteJSON(tunnelSignalMsg{
+		Type: "tunnel_ws_close",
+		Data: json.RawMessage(closeData),
+	})
 }
 
 // ─── 持久化 ─────────────────────────────────────────────────────

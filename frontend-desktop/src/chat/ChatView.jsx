@@ -97,6 +97,12 @@ function ChatContextBar({ useKB, onSearchOpen }) {
   const handleSelectAgent = useCallback((a) => {
     if (activeSessionId) {
       api.setSessionAgent(activeSessionId, a.id).catch(() => {});
+      useStore.setState((state) => ({
+        activeAgentId: a.id,
+        sessions: state.sessions.map((s) =>
+          s.id === activeSessionId ? { ...s, agent_id: a.id } : s
+        ),
+      }));
     } else {
       localStorage.setItem('lingxi-active-agent', String(a.id));
       useStore.setState({ activeAgentId: a.id });
