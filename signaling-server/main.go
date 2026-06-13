@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -12,6 +14,8 @@ import (
 
 	"github.com/gorilla/websocket"
 )
+
+var base64Encoding = base64.StdEncoding
 
 // ─── 数据结构 ────────────────────────────────────────────────────
 
@@ -240,6 +244,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 			log.Printf("[ws] recovered panic in handleWS: %v", r)
 		}
 		if peer != nil {
+			tunnelHub.unregister(peer.InstanceID)
 			hub.unregister(peer.InstanceID)
 		}
 		conn.Close()
@@ -401,6 +406,80 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 
+		case "tunnel_register":
+			if peer == nil {
+				continue
+			}
+			var reg struct {
+				Token string `json:"token"`
+			}
+			json.Unmarshal(msg.Data, &reg)
+			if reg.Token == "" {
+				continue
+			}
+			tunnelHub.register(reg.Token, peer.InstanceID, peer)
+			safeWrite(SignalMessage{Type: "tunnel_registered", Data: jsonRaw(map[string]string{"status": "ok", "token": reg.Token})})
+
+		case "tunnel_response":
+			if peer == nil {
+				continue
+			}
+			var resp TunnelResponse
+			json.Unmarshal(msg.Data, &resp)
+			if resp.RequestID == "" {
+				continue
+			}
+			// 查找对应的隧道并投递响应
+			tunnelHub.mu.RLock()
+			for _, info := range tunnelHub.tunnels {
+				if info.InstanceID == peer.InstanceID {
+					if ch, ok := info.pending.Load(resp.RequestID); ok {
+						select {
+						case ch.(chan *TunnelResponse) <- &resp:
+						default:
+						}
+					}
+					break
+				}
+			}
+			tunnelHub.mu.RUnlock()
+
+		case "tunnel_ws_message":
+			// 桌面端转发本地 WS 消息给手机端
+			if peer == nil {
+				continue
+			}
+			var fwd struct {
+				WsID    string `json:"ws_id"`
+				Message string `json:"message"` // base64
+			}
+			json.Unmarshal(msg.Data, &fwd)
+			if fwd.WsID == "" {
+				continue
+			}
+			twsConn := tunnelWsHub.get(fwd.WsID)
+			if twsConn == nil {
+				continue
+			}
+			msgBytes, err := base64Decode(fwd.Message)
+			if err != nil {
+				continue
+			}
+			twsConn.mobileWs.WriteMessage(websocket.TextMessage, msgBytes)
+
+		case "tunnel_ws_close":
+			// 桌面端请求关闭手机端 WS
+			if peer == nil {
+				continue
+			}
+			var cls struct {
+				WsID string `json:"ws_id"`
+			}
+			json.Unmarshal(msg.Data, &cls)
+			if cls.WsID != "" {
+				tunnelWsHub.unregister(cls.WsID)
+			}
+
 		case "heartbeat":
 			if peer != nil {
 				peer.lastSeen = time.Now()
@@ -415,6 +494,268 @@ func jsonRaw(v interface{}) json.RawMessage {
 	return b
 }
 
+// ─── HTTP 隧道（H5 远程访问反向代理）──────────────────────────────
+
+// TunnelRequest 通过 WS 发给桌面端的 HTTP 请求
+type TunnelRequest struct {
+	RequestID string            `json:"request_id"`
+	Method    string            `json:"method"`
+	Path      string            `json:"path"`
+	Headers   map[string]string `json:"headers"`
+	Body      string            `json:"body,omitempty"` // base64
+}
+
+// TunnelResponse 桌面端通过 WS 返回的 HTTP 响应
+type TunnelResponse struct {
+	RequestID  string            `json:"request_id"`
+	StatusCode int               `json:"status_code"`
+	Headers    map[string]string `json:"headers"`
+	Body       string            `json:"body,omitempty"` // base64
+}
+
+// tunnelHub 管理隧道注册（instance_id → tunnel token 映射）
+type TunnelHub struct {
+	mu      sync.RWMutex
+	tunnels map[string]*TunnelInfo // key: tunnel_token
+}
+
+type TunnelInfo struct {
+	InstanceID string
+	Token      string
+	peer       *PeerInfo
+	pending    sync.Map // request_id → chan *TunnelResponse
+}
+
+var tunnelHub = &TunnelHub{tunnels: make(map[string]*TunnelInfo)}
+
+func (th *TunnelHub) register(token, instanceID string, peer *PeerInfo) {
+	th.mu.Lock()
+	th.tunnels[token] = &TunnelInfo{InstanceID: instanceID, Token: token, peer: peer}
+	th.mu.Unlock()
+	log.Printf("[tunnel] registered: instance=%s token=%s", instanceID, token[:8]+"...")
+}
+
+func (th *TunnelHub) unregister(instanceID string) {
+	th.mu.Lock()
+	for token, info := range th.tunnels {
+		if info.InstanceID == instanceID {
+			delete(th.tunnels, token)
+			log.Printf("[tunnel] unregistered: instance=%s", instanceID)
+		}
+		_ = token
+	}
+	th.mu.Unlock()
+}
+
+func (th *TunnelHub) get(token string) *TunnelInfo {
+	th.mu.RLock()
+	defer th.mu.RUnlock()
+	return th.tunnels[token]
+}
+
+// handleTunnelHTTP 处理手机端发来的 HTTP 请求，转发给桌面端
+func handleTunnelHTTP(w http.ResponseWriter, r *http.Request) {
+	// URL: /tunnel/<token>/<path>
+	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/tunnel/"), "/", 2)
+	if len(parts) < 1 || parts[0] == "" {
+		http.Error(w, "invalid tunnel URL", http.StatusBadRequest)
+		return
+	}
+	token := parts[0]
+	subPath := "/"
+	if len(parts) > 1 {
+		subPath = "/" + parts[1]
+	}
+	if r.URL.RawQuery != "" {
+		subPath += "?" + r.URL.RawQuery
+	}
+
+	info := tunnelHub.get(token)
+	if info == nil {
+		http.Error(w, "tunnel not found or offline", http.StatusBadGateway)
+		return
+	}
+
+	// 检查 peer 是否在线
+	peer := hub.getPeer(info.InstanceID)
+	if peer == nil {
+		http.Error(w, "desktop offline", http.StatusBadGateway)
+		return
+	}
+
+	// 检测 WebSocket 升级请求
+	if isWebSocketUpgrade(r) {
+		handleTunnelWebSocket(w, r, token, subPath, info, peer)
+		return
+	}
+
+	// 读取请求体
+	var bodyB64 string
+	if r.Body != nil {
+		bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, 10<<20)) // 10MB limit
+		if err == nil && len(bodyBytes) > 0 {
+			bodyB64 = base64Encode(bodyBytes)
+		}
+	}
+
+	// 收集请求头
+	headers := make(map[string]string)
+	for k, vs := range r.Header {
+		if len(vs) > 0 {
+			headers[k] = vs[0]
+		}
+	}
+	headers["X-Forwarded-For"] = r.RemoteAddr
+	headers["X-Forwarded-Proto"] = "https"
+
+	// 生成请求 ID
+	reqID := fmt.Sprintf("%d-%d", time.Now().UnixNano(), time.Now().UnixMicro()%10000)
+
+	// 创建响应通道
+	respCh := make(chan *TunnelResponse, 1)
+	info.pending.Store(reqID, respCh)
+	defer info.pending.Delete(reqID)
+
+	// 通过 WS 发送请求给桌面端
+	tunnelReq := TunnelRequest{
+		RequestID: reqID,
+		Method:    r.Method,
+		Path:      subPath,
+		Headers:   headers,
+		Body:      bodyB64,
+	}
+	reqData, _ := json.Marshal(tunnelReq)
+	peer.enqueueJSON(SignalMessage{
+		Type: "tunnel_request",
+		Data: json.RawMessage(reqData),
+	})
+
+	// 等待桌面端响应（超时 30 秒）
+	select {
+	case resp := <-respCh:
+		for k, v := range resp.Headers {
+			w.Header().Set(k, v)
+		}
+		w.WriteHeader(resp.StatusCode)
+		if resp.Body != "" {
+			bodyBytes, _ := base64Decode(resp.Body)
+			w.Write(bodyBytes)
+		}
+	case <-time.After(30 * time.Second):
+		http.Error(w, "tunnel timeout", http.StatusGatewayTimeout)
+	}
+}
+
+func isWebSocketUpgrade(r *http.Request) bool {
+	return strings.EqualFold(r.Header.Get("Upgrade"), "websocket") &&
+		strings.Contains(strings.ToLower(r.Header.Get("Connection")), "upgrade")
+}
+
+// ─── WebSocket 隧道代理 ────────────────────────────────────────────
+
+// tunnelWsHub 管理通过隧道桥接的 WebSocket 连接
+type TunnelWsHub struct {
+	mu    sync.RWMutex
+	conns map[string]*TunnelWsConn // wsID → conn
+}
+
+type TunnelWsConn struct {
+	wsID     string
+	mobileWs *websocket.Conn
+	closeCh  chan struct{}
+}
+
+var tunnelWsHub = &TunnelWsHub{conns: make(map[string]*TunnelWsConn)}
+
+func (h *TunnelWsHub) register(wsID string, conn *TunnelWsConn) {
+	h.mu.Lock()
+	h.conns[wsID] = conn
+	h.mu.Unlock()
+}
+
+func (h *TunnelWsHub) unregister(wsID string) {
+	h.mu.Lock()
+	if c, ok := h.conns[wsID]; ok {
+		select {
+		case <-c.closeCh:
+		default:
+			close(c.closeCh)
+		}
+		delete(h.conns, wsID)
+	}
+	h.mu.Unlock()
+}
+
+func (h *TunnelWsHub) get(wsID string) *TunnelWsConn {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.conns[wsID]
+}
+
+// handleTunnelWebSocket 处理通过隧道代理的 WebSocket 连接
+func handleTunnelWebSocket(w http.ResponseWriter, r *http.Request, token, subPath string, info *TunnelInfo, peer *PeerInfo) {
+	// 升级手机端连接
+	mobileConn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("[tunnel-ws] upgrade error: %v", err)
+		return
+	}
+
+	wsID := fmt.Sprintf("tws-%d-%d", time.Now().UnixNano(), time.Now().UnixMicro()%10000)
+	twsConn := &TunnelWsConn{
+		wsID:     wsID,
+		mobileWs: mobileConn,
+		closeCh:  make(chan struct{}),
+	}
+	tunnelWsHub.register(wsID, twsConn)
+
+	defer func() {
+		tunnelWsHub.unregister(wsID)
+		mobileConn.Close()
+		// 通知桌面端关闭对应的本地 WS
+		closeData, _ := json.Marshal(map[string]string{"ws_id": wsID})
+		peer.enqueueJSON(SignalMessage{
+			Type: "tunnel_ws_close",
+			Data: json.RawMessage(closeData),
+		})
+	}()
+
+	// 通知桌面端打开一个到本地的 WS 连接
+	openData, _ := json.Marshal(map[string]string{
+		"ws_id": wsID,
+		"path":  subPath,
+	})
+	peer.enqueueJSON(SignalMessage{
+		Type: "tunnel_ws_open",
+		Data: json.RawMessage(openData),
+	})
+
+	// 读取手机端发来的 WS 消息，转发给桌面端
+	for {
+		_, msgBytes, err := mobileConn.ReadMessage()
+		if err != nil {
+			break
+		}
+		// 转发给桌面端
+		fwdData, _ := json.Marshal(map[string]string{
+			"ws_id":   wsID,
+			"message": base64Encode(msgBytes),
+		})
+		peer.enqueueJSON(SignalMessage{
+			Type: "tunnel_ws_message",
+			Data: json.RawMessage(fwdData),
+		})
+	}
+}
+
+func base64Encode(data []byte) string {
+	return base64Encoding.EncodeToString(data)
+}
+
+func base64Decode(s string) ([]byte, error) {
+	return base64Encoding.DecodeString(s)
+}
+
 // ─── HTTP 端点 ───────────────────────────────────────────────────
 
 func handlePeers(w http.ResponseWriter, r *http.Request) {
@@ -427,7 +768,10 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	hub.mu.RLock()
 	count := len(hub.peers)
 	hub.mu.RUnlock()
-	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "online": count})
+	tunnelHub.mu.RLock()
+	tunnelCount := len(tunnelHub.tunnels)
+	tunnelHub.mu.RUnlock()
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true, "online": count, "tunnels": tunnelCount})
 }
 
 func main() {
@@ -439,17 +783,18 @@ func main() {
 	http.HandleFunc("/ws", handleWS)
 	http.HandleFunc("/api/peers", handlePeers)
 	http.HandleFunc("/health", handleHealth)
+	http.HandleFunc("/tunnel/", handleTunnelHTTP)
 
 	tlsCert := os.Getenv("TLS_CERT")
 	tlsKey := os.Getenv("TLS_KEY")
 
 	if tlsCert != "" && tlsKey != "" {
-		log.Printf("[signaling] server starting on :%s (TLS/WSS)", port)
+		log.Printf("[signaling] server starting on :%s (TLS/WSS, tunnel enabled)", port)
 		if err := http.ListenAndServeTLS(":"+port, tlsCert, tlsKey, nil); err != nil {
 			log.Fatalf("[signaling] server error: %v", err)
 		}
 	} else {
-		log.Printf("[signaling] server starting on :%s (plain WS, set TLS_CERT & TLS_KEY for WSS)", port)
+		log.Printf("[signaling] server starting on :%s (plain WS, tunnel enabled, set TLS_CERT & TLS_KEY for WSS)", port)
 		if err := http.ListenAndServe(":"+port, nil); err != nil {
 			log.Fatalf("[signaling] server error: %v", err)
 		}

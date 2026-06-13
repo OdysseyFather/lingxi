@@ -923,6 +923,15 @@ xattr -cr "/Applications/灵犀.app"
 - **PermissionDialog 增强**：工具摘要行（Bash 命令/文件路径 + Copy）、Deny with reason 模式、完整参数可折叠查看
 - **权限管道确认完整**：permission_request/response stdin/stdout 双向通信 + AskUserQuestion 阻塞流程均已正确实现
 
+### H5 公网远程访问（v2026-06 Phase 23）
+- **云端 HTTP 隧道**：信令服务器新增 HTTP 反向代理能力，桌面端通过 WebSocket 注册隧道 token，手机端通过 `/tunnel/<token>/` 路径透明代理所有 HTTP 请求到桌面端
+- **WebSocket 隧道代理**：信令服务器支持 WebSocket 升级请求的代理，手机端 WS 连接经信令服务器中转到桌面端本地 WS（实现流式对话等实时功能）
+- **前端相对路径构建**：Vite `base: './'` + `TUNNEL_BASE` 动态检测，确保隧道模式下所有资源/API/WS 请求正确路由，桌面端零影响
+- **隧道入口免 token 验证**：`lx_tunnel_` 前缀的隧道访问跳过 H5 令牌验证，直接游客登录进入
+- **隧道配置持久化**：信令地址和 token 持久化到 kv_store，应用重启自动重新连接
+- **灵犀主模式移动端适配**：AppShell 响应式布局 + 微信浏览器兼容 + 移动端侧边栏/智能体选择器
+- **设置页云端隧道面板**：RemoteAccessPage 新增云端隧道区块（信令地址配置 + 连接/断开 + 隧道 URL + 二维码）
+
 ### 纯 Go 协议转换代理（v2026-05 Phase 3）
 - **替代 LiteLLM Bridge**：`backend-desktop/proxy/` 纯 Go 实现，启动零延迟、无 Python 依赖
 - **完整协议转换**：Anthropic `/v1/messages` ↔ OpenAI `/v1/chat/completions`（流式 + 非流式 + Tool use + 思考链 + 多模态）

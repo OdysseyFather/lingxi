@@ -35,6 +35,7 @@ ai-config/auth.json
 *.env
 .env.*
 *.lingxi-build-env
+.cursor/rules/deploy-signaling.mdc
 
 # Database
 *.db

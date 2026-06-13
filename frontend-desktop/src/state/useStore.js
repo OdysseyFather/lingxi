@@ -31,11 +31,7 @@ export function initStore() {
     wsClient.connect();
     _wsUnsubscribe = wsClient.on((msg) => {
       const state = useStore.getState();
-      if (state.appMode === 'coding') {
-        state.codingHandleWSEvent(msg);
-      } else {
-        state.handleWSEvent(msg);
-      }
+      state.handleWSEvent(msg);
     });
   }
 

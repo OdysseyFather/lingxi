@@ -943,12 +943,18 @@ body {
 /* ══════════════════════════════════════════════════════════════════
    移动端响应式适配（手机远程访问）
    ══════════════════════════════════════════════════════════════════ */
+
+.safe-area-top { padding-top: env(safe-area-inset-top, 0px); }
+.safe-area-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+.scrollbar-none { scrollbar-width: none; -ms-overflow-style: none; }
+.scrollbar-none::-webkit-scrollbar { display: none; }
+
 @media (max-width: 768px) {
   .app-drag { -webkit-app-region: unset !important; }
   textarea, input[type="text"], input[type="number"] { font-size: 16px !important; }
 
-  .safe-area-top { padding-top: env(safe-area-inset-top, 0px); }
-  .safe-area-bottom { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  html, body { overflow: hidden; overscroll-behavior: none; }
 
   .h-screen {
     height: 100dvh;

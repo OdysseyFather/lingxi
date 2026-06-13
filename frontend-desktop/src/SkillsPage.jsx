@@ -40,6 +40,7 @@ export default function SkillsPage() {
   const [batchMode, setBatchMode] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [batchDeleting, setBatchDeleting] = useState(false);
+  const [batchExporting, setBatchExporting] = useState(false);
   const fileInputRef = useRef(null);
   const logRef = useRef(null);
 
@@ -115,6 +116,29 @@ export default function SkillsPage() {
       setBatchMode(false);
       fetchSkills();
     } finally { setBatchDeleting(false); }
+  };
+
+  const handleBatchExport = async () => {
+    if (selected.size === 0) return;
+    setBatchExporting(true);
+    try {
+      const res = await fetch('/api/skills/batch-export', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ ids: [...selected] }),
+      });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `skills-export-${selected.size}.zip`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } finally { setBatchExporting(false); }
   };
 
   const exitBatchMode = () => { setBatchMode(false); setSelected(new Set()); };
@@ -250,6 +274,10 @@ export default function SkillsPage() {
                     {skills.every(s => selected.has(s.id)) ? '取消全选' : '全选'}
                   </Button>
                   <Button size="sm" variant="ghost" onClick={exitBatchMode}>取消</Button>
+                  <Button size="sm" variant="outline" onClick={handleBatchExport} disabled={selected.size === 0 || batchExporting}>
+                    {batchExporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+                    导出 ({selected.size})
+                  </Button>
                   <Button size="sm" variant="danger" onClick={handleBatchDelete} disabled={selected.size === 0 || batchDeleting}>
                     {batchDeleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                     删除 ({selected.size})

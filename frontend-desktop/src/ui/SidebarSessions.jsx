@@ -47,7 +47,7 @@ function groupSessionsByDate(sessions) {
   return result;
 }
 
-export function SidebarSessions() {
+export function SidebarSessions({ onSessionSelect } = {}) {
   const sessions = useStore((s) => s.sessions);
   const activeId = useStore((s) => s.activeSessionId);
   const setActive = useStore((s) => s.setActiveSession);
@@ -216,7 +216,7 @@ export function SidebarSessions() {
                   batchMode={batchMode}
                   checked={selected.has(s.id)}
                   onToggle={() => toggleSelect(s.id)}
-                  onClick={() => { if (batchMode) { toggleSelect(s.id); } else { setActive(s.id); setView('chat'); } }}
+                  onClick={() => { if (batchMode) { toggleSelect(s.id); } else { setActive(s.id); setView('chat'); onSessionSelect?.(); } }}
                   onDelete={() => setDeleteTarget(s)}
                   onRename={(title) => renameSession(s.id, title)}
                   onPin={() => pinSession(s.id, !s.pinned)}

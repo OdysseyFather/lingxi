@@ -2,10 +2,18 @@
 
 const baseHeaders = { 'Content-Type': 'application/json' };
 
+// 检测隧道路径前缀（如 /tunnel/lx_tunnel_xxx）
+function detectTunnelBase() {
+  if (typeof window === 'undefined') return '';
+  const m = window.location.pathname.match(/^(\/tunnel\/[^/]+)/);
+  return m ? m[1] : '';
+}
+export const TUNNEL_BASE = detectTunnelBase();
+
 async function req(method, path, body) {
   const opts = { method, headers: baseHeaders, credentials: 'include' };
   if (body !== undefined) opts.body = JSON.stringify(body);
-  const res = await fetch(path, opts);
+  const res = await fetch(TUNNEL_BASE + path, opts);
   if (!res.ok) {
     const text = await res.text().catch(() => '');
     throw new Error(`HTTP ${res.status}: ${text}`);
@@ -323,6 +331,10 @@ export const api = {
   generateH5Token: (data) => req('POST', '/api/h5-access/tokens', data),
   revokeH5Token: (id) => req('POST', `/api/h5-access/tokens/${id}/revoke`),
   deleteH5Token: (id) => req('DELETE', `/api/h5-access/tokens/${id}`),
+
+  // ── H5 云端隧道 ───────────────────────────────────────────────
+  enableH5Tunnel: (data) => req('POST', '/api/h5-tunnel/enable', data),
+  getH5TunnelStatus: () => req('GET', '/api/h5-tunnel/status'),
 };
 
 // ─── WebSocket ────────────────────────────────────────────────────
@@ -340,7 +352,7 @@ export class WSClient {
   }
   connect(initialSessionId) {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const url = `${proto}//${location.host}/api/ws${initialSessionId ? `?sessionId=${initialSessionId}` : ''}`;
+    const url = `${proto}//${location.host}${TUNNEL_BASE}/api/ws${initialSessionId ? `?sessionId=${initialSessionId}` : ''}`;
     this.ws = new WebSocket(url);
     this.ws.onopen = () => {
       // 重新订阅

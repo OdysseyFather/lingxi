@@ -799,3 +799,13 @@ PORT=3099 DB_PATH=/tmp/lingxi-instance2/smart-agent.db FRONTEND_DIST=../frontend
 - [x] **权限响应管道确认完整**：后端 `handlePermissionRequest` 已实现完整链路（SDK stdout → WS 推送前端 → HTTP 响应 → Go channel → stdin 回写 SDK），`handleAskUserPermission` 同理，无需额外修复
 - [x] **PermissionDialog 增强**：新增工具摘要行（Bash 显示 command、Write/Edit 显示 file_path，带 Terminal/FileText 图标 + Copy 按钮）；增加 Deny with reason 模式（textarea 输入拒绝理由，agent 可看到并调整方案）；完整参数可折叠查看
 - [x] **AskUserQuestion 响应链路确认完整**：`ask_questions_batch` WS 事件携带 `permission_id`，前端 `submitCodingAnswerBatch` 通过 `api.submitCodingPermissionResponse` 路由回后端 channel，`handleAskUserPermission` 从 channel 读取后重新映射答案格式写入 SDK stdin
+
+### H5 公网远程访问（v2026-06 Phase 23）
+- [x] **云端 HTTP 隧道**：信令服务器新增 HTTP 反向代理能力（`handleTunnelHTTP`），桌面端通过 WebSocket 注册隧道 token（`tunnel_register`），手机端通过 `/tunnel/<token>/` 路径透明代理所有 HTTP 请求到桌面端
+- [x] **WebSocket 隧道代理**：信令服务器检测 WS 升级请求后建立双向桥接（`tunnel_ws_open`/`tunnel_ws_message`/`tunnel_ws_close`），手机端 WS 连接经信令服务器中转到桌面端本地 WS Hub
+- [x] **桌面端隧道客户端**：`backend-desktop/handler/h5_tunnel.go` 实现 H5TunnelClient（WS 连接信令服务器 + 注册 + HTTP/WS 请求转发 + 心跳 + 自动重连）
+- [x] **前端相对路径构建**：Vite `base: './'` + `TUNNEL_BASE` 动态前缀检测，确保隧道模式下资源/API/WS 请求正确路由，桌面端本地运行零影响
+- [x] **隧道入口免 token 验证**：`h5_page.go` 对 `lx_tunnel_` 前缀的隧道访问跳过 H5 令牌验证，直接游客登录后跳转
+- [x] **隧道配置持久化 + 自动重连**：信令地址和 token 存储到 `kv_store`，`AutoStartH5Tunnel()` 应用启动时自动恢复
+- [x] **灵犀主模式移动端适配**：AppShell 响应式布局（滑出侧边栏/移动端顶栏/底部智能体选择器）+ 微信浏览器兼容（`isH5Mobile()` 多策略检测）
+- [x] **设置页云端隧道面板**：RemoteAccessPage 新增云端隧道区块（信令地址配置 + 连接/断开 + 隧道 URL 显示 + 二维码生成）

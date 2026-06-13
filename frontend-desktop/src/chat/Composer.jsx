@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { Send, ImagePlus, BookOpen, Square, Cpu, Coins, Slash, Languages, FileText, Lightbulb, Code2, SearchCheck, RefreshCw, Wrench, Mail, Sparkles, GitCompare, Database, TestTube, Mic, MicOff, Loader2, Paperclip, X, Camera, Monitor } from 'lucide-react';
 import { useStore } from '../state/useStore';
 import { Button, Tooltip } from '../ui/primitives';
-import { cn } from '../ui/cn';
+import { cn, isH5Mobile } from '../ui/cn';
 import { formatNum } from './blockUtils';
 import { api } from '../api/client';
 
@@ -297,9 +297,16 @@ export function Composer({ useKB: controlledUseKB, setUseKB: setControlledUseKB 
   }, [pushNotification]);
 
   const hasContent = text.trim() || images.length > 0 || files.length > 0;
+  const [isMobileComposer, setIsMobileComposer] = useState(() => isH5Mobile() || (typeof window !== 'undefined' && window.innerWidth < 768));
+  useEffect(() => {
+    const h5 = isH5Mobile();
+    const check = () => setIsMobileComposer(h5 || window.innerWidth < 768);
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   return (
-    <div className="px-4 pb-6">
+    <div className={cn('pb-6 safe-area-bottom', isMobileComposer ? 'px-2 pb-3' : 'px-4')}>
       <div className="max-w-4xl mx-auto">
         {(sessionUsage.in + sessionUsage.out) > 0 && (
           <div className="mb-2 flex items-center justify-end gap-3 text-xs text-[color:var(--text-faint)]">
@@ -436,30 +443,32 @@ export function Composer({ useKB: controlledUseKB, setUseKB: setControlledUseKB 
                   </span>
                 </label>
               </Tooltip>
-              <Tooltip label="添加文件">
-                <label className="cursor-pointer">
-                  <input
-                    type="file" multiple className="hidden"
-                    onChange={(e) => {
-                      const picked = Array.from(e.target.files || []);
-                      const imgFiles = picked.filter(f => f.type.startsWith('image/'));
-                      const txtFiles = picked.filter(f => !f.type.startsWith('image/'));
-                      if (imgFiles.length) onPickFiles(imgFiles);
-                      if (txtFiles.length) {
-                        Promise.all(txtFiles.map(async f => {
-                          const ext = getFileExt(f.name);
-                          const content = await f.text();
-                          return { name: f.name, ext, content, size: f.size };
-                        })).then(newFiles => setFiles(prev => [...prev, ...newFiles].slice(0, 5)));
-                      }
-                      e.target.value = '';
-                    }}
-                  />
-                  <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-[color:var(--bg-soft)] text-[color:var(--text-faint)] hover:text-[color:var(--text-soft)] transition">
-                    <Paperclip size={16} />
-                  </span>
-                </label>
-              </Tooltip>
+              {!isMobileComposer && (
+                <Tooltip label="添加文件">
+                  <label className="cursor-pointer">
+                    <input
+                      type="file" multiple className="hidden"
+                      onChange={(e) => {
+                        const picked = Array.from(e.target.files || []);
+                        const imgFiles = picked.filter(f => f.type.startsWith('image/'));
+                        const txtFiles = picked.filter(f => !f.type.startsWith('image/'));
+                        if (imgFiles.length) onPickFiles(imgFiles);
+                        if (txtFiles.length) {
+                          Promise.all(txtFiles.map(async f => {
+                            const ext = getFileExt(f.name);
+                            const content = await f.text();
+                            return { name: f.name, ext, content, size: f.size };
+                          })).then(newFiles => setFiles(prev => [...prev, ...newFiles].slice(0, 5)));
+                        }
+                        e.target.value = '';
+                      }}
+                    />
+                    <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg hover:bg-[color:var(--bg-soft)] text-[color:var(--text-faint)] hover:text-[color:var(--text-soft)] transition">
+                      <Paperclip size={16} />
+                    </span>
+                  </label>
+                </Tooltip>
+              )}
               <span className="w-px h-4 bg-[color:var(--line)] mx-0.5" />
               <Tooltip label={recording ? '点击停止' : transcribing ? '识别中...' : '语音输入'}>
                 <button
@@ -480,7 +489,7 @@ export function Composer({ useKB: controlledUseKB, setUseKB: setControlledUseKB 
                    recording ? <MicOff size={16} /> : <Mic size={16} />}
                 </button>
               </Tooltip>
-              {window.electronAPI?.captureScreen && (
+              {!isMobileComposer && window.electronAPI?.captureScreen && (
                 <Tooltip label="截屏 (⌘⇧S)">
                   <button
                     onClick={handleScreenshot}
@@ -490,19 +499,21 @@ export function Composer({ useKB: controlledUseKB, setUseKB: setControlledUseKB 
                   </button>
                 </Tooltip>
               )}
-              <Tooltip label={screenAgentMode ? '关闭 Screen Agent' : 'Screen Agent'}>
-                <button
-                  onClick={toggleScreenAgentMode}
-                  className={cn(
-                    'inline-flex items-center justify-center w-8 h-8 rounded-lg transition',
-                    screenAgentMode
-                      ? 'bg-blue-500/20 text-blue-500'
-                      : 'hover:bg-[color:var(--bg-soft)] text-[color:var(--text-faint)] hover:text-[color:var(--text-soft)]'
-                  )}
-                >
-                  <Monitor size={16} />
-                </button>
-              </Tooltip>
+              {!isMobileComposer && (
+                <Tooltip label={screenAgentMode ? '关闭 Screen Agent' : 'Screen Agent'}>
+                  <button
+                    onClick={toggleScreenAgentMode}
+                    className={cn(
+                      'inline-flex items-center justify-center w-8 h-8 rounded-lg transition',
+                      screenAgentMode
+                        ? 'bg-blue-500/20 text-blue-500'
+                        : 'hover:bg-[color:var(--bg-soft)] text-[color:var(--text-faint)] hover:text-[color:var(--text-soft)]'
+                    )}
+                  >
+                    <Monitor size={16} />
+                  </button>
+                </Tooltip>
+              )}
               <Tooltip label={useKB ? '已启用知识库' : '启用知识库检索'}>
                 <button
                   onClick={() => setUseKB((v) => !v)}
@@ -520,7 +531,10 @@ export function Composer({ useKB: controlledUseKB, setUseKB: setControlledUseKB 
             {isStreaming ? (
               <button
                 onClick={abort}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium border border-red-500/30 text-red-500 bg-red-500/5 hover:bg-red-500/10 transition-all"
+                className={cn(
+                  'inline-flex items-center gap-1.5 rounded-lg text-sm font-medium border border-red-500/30 text-red-500 bg-red-500/5 hover:bg-red-500/10 transition-all active:scale-95',
+                  isMobileComposer ? 'px-3 py-2 min-w-[60px] justify-center' : 'px-3.5 py-1.5'
+                )}
               >
                 <Square size={12} /> 停止
               </button>
@@ -529,13 +543,14 @@ export function Composer({ useKB: controlledUseKB, setUseKB: setControlledUseKB 
                 onClick={onSubmit}
                 disabled={!hasContent}
                 className={cn(
-                  'inline-flex items-center justify-center w-9 h-9 rounded-xl transition-all duration-200',
+                  'inline-flex items-center justify-center rounded-xl transition-all duration-200',
+                  isMobileComposer ? 'w-10 h-10' : 'w-9 h-9',
                   hasContent
                     ? 'bg-[color:var(--accent)] text-white shadow-[0_2px_12px_var(--accent-glow)] hover:shadow-[0_4px_20px_var(--accent-glow)] hover:-translate-y-px active:translate-y-0 active:scale-95'
                     : 'bg-[color:var(--bg-soft)] text-[color:var(--text-faint)] cursor-not-allowed'
                 )}
               >
-                <Send size={16} />
+                <Send size={isMobileComposer ? 18 : 16} />
               </button>
             )}
           </div>

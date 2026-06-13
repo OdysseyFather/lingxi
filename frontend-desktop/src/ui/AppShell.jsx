@@ -32,8 +32,8 @@ const EvolutionPage = lazyRetry(() => import('../EvolutionPage'));
 
 const LoginPage = lazyRetry(() => import('../LoginPage'));
 import EvolutionProgressPanel from './EvolutionProgressPanel';
-import { cn } from './cn';
-import { MessageSquare, Settings as SettingsIcon, Brain, BookOpen, MessageCircle, Plug, Sparkles, PanelLeftClose, PanelLeftOpen, Clock, Workflow, Globe, LogOut, User, UserPlus, Check, X, Dna, Code2, ArrowLeftRight } from 'lucide-react';
+import { cn, isH5Mobile } from './cn';
+import { MessageSquare, Settings as SettingsIcon, Brain, BookOpen, MessageCircle, Plug, Sparkles, PanelLeftClose, PanelLeftOpen, Clock, Workflow, Globe, LogOut, User, UserPlus, Check, X, Dna, Menu, Plus } from 'lucide-react';
 import { api, wsClient } from '../api/client';
 
 const SHORTCUTS = [
@@ -303,11 +303,8 @@ function NexusNotificationOverlay() {
   );
 }
 
-const CodingShellPage = lazyRetry(() => import('../code/v2/CodingShellV2').then(m => ({ default: m.CodingShellV2 })));
-const ModeSelectorPage = lazyRetry(() => import('../ModeSelector'));
 
 export function AppShell() {
-  const appMode = useStore((s) => s.appMode);
   const view = useStore((s) => s.view);
   const setView = useStore((s) => s.setView);
   const notifications = useStore((s) => s.notifications);
@@ -319,15 +316,23 @@ export function AppShell() {
   const logout = useStore((s) => s.logout);
   const addNexusNotif = useStore((s) => s.addNexusNotif);
 
-  // 移动端检测
-  const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
+  // 移动端检测：视口宽度 < 768px 或通过 H5 远程访问标记或微信浏览器
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    if (isH5Mobile()) return true;
+    return window.innerWidth < 768;
+  });
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 768);
+    const h5 = isH5Mobile();
+    const check = () => setIsMobile(h5 || window.innerWidth < 768);
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
   }, []);
 
-  // 移动端自动折叠侧边栏
+  // 移动端侧边栏滑出状态（独立于桌面端的 sidebarCollapsed）
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+
+  // 移动端自动折叠桌面侧边栏
   useEffect(() => {
     if (isMobile && !sidebarCollapsed) toggleSidebar();
   }, [isMobile]);
@@ -453,62 +458,63 @@ export function AppShell() {
     );
   }
 
-  // 未选择模式，显示模式选择页
-  if (!appMode) {
-    return (
-      <PageErrorBoundary>
-        <Suspense fallback={<PageFallback />}>
-          <ModeSelectorPage />
-        </Suspense>
-      </PageErrorBoundary>
-    );
-  }
-
-  // Coding 模式：渲染独立的 CodingShell
-  if (appMode === 'coding') {
-    return (
-      <PageErrorBoundary>
-        <Suspense fallback={<PageFallback />}>
-          <CodingShellPage />
-        </Suspense>
-      </PageErrorBoundary>
-    );
-  }
 
   const showSidebar = view === 'chat';
 
   return (
-    <div className="h-screen flex flex-col bg-[color:var(--bg)]">
+    <div className="h-screen h-[100dvh] flex flex-col bg-[color:var(--bg)] overflow-hidden">
       {/* 顶部栏 */}
       <header className={cn(
         'app-drag flex items-center border-b border-[color:var(--line)] glass relative shrink-0',
-        isMobile ? 'h-11 px-2' : 'h-12 px-4'
+        isMobile ? 'h-12 px-2 safe-area-top' : 'h-12 px-4'
       )}>
         <div className="absolute left-0 right-0 top-0 h-px bg-gradient-to-r from-transparent via-[color:var(--accent)]/40 to-transparent" />
         <div className="absolute left-0 right-0 bottom-0 h-[3px] bg-gradient-to-b from-[color:var(--line)] to-transparent opacity-50 pointer-events-none" />
 
-        {/* 左侧：Logo + AgentState */}
-        <div className={cn('flex items-center gap-2 shrink-0', isMobile ? 'pl-1' : 'pl-16')}>
-          <img src="/logo.png" alt="灵犀" className={cn('rounded-lg shadow-soft ring-1 ring-[color:var(--accent-soft)]', isMobile ? 'w-6 h-6' : 'w-7 h-7')} />
-          {!isMobile && <div className="text-sm font-semibold tracking-tight text-gradient">灵犀</div>}
-          <div className={isMobile ? 'ml-0.5' : 'ml-2'}><AgentStatePill /></div>
-        </div>
+        {/* 移动端左侧：汉堡菜单 + 新建 */}
+        {isMobile && (
+          <div className="flex items-center gap-1 shrink-0 app-no-drag">
+            <button
+              onClick={() => setMobileSidebarOpen(true)}
+              className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-[color:var(--text)] hover:bg-[color:var(--bg-soft)] transition active:scale-95"
+              aria-label="打开菜单"
+            >
+              <Menu size={20} />
+            </button>
+            <button
+              onClick={() => { useStore.getState().createSession(); }}
+              className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-[color:var(--accent)] hover:bg-[color:var(--accent-soft)] transition active:scale-95"
+              aria-label="新建对话"
+            >
+              <Plus size={20} />
+            </button>
+          </div>
+        )}
 
-        <div className="flex-1 min-w-[8px]" />
+        {/* 桌面端左侧：Logo + AgentState */}
+        {!isMobile && (
+          <div className="flex items-center gap-2 shrink-0 pl-16">
+            <img src="/logo.png" alt="灵犀" className="w-7 h-7 rounded-lg shadow-soft ring-1 ring-[color:var(--accent-soft)]" />
+            <div className="text-sm font-semibold tracking-tight text-gradient">灵犀</div>
+            <div className="ml-2"><AgentStatePill /></div>
+          </div>
+        )}
+
+        <div className="flex-1 min-w-[4px]" />
 
         {/* 主导航 */}
-        <nav className="app-no-drag flex items-center justify-center gap-0.5" aria-label="主导航">
+        <nav className="app-no-drag flex items-center justify-center gap-0.5 overflow-x-auto scrollbar-none" aria-label="主导航">
           {NAV_TABS.map((tab) => {
             const Icon = tab.icon;
             const active = view === tab.id;
             return (
               <button
                 key={tab.id}
-                onClick={() => setView(tab.id)}
+                onClick={() => { setView(tab.id); if (isMobile) setMobileSidebarOpen(false); }}
                 title={tab.label}
                 className={cn(
-                  'relative flex items-center justify-center rounded-lg text-xs font-medium transition-all duration-200',
-                  isMobile ? 'p-1.5' : 'gap-1 px-2.5 py-1.5',
+                  'relative flex items-center justify-center rounded-lg text-xs font-medium transition-all duration-200 shrink-0',
+                  isMobile ? 'p-2' : 'gap-1 px-2.5 py-1.5',
                   active
                     ? 'text-[color:var(--accent)]'
                     : 'text-[color:var(--text-soft)] hover:text-[color:var(--text)] hover:bg-[color:var(--bg-soft)]'
@@ -523,7 +529,7 @@ export function AppShell() {
                   />
                 )}
                 <span className="relative z-10 flex items-center gap-1">
-                  <Icon size={isMobile ? 16 : 14} />
+                  <Icon size={isMobile ? 18 : 14} />
                   {!isMobile && <span>{tab.label}</span>}
                 </span>
               </button>
@@ -531,7 +537,7 @@ export function AppShell() {
           })}
         </nav>
 
-        <div className="flex-1 min-w-[8px]" />
+        <div className="flex-1 min-w-[4px]" />
 
         {/* 右侧 */}
         <div className="app-no-drag flex items-center gap-1 shrink-0">
@@ -559,16 +565,6 @@ export function AppShell() {
               })}
             </div>
           )}
-          {!isMobile && (
-            <button
-              onClick={() => useStore.getState().setAppMode('coding')}
-              title="切换到 Coding 模式"
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-medium text-[#8b5e3c] bg-[#f5efe8] hover:bg-[#ede5dc] border border-[#e0d5c8] transition mr-1"
-            >
-              <Code2 size={13} />
-              <span>Coding</span>
-            </button>
-          )}
           {!isMobile && <RouterPill />}
           {!isMobile && <ModelSwitcher />}
           {!isMobile && currentUser && (
@@ -590,16 +586,37 @@ export function AppShell() {
           {isMobile && (
             <button
               onClick={() => setView('settings')}
-              className="p-1.5 rounded-lg text-[color:var(--text-faint)] hover:text-[color:var(--text)]"
+              className="inline-flex items-center justify-center w-9 h-9 rounded-lg text-[color:var(--text-faint)] hover:text-[color:var(--text)] active:scale-95 transition"
             >
-              <SettingsIcon size={16} />
+              <SettingsIcon size={18} />
             </button>
           )}
         </div>
       </header>
 
-      <div className="flex-1 flex min-h-0">
-        {/* 侧边栏（移动端隐藏） */}
+      <div className="flex-1 flex min-h-0 overflow-hidden relative">
+        {/* 移动端滑出式侧边栏 + 遮罩 */}
+        {isMobile && (
+          <>
+            {mobileSidebarOpen && (
+              <div
+                className="fixed inset-0 z-40 bg-black/40 backdrop-blur-[2px]"
+                onClick={() => setMobileSidebarOpen(false)}
+              />
+            )}
+            <aside
+              className={cn(
+                'fixed inset-y-0 left-0 z-50 w-[min(85vw,300px)] bg-[color:var(--bg-elev)] border-r border-[color:var(--line)] shadow-xl flex flex-col transition-transform duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
+                mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+              )}
+              aria-hidden={!mobileSidebarOpen}
+            >
+              <SidebarSessions onSessionSelect={() => setMobileSidebarOpen(false)} />
+            </aside>
+          </>
+        )}
+
+        {/* 桌面端侧边栏 */}
         {showSidebar && !isMobile && (
           <aside className={cn(
             'shrink-0 border-r border-[color:var(--line)] bg-[color:var(--bg-elev)]/80 backdrop-blur flex flex-col transition-all duration-300',
@@ -610,7 +627,7 @@ export function AppShell() {
         )}
 
         {/* 主区 */}
-        <main className="flex-1 flex flex-col min-h-0 relative">
+        <main className="flex-1 flex flex-col min-h-0 min-w-0 relative">
           <PageErrorBoundary>
           <Suspense fallback={<PageFallback />}>
           <AnimatePresence mode="wait">
@@ -625,32 +642,32 @@ export function AppShell() {
               </motion.div>
             )}
             {view === 'agents' && (
-              <motion.div key="agents" className="flex-1 overflow-auto scrollable bg-[color:var(--bg)] p-6" {...pageMotion}>
+              <motion.div key="agents" className={cn('flex-1 overflow-auto scrollable bg-[color:var(--bg)]', isMobile ? 'p-3' : 'p-6')} {...pageMotion}>
                 <AgentFactoryPage onBack={() => setView('chat')} />
               </motion.div>
             )}
             {view === 'mcp' && (
-              <motion.div key="mcp" className="flex-1 overflow-auto scrollable bg-[color:var(--bg)] p-6" {...pageMotion}>
+              <motion.div key="mcp" className={cn('flex-1 overflow-auto scrollable bg-[color:var(--bg)]', isMobile ? 'p-3' : 'p-6')} {...pageMotion}>
                 <MCPPage onBack={() => setView('chat')} />
               </motion.div>
             )}
             {view === 'skills' && (
-              <motion.div key="skills" className="flex-1 overflow-auto scrollable bg-[color:var(--bg)] p-4" {...pageMotion}>
+              <motion.div key="skills" className={cn('flex-1 overflow-auto scrollable bg-[color:var(--bg)]', isMobile ? 'p-3' : 'p-4')} {...pageMotion}>
                 <SkillsPage />
               </motion.div>
             )}
             {view === 'knowledge' && (
-              <motion.div key="knowledge" className="flex-1 overflow-auto scrollable bg-[color:var(--bg)] p-4" {...pageMotion}>
+              <motion.div key="knowledge" className={cn('flex-1 overflow-auto scrollable bg-[color:var(--bg)]', isMobile ? 'p-3' : 'p-4')} {...pageMotion}>
                 <KnowledgePage />
               </motion.div>
             )}
             {view === 'im' && (
-              <motion.div key="im" className="flex-1 overflow-auto scrollable bg-[color:var(--bg)] p-4" {...pageMotion}>
+              <motion.div key="im" className={cn('flex-1 overflow-auto scrollable bg-[color:var(--bg)]', isMobile ? 'p-3' : 'p-4')} {...pageMotion}>
                 <IMConnectorPage />
               </motion.div>
             )}
             {view === 'workflow' && (
-              <motion.div key="workflow" className="flex-1 overflow-auto scrollable bg-[color:var(--bg)] p-6" {...pageMotion}>
+              <motion.div key="workflow" className={cn('flex-1 overflow-auto scrollable bg-[color:var(--bg)]', isMobile ? 'p-3' : 'p-6')} {...pageMotion}>
                 <WorkflowPage />
               </motion.div>
             )}

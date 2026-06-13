@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AnimatePresence } from 'framer-motion';
-import { BookOpen, Brain, Cpu, Plug, Search, Download, Zap, Dna, Undo2, X, Shield } from 'lucide-react';
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
+import { BookOpen, Brain, Cpu, Plug, Search, Download, Zap, Dna, Undo2, X, Shield, ChevronDown, Check } from 'lucide-react';
 import { parseAssistantContent } from './blockUtils';
 import { useStore } from '../state/useStore';
 import { MessageList } from './MessageList';
@@ -9,7 +9,7 @@ import { SearchModal } from './SearchModal';
 import { ScreenAgentPanel } from './ScreenAgentPanel';
 import { Badge } from '../ui/primitives';
 import { api } from '../api/client';
-import { cn } from '../ui/cn';
+import { cn, isH5Mobile } from '../ui/cn';
 import AgentAvatar from '../ui/AgentAvatar';
 
 export function ChatView() {
@@ -69,8 +69,18 @@ function ChatContextBar({ useKB, onSearchOpen }) {
   const sessions = useStore((s) => s.sessions);
   const activeSessionId = useStore((s) => s.activeSessionId);
   const activeAgentId = useStore((s) => s.activeAgentId);
+  
   const activeProfile = useStore((s) => s.activeProfile);
   const messages = useStore((s) => s.messages);
+  const [agentPickerOpen, setAgentPickerOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => isH5Mobile() || (typeof window !== 'undefined' && window.innerWidth < 768));
+
+  useEffect(() => {
+    const h5 = isH5Mobile();
+    const check = () => setIsMobile(h5 || window.innerWidth < 768);
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   const session = sessions.find((s) => s.id === activeSessionId);
   const agent = useMemo(() => {
@@ -84,6 +94,93 @@ function ChatContextBar({ useKB, onSearchOpen }) {
   const capability = useMemo(() => summarizeCapability(agent), [agent]);
   const title = session?.title || (activeSessionId ? '当前会话' : '新对话');
 
+  const handleSelectAgent = useCallback((a) => {
+    if (activeSessionId) {
+      api.setSessionAgent(activeSessionId, a.id).catch(() => {});
+    } else {
+      localStorage.setItem('lingxi-active-agent', String(a.id));
+      useStore.setState({ activeAgentId: a.id });
+    }
+    setAgentPickerOpen(false);
+  }, [activeSessionId]);
+
+  // 移动端紧凑布局
+  if (isMobile) {
+    return (
+      <div className="px-3 pt-2 pb-1">
+        <div className="flex items-center gap-2">
+          {/* 智能体选择按钮 */}
+          <button
+            onClick={() => setAgentPickerOpen(true)}
+            className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg bg-[color:var(--bg-soft)] border border-[color:var(--line)] active:scale-95 transition min-w-0 shrink-0"
+          >
+            <AgentAvatar avatar={agent?.avatar} name={agent?.name} size={22} className="shrink-0" />
+            <span className="text-xs font-medium truncate max-w-[80px] text-[color:var(--text)]">{agent?.name || '默认'}</span>
+            <ChevronDown size={12} className="text-[color:var(--text-faint)] shrink-0" />
+          </button>
+          {/* 会话标题 */}
+          <span className="text-xs text-[color:var(--text-faint)] truncate flex-1 min-w-0">{title}</span>
+          {/* 搜索按钮 */}
+          <button
+            onClick={onSearchOpen}
+            className="inline-flex items-center justify-center w-8 h-8 rounded-lg text-[color:var(--text-faint)] hover:text-[color:var(--text-soft)] hover:bg-[color:var(--bg-soft)] transition shrink-0"
+          >
+            <Search size={15} />
+          </button>
+        </div>
+
+        {/* 移动端智能体选择弹窗 */}
+        <AnimatePresence>
+          {agentPickerOpen && (
+            <>
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="fixed inset-0 z-[200] bg-black/30"
+                onClick={() => setAgentPickerOpen(false)}
+              />
+              <motion.div
+                initial={{ opacity: 0, y: 100 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 100 }}
+                transition={{ type: 'spring', damping: 28, stiffness: 300 }}
+                className="fixed bottom-0 left-0 right-0 z-[201] max-h-[70vh] rounded-t-2xl bg-[color:var(--bg-elev)] border-t border-[color:var(--line)] shadow-xl flex flex-col safe-area-bottom"
+              >
+                <div className="flex items-center justify-between px-4 py-3 border-b border-[color:var(--line)]">
+                  <span className="text-sm font-semibold text-[color:var(--text)]">选择智能体</span>
+                  <button onClick={() => setAgentPickerOpen(false)} className="p-1 rounded-lg hover:bg-[color:var(--bg-soft)]">
+                    <X size={18} className="text-[color:var(--text-faint)]" />
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto overscroll-contain p-2 space-y-0.5">
+                  {agents.map((a) => (
+                    <button
+                      key={a.id}
+                      onClick={() => handleSelectAgent(a)}
+                      className={cn(
+                        'w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition active:scale-[0.98]',
+                        a.id === agent?.id ? 'bg-[color:var(--accent-soft)]' : 'hover:bg-[color:var(--bg-soft)]'
+                      )}
+                    >
+                      <AgentAvatar avatar={a.avatar} name={a.name} size={36} />
+                      <div className="flex-1 min-w-0 text-left">
+                        <div className="text-sm font-medium text-[color:var(--text)] truncate">{a.name}</div>
+                        {a.description && <div className="text-[11px] text-[color:var(--text-faint)] truncate mt-0.5">{a.description}</div>}
+                      </div>
+                      {a.id === agent?.id && <Check size={16} className="text-[color:var(--accent)] shrink-0" />}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            </>
+          )}
+        </AnimatePresence>
+      </div>
+    );
+  }
+
+  // 桌面端布局
   return (
     <div className="px-4 pt-3">
       <div className="max-w-4xl mx-auto flex items-center gap-3 px-4 py-2.5 rounded-xl bg-[color:var(--bg-soft)]/40">

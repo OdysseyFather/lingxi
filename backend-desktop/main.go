@@ -182,6 +182,13 @@ func main() {
 	api.GET("/h5-access/session/:sessionId/messages", handler.H5SessionMessagesHandler)
 	api.GET("/h5-access/agents", handler.H5AgentsListHandler)
 
+	// H5 云端隧道
+	api.POST("/h5-tunnel/enable", func(c *gin.Context) {
+		c.Set("server_port", cfg.Server.Port)
+		handler.EnableH5TunnelHandler(c)
+	})
+	api.GET("/h5-tunnel/status", handler.GetH5TunnelStatusHandler)
+
 	// 模型 / 接入点 / AKSK 档案
 	api.GET("/providers", handler.ListProviders)
 	api.GET("/api-profiles", handler.ListAPIProfiles)
@@ -425,6 +432,9 @@ func main() {
 
 	// 启动文件监控
 	watcher.Start()
+
+	// 自动恢复 H5 云端隧道（如果之前已配置并启用）
+	handler.AutoStartH5Tunnel(cfg.Server.Port)
 
 	backupStop := make(chan struct{})
 	go handler.StartDailyBackup(backupStop)
