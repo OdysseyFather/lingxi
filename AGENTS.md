@@ -332,6 +332,7 @@ dist-electron/
 | PATCH | /api/sessions/:id | UpdateSession | 更新会话（title/pinned/folder） |
 | DELETE | /api/sessions/:id | DeleteSession | 删除会话 |
 | POST | /api/sessions/batch-delete | BatchDeleteSessions | 批量删除会话 |
+| POST | /api/sessions/batch-export | BatchExportSessions | 批量导出会话为 ZIP（Markdown） |
 | GET | /api/sessions/:id/messages | ListMessages | 消息列表 |
 | GET | /api/sessions/:id/pending | GetPendingTask | 查询挂起任务 |
 | DELETE | /api/sessions/:id/pending | ClearPendingTask | 清除挂起任务 |
@@ -608,6 +609,7 @@ xattr -cr "/Applications/灵犀.app"
 - **顶部导航栏（主导航 6 项：对话/编程/智能体/技能/知识库/MCP + 辅助导航 5 项，layoutId 动画指示器）**
 - 会话重命名（双击编辑）+ **会话置顶**
 - **会话批量删除**
+- **会话批量导出（选中多个会话导出为 Markdown ZIP 包）**
 - Modal 化删除确认
 - **费用估算（非官方 API 本地定价表兜底，标注"~"估算标记）**
 - 用量统计 + 预算预警

@@ -1,13 +1,17 @@
 package handler
 
 import (
+	"archive/zip"
+	"bytes"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"lingxi-agent/db"
 	"lingxi-agent/model"
@@ -554,4 +558,106 @@ func ForkSession(c *gin.Context) {
 		SELECT ?, role, content, created_at FROM messages WHERE session_id=? ORDER BY id`, newID, srcID)
 
 	c.JSON(http.StatusOK, gin.H{"id": newID, "source_id": srcID})
+}
+
+// BatchExportSessions POST /api/sessions/batch-export
+func BatchExportSessions(c *gin.Context) {
+	var body struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || len(body.IDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "ids 不能为空"})
+		return
+	}
+
+	buf := new(bytes.Buffer)
+	zw := zip.NewWriter(buf)
+
+	for _, sid := range body.IDs {
+		var title string
+		err := db.DB.QueryRow(`SELECT COALESCE(title,'新对话') FROM sessions WHERE id=?`, sid).Scan(&title)
+		if err != nil {
+			continue
+		}
+
+		rows, err := db.DB.Query(`
+			SELECT role, content, created_at FROM messages WHERE session_id=? ORDER BY id ASC
+		`, sid)
+		if err != nil {
+			continue
+		}
+
+		var lines []string
+		lines = append(lines, fmt.Sprintf("# %s", title))
+		lines = append(lines, "")
+		lines = append(lines, fmt.Sprintf("> 导出时间：%s", time.Now().Format("2006-01-02 15:04:05")))
+		lines = append(lines, "")
+
+		for rows.Next() {
+			var role, content string
+			var createdAt time.Time
+			if err := rows.Scan(&role, &content, &createdAt); err != nil {
+				continue
+			}
+			if role == "user" {
+				lines = append(lines, "## 👤 用户", "")
+				text := content
+				var obj map[string]interface{}
+				if json.Unmarshal([]byte(content), &obj) == nil {
+					if t, ok := obj["text"].(string); ok {
+						text = t
+					}
+				}
+				lines = append(lines, text, "")
+			} else {
+				lines = append(lines, "## 🤖 助理", "")
+				var blocks []map[string]interface{}
+				if json.Unmarshal([]byte(content), &blocks) == nil {
+					for _, b := range blocks {
+						btype, _ := b["type"].(string)
+						btext, _ := b["text"].(string)
+						switch btype {
+						case "text":
+							if btext != "" {
+								lines = append(lines, btext, "")
+							}
+						case "thinking":
+							if btext != "" {
+								lines = append(lines, "<details><summary>思考过程</summary>", "", btext, "", "</details>", "")
+							}
+						case "tool":
+							label, _ := b["label"].(string)
+							name, _ := b["name"].(string)
+							if label == "" {
+								label = name
+							}
+							lines = append(lines, fmt.Sprintf("> 🔧 工具调用: %s", label), "")
+						}
+					}
+				} else {
+					lines = append(lines, content, "")
+				}
+			}
+			lines = append(lines, "---", "")
+		}
+		rows.Close()
+
+		safeTitle := strings.NewReplacer("/", "-", "\\", "-", "?", "", "%", "", "*", "", ":", "-", "|", "-", "\"", "", "<", "", ">", "").Replace(title)
+		if safeTitle == "" {
+			safeTitle = fmt.Sprintf("对话_%d", sid)
+		}
+		filename := fmt.Sprintf("%s_%d.md", safeTitle, sid)
+
+		fw, err := zw.Create(filename)
+		if err != nil {
+			continue
+		}
+		fw.Write([]byte(strings.Join(lines, "\n")))
+	}
+
+	zw.Close()
+
+	dateStr := time.Now().Format("20060102")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="灵犀对话导出-%s.zip"`, dateStr))
+	c.Data(http.StatusOK, "application/zip", buf.Bytes())
 }

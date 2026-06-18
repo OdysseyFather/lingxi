@@ -89,6 +89,7 @@ func main() {
 	api.PATCH("/sessions/:id", handler.UpdateSession)
 	api.DELETE("/sessions/:id", handler.DeleteSession)
 	api.POST("/sessions/batch-delete", handler.BatchDeleteSessions)
+	api.POST("/sessions/batch-export", handler.BatchExportSessions)
 	api.POST("/sessions/:id/fork", handler.ForkSession)
 	api.POST("/sessions/:id/extract-knowledge", handler.ExtractSessionKnowledge)
 	api.GET("/sessions/:id/messages", handler.ListMessages)

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useStore } from '../state/useStore';
-import { Plus, MessageSquare, Trash2, Search, ChevronDown, Sparkles, Settings as SettingsIcon, Pencil, Pin, CheckSquare, Square, X, BookOpen, Shield, ShieldOff } from 'lucide-react';
+import { Plus, MessageSquare, Trash2, Search, ChevronDown, Sparkles, Settings as SettingsIcon, Pencil, Pin, CheckSquare, Square, X, BookOpen, Shield, ShieldOff, Download, Loader2 } from 'lucide-react';
 import { Input, Button, Modal } from './primitives';
 import { api } from '../api/client';
 import { cn } from './cn';
@@ -68,6 +68,7 @@ export function SidebarSessions({ onSessionSelect } = {}) {
   const [batchMode, setBatchMode] = useState(false);
   const [selected, setSelected] = useState(new Set());
   const [batchDeleteOpen, setBatchDeleteOpen] = useState(false);
+  const [batchExporting, setBatchExporting] = useState(false);
   const filtered = sessions.filter((s) => !q || (s.title || '').toLowerCase().includes(q.toLowerCase()));
   const grouped = useMemo(() => groupSessionsByDate(filtered), [filtered]);
   const currentAgent = agents.find((a) => a.id === activeAgentId) || agents.find((a) => a.builtin) || agents[0];
@@ -96,6 +97,24 @@ export function SidebarSessions({ onSessionSelect } = {}) {
     setBatchDeleteOpen(false);
     exitBatchMode();
   }, [selected, batchDeleteSessions, exitBatchMode]);
+
+  const handleBatchExport = useCallback(async () => {
+    if (selected.size === 0 || batchExporting) return;
+    setBatchExporting(true);
+    try {
+      const blob = await api.batchExportSessions(Array.from(selected));
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `灵犀对话导出-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error('batch export failed', e);
+    } finally {
+      setBatchExporting(false);
+    }
+  }, [selected, batchExporting]);
 
   const handleConfirmDelete = useCallback(async () => {
     if (deleteTarget) {
@@ -168,15 +187,23 @@ export function SidebarSessions({ onSessionSelect } = {}) {
 
       {batchMode ? (
         <div className="flex items-center gap-1.5">
-          <Button variant="outline" size="sm" className="flex-1" onClick={selectAll}>
+          <Button variant="outline" size="sm" onClick={selectAll}>
             <CheckSquare size={13} /> 全选
           </Button>
           <Button
-            variant="danger" size="sm" className="flex-1"
+            variant="outline" size="sm"
+            disabled={selected.size === 0 || batchExporting}
+            onClick={handleBatchExport}
+          >
+            {batchExporting ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+            导出{selected.size > 0 ? ` (${selected.size})` : ''}
+          </Button>
+          <Button
+            variant="danger" size="sm"
             disabled={selected.size === 0}
             onClick={() => setBatchDeleteOpen(true)}
           >
-            <Trash2 size={13} /> 删除 {selected.size > 0 ? `(${selected.size})` : ''}
+            <Trash2 size={13} /> 删除{selected.size > 0 ? ` (${selected.size})` : ''}
           </Button>
           <button onClick={exitBatchMode} className="p-1.5 rounded-lg text-[color:var(--text-faint)] hover:text-[color:var(--text)] hover:bg-[color:var(--bg-soft)] transition">
             <X size={15} />

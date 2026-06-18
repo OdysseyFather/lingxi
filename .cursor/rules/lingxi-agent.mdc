@@ -473,6 +473,7 @@ PORT=3099 DB_PATH=/tmp/lingxi-instance2/smart-agent.db FRONTEND_DIST=../frontend
 - [x] 会话文件夹数据模型（sessions.folder 列 + UpdateSession 支持 folder）
 - [x] 会话置顶（sessions.pinned 列 + UpdateSession 支持 pinned）
 - [x] 会话批量删除（POST /api/sessions/batch-delete）
+- [x] 会话批量导出 Markdown ZIP（POST /api/sessions/batch-export）
 - [x] 技能批量上传（POST /api/skills/batch-upload）
 - [x] 对话中止（POST /api/chat/abort）
 - [x] 对话批量发送（POST /api/chat/batch）

@@ -51,6 +51,14 @@ export const api = {
   pinSession: (id, pinned) => req('PATCH', `/api/sessions/${id}`, { pinned }),
   deleteSession: (id) => req('DELETE', `/api/sessions/${id}`),
   batchDeleteSessions: (ids) => req('POST', '/api/sessions/batch-delete', { ids }),
+  batchExportSessions: async (ids) => {
+    const res = await fetch(TUNNEL_BASE + '/api/sessions/batch-export', {
+      method: 'POST', headers: baseHeaders, credentials: 'include',
+      body: JSON.stringify({ ids }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.blob();
+  },
   extractSessionKnowledge: (id) => req('POST', `/api/sessions/${id}/extract-knowledge`),
   forkSession: (id) => req('POST', `/api/sessions/${id}/fork`),
   listMessages: (id) => req('GET', `/api/sessions/${id}/messages`),
