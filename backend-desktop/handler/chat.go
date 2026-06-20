@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bufio"
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"lingxi-agent/config"
+	"lingxi-agent/connector"
 	"lingxi-agent/db"
 	"lingxi-agent/nexus"
 	"lingxi-agent/router"
@@ -2072,6 +2074,30 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 	}
 
 	tryPostChatEvolution(agentID, sessionID, blocks)
+	tryAutoSummarize(sessionID)
+
+	// 向已配对的手机设备发送推送通知（异步，不阻塞主流程）
+	var pushAgentName string
+	if agentID > 0 {
+		if a, err := db.GetAgent(agentID); err == nil {
+			pushAgentName = a.Name
+		}
+	}
+	var pushBuf strings.Builder
+	for _, b := range blocks {
+		if b.Type == "text" && b.Text != "" {
+			if pushBuf.Len() > 0 {
+				pushBuf.WriteString(" ")
+			}
+			pushBuf.WriteString(b.Text)
+			if pushBuf.Len() > 200 {
+				break
+			}
+		}
+	}
+	if pushBuf.Len() > 0 {
+		TrySendPushNotification(sessionID, pushAgentName, pushBuf.String(), false)
+	}
 
 	hub.Send(sessionID, "done", "[DONE]")
 }
@@ -2684,6 +2710,13 @@ func RunClaudeSync(message string, sessionID int64) (reply string, usedSessionID
 		"--dangerously-skip-permissions",
 	}
 	prompt := buildSystemPrompt(false)
+	// 应用智能体角色设定（如果会话绑定了非内置 agent）
+	agentID := db.GetSessionAgentID(sessionID)
+	if agentID > 0 {
+		if a, err := db.GetAgent(agentID); err == nil && !a.Builtin && strings.TrimSpace(a.SystemPrompt) != "" {
+			prompt = applyAgentPersona(prompt, a.Name, a.SystemPrompt)
+		}
+	}
 	if claudeSessionID != "" {
 		args = append(args, "--resume", claudeSessionID)
 	}
@@ -2831,6 +2864,545 @@ func RunClaudeSync(message string, sessionID int64) (reply string, usedSessionID
 
 	return redactSensitive(textBuf.String()), usedSessionID, nil
 }
+
+// RunClaudeStreaming 供 connector 包的流式路径调用。
+// 与 RunClaudeSync 结构相同，但在每次收到 text_delta 时实时回调 onChunk，
+// 生成结束时调用 onChunk("", true)。
+// 持久化逻辑与 RunClaudeSync 保持一致。
+func RunClaudeStreaming(message string, sessionID int64, onChunk func(chunk string, done bool)) (usedSessionID int64, err error) {
+	cfg := config.Get()
+
+	if sessionID == 0 {
+		res, e := db.DB.Exec(`INSERT INTO sessions (title) VALUES (?)`, truncateTitle(message))
+		if e != nil {
+			return 0, e
+		}
+		sessionID, _ = res.LastInsertId()
+	}
+	usedSessionID = sessionID
+
+	appendMessage(sessionID, "user", message)
+
+	claudeSessionID := getClaudeSessionID(sessionID)
+
+	args := []string{
+		"-p",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--include-partial-messages",
+		"--dangerously-skip-permissions",
+	}
+	prompt := buildSystemPrompt(false)
+	// 应用智能体角色设定（如果会话绑定了非内置 agent）
+	agentID := db.GetSessionAgentID(sessionID)
+	if agentID > 0 {
+		if a, err := db.GetAgent(agentID); err == nil && !a.Builtin && strings.TrimSpace(a.SystemPrompt) != "" {
+			prompt = applyAgentPersona(prompt, a.Name, a.SystemPrompt)
+		}
+	}
+	if claudeSessionID != "" {
+		args = append(args, "--resume", claudeSessionID)
+	}
+	args = append(args, "--system-prompt", prompt)
+
+	claudeBin := cfg.Claude.Bin
+	cmd := exec.Command(claudeBin, args...)
+	cmd.Stdin = strings.NewReader(message)
+	cmd.Env = buildClaudeEnv(cfg)
+
+	stdout, e := cmd.StdoutPipe()
+	if e != nil {
+		return usedSessionID, e
+	}
+	stderrPipe, _ := cmd.StderrPipe()
+	if e := cmd.Start(); e != nil {
+		return usedSessionID, e
+	}
+	slog.Info("[stream] claude started pid= session", "pid", cmd.Process.Pid, "value", sessionID)
+
+	go func() {
+		s := bufio.NewScanner(stderrPipe)
+		for s.Scan() {
+			slog.Info("[im claude stderr]", "text()", s.Text())
+		}
+	}()
+
+	var (
+		textBuf            strings.Builder
+		blocks             []msgBlock
+		newClaudeSessionID string
+	)
+
+	appendBlock := func(typ, name, chunk string) {
+		if len(blocks) > 0 && typ != "tool" {
+			last := &blocks[len(blocks)-1]
+			if last.Type == typ {
+				last.Text += chunk
+				return
+			}
+		}
+		blocks = append(blocks, msgBlock{Type: typ, Name: name, Text: chunk})
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var ev claudeEvent
+		if json.Unmarshal([]byte(line), &ev) != nil {
+			continue
+		}
+		switch ev.Type {
+		case "system":
+			if ev.Subtype == "init" && ev.Session != "" {
+				newClaudeSessionID = ev.Session
+			}
+		case "stream_event":
+			var inner innerEvent
+			if json.Unmarshal(ev.Event, &inner) != nil {
+				continue
+			}
+			switch inner.Type {
+			case "content_block_start":
+				if inner.ContentBlock.Type == "tool_use" {
+					appendBlock("tool", inner.ContentBlock.Name, "")
+				}
+			case "content_block_delta":
+				d := inner.Delta
+				switch d.Type {
+				case "text_delta":
+					if d.Text != "" {
+						safeText := redactSensitive(d.Text)
+						textBuf.WriteString(safeText)
+						appendBlock("text", "", safeText)
+						// 实时回调：推送文本增量
+						onChunk(safeText, false)
+					}
+				case "thinking_delta":
+					if d.Thinking != "" {
+						appendBlock("thinking", "", d.Thinking)
+					}
+				case "input_json_delta":
+					if d.PartialJSON != "" && len(blocks) > 0 {
+						last := &blocks[len(blocks)-1]
+						if last.Type == "tool" {
+							last.Input += d.PartialJSON
+						}
+					}
+				}
+			case "content_block_stop":
+				if len(blocks) > 0 {
+					last := &blocks[len(blocks)-1]
+					if last.Type == "tool" {
+						if isAskUserTool(last.Name) {
+							interactiveText := convertAskToolToInteractiveBlock(last.Input)
+							if interactiveText != "" {
+								last.Type = "text"
+								last.Text = interactiveText
+								last.Name = ""
+								last.Label = ""
+								last.Input = ""
+								last.Done = false
+								last.Ms = 0
+								textBuf.WriteString(interactiveText)
+							} else {
+								blocks = blocks[:len(blocks)-1]
+							}
+						} else {
+							last.Done = true
+							if isSensitivePath(last.Input) {
+								last.Input = "[已拦截敏感操作]"
+							}
+							last.Input = safeSummarizeToolInput(last.Name, last.Input)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	cmd.Wait()
+
+	// 生成完毕：通知调用方
+	onChunk("", true)
+
+	if newClaudeSessionID != "" {
+		saveClaudeSessionID(sessionID, newClaudeSessionID)
+	}
+	if len(blocks) > 0 {
+		for i := range blocks {
+			if blocks[i].Type == "tool" {
+				blocks[i].Done = true
+				blocks[i].Text = ""
+			} else {
+				blocks[i].Text = redactSensitive(blocks[i].Text)
+			}
+		}
+		if bj, e := json.Marshal(blocks); e == nil {
+			appendMessage(sessionID, "assistant", string(bj))
+		}
+	}
+
+	return usedSessionID, nil
+}
+
+// RunClaudeSyncCtx 带 context 支持的 RunClaudeSync，context 取消时自动 kill 进程
+func RunClaudeSyncCtx(ctx context.Context, message string, sessionID int64) (reply string, usedSessionID int64, err error) {
+	cfg := config.Get()
+
+	if sessionID == 0 {
+		res, e := db.DB.Exec(`INSERT INTO sessions (title) VALUES (?)`, truncateTitle(message))
+		if e != nil {
+			return "", 0, e
+		}
+		sessionID, _ = res.LastInsertId()
+	}
+	usedSessionID = sessionID
+	appendMessage(sessionID, "user", message)
+
+	claudeSessionID := getClaudeSessionID(sessionID)
+	args := []string{
+		"-p",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--include-partial-messages",
+		"--dangerously-skip-permissions",
+	}
+	prompt := buildSystemPrompt(false)
+	// 应用智能体角色设定（如果会话绑定了非内置 agent）
+	agentID := db.GetSessionAgentID(sessionID)
+	if agentID > 0 {
+		if a, err := db.GetAgent(agentID); err == nil && !a.Builtin && strings.TrimSpace(a.SystemPrompt) != "" {
+			prompt = applyAgentPersona(prompt, a.Name, a.SystemPrompt)
+		}
+	}
+	if claudeSessionID != "" {
+		args = append(args, "--resume", claudeSessionID)
+	}
+	args = append(args, "--system-prompt", prompt)
+
+	claudeBin := cfg.Claude.Bin
+	cmd := exec.CommandContext(ctx, claudeBin, args...)
+	cmd.Stdin = strings.NewReader(message)
+	cmd.Env = buildClaudeEnv(cfg)
+
+	stdout, e := cmd.StdoutPipe()
+	if e != nil {
+		return "", usedSessionID, e
+	}
+	stderrPipe, _ := cmd.StderrPipe()
+	if e := cmd.Start(); e != nil {
+		return "", usedSessionID, e
+	}
+	slog.Info("[ctx-sync] claude started pid= session", "pid", cmd.Process.Pid, "value", sessionID)
+
+	go func() {
+		s := bufio.NewScanner(stderrPipe)
+		for s.Scan() {
+			slog.Info("[im claude stderr]", "text()", s.Text())
+		}
+	}()
+
+	var (
+		textBuf            strings.Builder
+		blocks             []msgBlock
+		newClaudeSessionID string
+	)
+
+	appendBlock := func(typ, name, chunk string) {
+		if len(blocks) > 0 && typ != "tool" {
+			last := &blocks[len(blocks)-1]
+			if last.Type == typ {
+				last.Text += chunk
+				return
+			}
+		}
+		blocks = append(blocks, msgBlock{Type: typ, Name: name, Text: chunk})
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			break
+		}
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var ev claudeEvent
+		if json.Unmarshal([]byte(line), &ev) != nil {
+			continue
+		}
+		switch ev.Type {
+		case "system":
+			if ev.Subtype == "init" && ev.Session != "" {
+				newClaudeSessionID = ev.Session
+			}
+		case "stream_event":
+			var inner innerEvent
+			if json.Unmarshal(ev.Event, &inner) != nil {
+				continue
+			}
+			switch inner.Type {
+			case "content_block_delta":
+				d := inner.Delta
+				switch d.Type {
+				case "text_delta":
+					if d.Text != "" {
+						safeText := redactSensitive(d.Text)
+						textBuf.WriteString(safeText)
+						appendBlock("text", "", safeText)
+					}
+				case "thinking_delta":
+					if d.Thinking != "" {
+						appendBlock("thinking", "", d.Thinking)
+					}
+				}
+			case "content_block_start":
+				if inner.ContentBlock.Type == "tool_use" {
+					appendBlock("tool", inner.ContentBlock.Name, "")
+				}
+			}
+		}
+	}
+
+	cmd.Wait()
+
+	if ctx.Err() != nil {
+		slog.Info("[ctx-sync] cancelled, partial save", "session", sessionID)
+		return "", usedSessionID, ctx.Err()
+	}
+
+	if newClaudeSessionID != "" {
+		saveClaudeSessionID(sessionID, newClaudeSessionID)
+	}
+	replyText := textBuf.String()
+	if len(blocks) > 0 {
+		for i := range blocks {
+			if blocks[i].Type == "tool" {
+				blocks[i].Done = true
+				blocks[i].Text = ""
+			} else {
+				blocks[i].Text = redactSensitive(blocks[i].Text)
+			}
+		}
+		if bj, e := json.Marshal(blocks); e == nil {
+			appendMessage(sessionID, "assistant", string(bj))
+		}
+	}
+	return replyText, usedSessionID, nil
+}
+
+// RunClaudeStreamingCtx 带 context 支持的 RunClaudeStreaming
+func RunClaudeStreamingCtx(ctx context.Context, message string, sessionID int64, onChunk func(chunk string, done bool)) (usedSessionID int64, err error) {
+	cfg := config.Get()
+
+	if sessionID == 0 {
+		res, e := db.DB.Exec(`INSERT INTO sessions (title) VALUES (?)`, truncateTitle(message))
+		if e != nil {
+			return 0, e
+		}
+		sessionID, _ = res.LastInsertId()
+	}
+	usedSessionID = sessionID
+	appendMessage(sessionID, "user", message)
+
+	claudeSessionID := getClaudeSessionID(sessionID)
+	args := []string{
+		"-p",
+		"--output-format", "stream-json",
+		"--verbose",
+		"--include-partial-messages",
+		"--dangerously-skip-permissions",
+	}
+	prompt := buildSystemPrompt(false)
+	// 应用智能体角色设定（如果会话绑定了非内置 agent）
+	agentID := db.GetSessionAgentID(sessionID)
+	if agentID > 0 {
+		if a, err := db.GetAgent(agentID); err == nil && !a.Builtin && strings.TrimSpace(a.SystemPrompt) != "" {
+			prompt = applyAgentPersona(prompt, a.Name, a.SystemPrompt)
+		}
+	}
+	if claudeSessionID != "" {
+		args = append(args, "--resume", claudeSessionID)
+	}
+	args = append(args, "--system-prompt", prompt)
+
+	claudeBin := cfg.Claude.Bin
+	cmd := exec.CommandContext(ctx, claudeBin, args...)
+	cmd.Stdin = strings.NewReader(message)
+	cmd.Env = buildClaudeEnv(cfg)
+
+	stdout, e := cmd.StdoutPipe()
+	if e != nil {
+		return usedSessionID, e
+	}
+	stderrPipe, _ := cmd.StderrPipe()
+	if e := cmd.Start(); e != nil {
+		return usedSessionID, e
+	}
+	slog.Info("[ctx-stream] claude started pid= session", "pid", cmd.Process.Pid, "value", sessionID)
+
+	go func() {
+		s := bufio.NewScanner(stderrPipe)
+		for s.Scan() {
+			slog.Info("[im claude stderr]", "text()", s.Text())
+		}
+	}()
+
+	var (
+		textBuf            strings.Builder
+		blocks             []msgBlock
+		newClaudeSessionID string
+	)
+
+	appendBlock := func(typ, name, chunk string) {
+		if len(blocks) > 0 && typ != "tool" {
+			last := &blocks[len(blocks)-1]
+			if last.Type == typ {
+				last.Text += chunk
+				return
+			}
+		}
+		blocks = append(blocks, msgBlock{Type: typ, Name: name, Text: chunk})
+	}
+
+	// 检查是否有扩展回调（用于飞书多类型事件透传）
+	extCb, _ := ctx.Value(ctxKeyStreamExt{}).(func(connector.StreamKind, string, bool))
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	for scanner.Scan() {
+		if ctx.Err() != nil {
+			break
+		}
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var ev claudeEvent
+		if json.Unmarshal([]byte(line), &ev) != nil {
+			continue
+		}
+		switch ev.Type {
+		case "system":
+			if ev.Subtype == "init" && ev.Session != "" {
+				newClaudeSessionID = ev.Session
+			}
+		case "stream_event":
+			var inner innerEvent
+			if json.Unmarshal(ev.Event, &inner) != nil {
+				continue
+			}
+			switch inner.Type {
+			case "content_block_start":
+				if inner.ContentBlock.Type == "tool_use" {
+					appendBlock("tool", inner.ContentBlock.Name, "")
+					if extCb != nil {
+						extCb(connector.KindTool, "🔧 "+inner.ContentBlock.Name, false)
+					}
+				}
+			case "content_block_delta":
+				d := inner.Delta
+				switch d.Type {
+				case "text_delta":
+					if d.Text != "" {
+						safeText := redactSensitive(d.Text)
+						textBuf.WriteString(safeText)
+						appendBlock("text", "", safeText)
+						onChunk(safeText, false)
+					}
+				case "thinking_delta":
+					if d.Thinking != "" {
+						appendBlock("thinking", "", d.Thinking)
+						if extCb != nil {
+							extCb(connector.KindThinking, d.Thinking, false)
+						}
+					}
+				case "input_json_delta":
+					if d.PartialJSON != "" && len(blocks) > 0 {
+						last := &blocks[len(blocks)-1]
+						if last.Type == "tool" {
+							last.Input += d.PartialJSON
+						}
+					}
+				}
+			case "content_block_stop":
+				if len(blocks) > 0 {
+					last := &blocks[len(blocks)-1]
+					if last.Type == "tool" {
+						if isAskUserTool(last.Name) {
+							interactiveText := convertAskToolToInteractiveBlock(last.Input)
+							if interactiveText != "" {
+								last.Type = "text"
+								last.Text = interactiveText
+								last.Name = ""
+								last.Label = ""
+								last.Input = ""
+								last.Done = false
+								last.Ms = 0
+								textBuf.WriteString(interactiveText)
+							} else {
+								blocks = blocks[:len(blocks)-1]
+							}
+						} else {
+							last.Done = true
+							if isSensitivePath(last.Input) {
+								last.Input = "[已拦截敏感操作]"
+							}
+							last.Input = safeSummarizeToolInput(last.Name, last.Input)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	cmd.Wait()
+
+	if ctx.Err() != nil {
+		slog.Info("[ctx-stream] cancelled, stopping", "session", sessionID)
+		onChunk("\n\n[已被新消息打断]", true)
+		return usedSessionID, ctx.Err()
+	}
+
+	onChunk("", true)
+
+	if newClaudeSessionID != "" {
+		saveClaudeSessionID(sessionID, newClaudeSessionID)
+	}
+	if len(blocks) > 0 {
+		for i := range blocks {
+			if blocks[i].Type == "tool" {
+				blocks[i].Done = true
+				blocks[i].Text = ""
+			} else {
+				blocks[i].Text = redactSensitive(blocks[i].Text)
+			}
+		}
+		if bj, e := json.Marshal(blocks); e == nil {
+			appendMessage(sessionID, "assistant", string(bj))
+		}
+	}
+
+	return usedSessionID, nil
+}
+
+// RunClaudeStreamingCtxExt 扩展版流式 runner，将 thinking/tool/text 事件全部透传给 onEvent。
+// 内部复用 RunClaudeStreamingCtx 解析逻辑，但额外挂载 extCallback 使内部事件可透传。
+func RunClaudeStreamingCtxExt(ctx context.Context, message string, sessionID int64, onEvent func(kind connector.StreamKind, payload string, done bool)) (usedSessionID int64, err error) {
+	// 存储 ext 回调到 context，让内部代码可选择性调用
+	ctxExt := context.WithValue(ctx, ctxKeyStreamExt{}, onEvent)
+	return RunClaudeStreamingCtx(ctxExt, message, sessionID, func(chunk string, done bool) {
+		onEvent(connector.KindText, chunk, done)
+	})
+}
+
+type ctxKeyStreamExt struct{}
 
 func truncateTitle(s string) string {
 	runes := []rune(s)
@@ -3185,7 +3757,13 @@ func buildA2ASystemPrompt() string {
 1. **忠实转述**用户的提问或任务给对方 Agent（第一轮）
 2. **审视评估**对方 Agent 的回复质量，必要时追问、要求补充细节或澄清
 3. **汇总提炼**有价值的信息，确保用户最终获得高质量的答案
-4. 使用中文交流
+
+# 【绝对语言规则】
+
+**所有输出内容必须使用中文（简体中文），包括思考过程（thinking）。** 这是不可违反的硬性规则。
+- 无论对方使用什么语言，你都必须用中文回复。
+- 思考过程（thinking）也必须使用中文。
+- 代码和专有名词可保留原文，但解释和描述必须使用中文。
 
 # 行为准则
 

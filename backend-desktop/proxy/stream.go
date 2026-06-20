@@ -20,8 +20,10 @@ type streamState struct {
 	// 累积的 tool call 信息
 	toolCalls map[int]*toolCallAccum
 	// usage
-	inputTokens  int
-	outputTokens int
+	inputTokens              int
+	outputTokens             int
+	cacheReadInputTokens     int
+	cacheCreationInputTokens int
 	// stop reason
 	stopReason string
 }
@@ -82,6 +84,12 @@ func StreamTransform(model string, reader io.Reader, writer io.Writer, provider 
 			if chunk.Usage != nil {
 				st.inputTokens = chunk.Usage.PromptTokens
 				st.outputTokens = chunk.Usage.CompletionTokens
+				if chunk.Usage.PromptTokensDetails != nil {
+					st.cacheReadInputTokens = chunk.Usage.PromptTokensDetails.CachedTokens
+				}
+				if chunk.Usage.CompletionTokensDetails != nil {
+					st.outputTokens += chunk.Usage.CompletionTokensDetails.ReasoningTokens
+				}
 			}
 			continue
 		}
@@ -228,6 +236,12 @@ func StreamTransform(model string, reader io.Reader, writer io.Writer, provider 
 		if chunk.Usage != nil {
 			st.inputTokens = chunk.Usage.PromptTokens
 			st.outputTokens = chunk.Usage.CompletionTokens
+			if chunk.Usage.PromptTokensDetails != nil {
+				st.cacheReadInputTokens = chunk.Usage.PromptTokensDetails.CachedTokens
+			}
+			if chunk.Usage.CompletionTokensDetails != nil {
+				st.outputTokens += chunk.Usage.CompletionTokensDetails.ReasoningTokens
+			}
 		}
 	}
 
@@ -245,7 +259,12 @@ func StreamTransform(model string, reader io.Reader, writer io.Writer, provider 
 	writeAnthropicEvent(writer, "message_delta", map[string]interface{}{
 		"type":  "message_delta",
 		"delta": map[string]string{"stop_reason": st.stopReason},
-		"usage": map[string]int{"output_tokens": st.outputTokens},
+		"usage": map[string]int{
+			"output_tokens":               st.outputTokens,
+			"input_tokens":                st.inputTokens,
+			"cache_read_input_tokens":     st.cacheReadInputTokens,
+			"cache_creation_input_tokens": st.cacheCreationInputTokens,
+		},
 	})
 
 	// message_stop
@@ -272,9 +291,19 @@ type openAIChoice struct {
 }
 
 type openAIUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+	PromptTokens            int                  `json:"prompt_tokens"`
+	CompletionTokens        int                  `json:"completion_tokens"`
+	TotalTokens             int                  `json:"total_tokens"`
+	PromptTokensDetails     *promptTokensDetails `json:"prompt_tokens_details,omitempty"`
+	CompletionTokensDetails *complTokensDetails  `json:"completion_tokens_details,omitempty"`
+}
+
+type promptTokensDetails struct {
+	CachedTokens int `json:"cached_tokens"`
+}
+
+type complTokensDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
 }
 
 // ── 辅助函数 ────────────────────────────────────────────────────

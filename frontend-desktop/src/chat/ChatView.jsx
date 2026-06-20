@@ -11,6 +11,7 @@ import { Badge } from '../ui/primitives';
 import { api } from '../api/client';
 import { cn, isH5Mobile } from '../ui/cn';
 import AgentAvatar from '../ui/AgentAvatar';
+import TokenWaterLevel from './TokenWaterLevel';
 
 export function ChatView() {
   const [useKB, setUseKB] = useState(false);
@@ -57,6 +58,9 @@ export function ChatView() {
         <AnimatePresence>
           <ScreenAgentPanel />
         </AnimatePresence>
+        <div className="max-w-4xl mx-auto px-4 py-1">
+          <TokenWaterLevel />
+        </div>
         <Composer useKB={useKB} setUseKB={setUseKB} />
       </div>
       <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />

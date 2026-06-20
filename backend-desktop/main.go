@@ -53,6 +53,7 @@ func main() {
 	r.StaticFile("/favicon.ico", dist+"/favicon.ico")
 
 	api := r.Group("/api")
+	api.Use(handler.PairTokenAuthMiddleware())
 
 	// 用户上传图片静态目录
 	uploadsDir := os.Getenv("UPLOADS_PATH")
@@ -65,11 +66,20 @@ func main() {
 	// 初始化 IM 连接器管理器（在路由组创建后立即初始化，wecom 会注册子路由）
 	connector.InitManager(api)
 	connector.SetClaudeRunner(handler.RunClaudeSync)
+	connector.SetClaudeStreamRunner(handler.RunClaudeStreaming)
+	connector.SetClaudeRunnerCtx(handler.RunClaudeSyncCtx)
+	connector.SetClaudeStreamRunnerCtx(handler.RunClaudeStreamingCtx)
+	connector.SetClaudeStreamRunnerCtxExt(handler.RunClaudeStreamingCtxExt)
 	go connector.GlobalManager.LoadFromDB()
 
 	// 健康检查
 	api.GET("/ping", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"ok": true}) })
 	api.GET("/health", handler.HealthCheck)
+
+	// 主动式 Agent（日报 + 任务追踪）
+	api.GET("/proactive/config", handler.GetProactiveConfig)
+	api.PUT("/proactive/config", handler.UpdateProactiveConfig)
+	api.POST("/proactive/trigger-digest", handler.TriggerDigest)
 
 	// 数据库备份
 	api.GET("/backup/export", handler.ExportBackup)
@@ -82,6 +92,22 @@ func main() {
 	api.POST("/auth/logout", handler.Logout)
 	api.GET("/auth/oauth-configs", handler.ListOAuthConfigs)
 	api.POST("/auth/oauth-configs", handler.SaveOAuthConfig)
+
+	// ── 手机配对 ──────────────────────────────────────────────────
+	api.POST("/pair/initiate", handler.PairInitiateHandler)
+	api.POST("/pair/complete", handler.PairCompleteHandler)
+	api.POST("/pair/verify", handler.PairVerifyHandler)
+	api.GET("/pair/devices", handler.PairListDevicesHandler)
+	api.DELETE("/pair/devices/:id", handler.PairUnpairHandler)
+	api.POST("/pair/devices/:id/rotate", handler.PairRotateHandler)
+	api.POST("/pair/devices/:id/push-token", handler.PairRegisterPushTokenHandler)
+	api.POST("/pair/revoke-all", handler.PairRevokeAllHandler)
+	api.POST("/auth/ws-ticket", handler.IssueWsTicketHandler)
+
+	// 推送通知配置
+	api.GET("/push/config", handler.GetPushConfigHandler)
+	api.PUT("/push/config", handler.SetPushConfigHandler)
+	api.POST("/push/test", handler.TestPushHandler)
 
 	// 单机模式：无认证，所有接口直接可用
 	api.GET("/sessions", handler.ListSessions)
@@ -143,6 +169,13 @@ func main() {
 	api.GET("/knowledge/categories", handler.ListKnowledgeCategories)
 	api.POST("/knowledge/categories", handler.CreateKnowledgeCategory)
 	api.DELETE("/knowledge/categories/:id", handler.DeleteKnowledgeCategory)
+
+	// Web 知识采集
+	api.POST("/knowledge/from-url", handler.ImportKnowledgeFromURL)
+	api.POST("/knowledge/from-urls", handler.BatchImportKnowledgeFromURLs)
+
+	// 深度联网搜索（多源 + 交叉验证 + 引用追踪）
+	api.POST("/search/deep", handler.DeepSearch)
 
 	// 向量知识库（深度 RAG）
 	api.POST("/knowledge/reindex", handler.ReindexKnowledge)
@@ -225,6 +258,8 @@ func main() {
 	api.GET("/agents/:id", handler.GetAgent)
 	api.DELETE("/agents/:id", handler.DeleteAgent)
 	api.POST("/sessions/:id/agent", handler.SetSessionAgent)
+	api.GET("/sessions/:id/token-stats", handler.GetSessionTokenStats)
+	api.POST("/sessions/:id/summarize", handler.SummarizeSession)
 
 	// 定时任务
 	api.GET("/scheduled-tasks", handler.ListScheduledTasks)
@@ -348,30 +383,6 @@ func main() {
 	api.GET("/files/project", handler.GetProjectInfo)
 	api.GET("/files/search", handler.SearchFiles)
 	api.GET("/files/search-names", handler.SearchFileNames)
-
-	// Coding 模式专用 API
-	api.GET("/coding/changes", handler.GetWorkspaceChanges)
-	api.GET("/coding/diff", handler.GetFileDiff)
-	api.GET("/coding/branch", handler.GetGitBranch)
-	api.POST("/coding/chat", handler.CodingChat)
-	api.POST("/coding/chat/answer-batch", handler.CodingChatAnswerBatch)
-	api.POST("/coding/chat/permission-response", handler.CodingChatPermissionResponse)
-	api.POST("/coding/checkpoint", handler.CreateCheckpoint)
-	api.POST("/coding/rollback/:id", handler.RollbackCheckpoint)
-	api.GET("/coding/checkpoints/:sessionId", handler.ListCheckpoints)
-	api.GET("/coding/checkpoint-files/:id", handler.GetCheckpointFiles)
-	api.GET("/coding/agents", handler.ListCodingAgents)
-	api.POST("/coding/agents", handler.SaveCodingAgent)
-	api.DELETE("/coding/agents/:id", handler.DeleteCodingAgent)
-	api.PUT("/coding/agents/:id", handler.UpdateCodingAgent)
-	api.GET("/coding/plugins", handler.GetCodingPlugins)
-	api.PUT("/coding/plugins", handler.SaveCodingPlugins)
-	api.GET("/coding/hooks-config", handler.GetCodingHooksConfigHandler)
-	api.PUT("/coding/hooks-config", handler.UpdateCodingHooksConfigHandler)
-	api.GET("/coding/prompt-config", handler.GetCodingPromptConfigHandler)
-	api.PUT("/coding/prompt-config", handler.UpdateCodingPromptConfigHandler)
-	api.GET("/coding/perm-config", handler.GetCodingPermConfigHandler)
-	api.PUT("/coding/perm-config", handler.UpdateCodingPermConfigHandler)
 
 	// Electron 启动时下发激活档案明文 token
 	api.POST("/runtime/active-secret", handler.SetActiveSecret)

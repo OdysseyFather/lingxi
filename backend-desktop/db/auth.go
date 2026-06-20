@@ -3,6 +3,8 @@ package db
 import (
 	"log/slog"
 	"time"
+
+	"lingxi-agent/crypto"
 )
 
 // ─── Users ───────────────────────────────────────────────────────
@@ -83,11 +85,21 @@ func GetOAuthConfig(provider string) (*OAuthConfig, error) {
 	if err != nil {
 		return nil, err
 	}
+	if decrypted, derr := crypto.Decrypt(c.AppSecret); derr == nil {
+		c.AppSecret = decrypted
+	} else {
+		slog.Warn("[oauth] decrypt app_secret failed", "provider", provider, "err", derr)
+	}
 	return &c, nil
 }
 
 func UpsertOAuthConfig(c *OAuthConfig) error {
-	_, err := DB.Exec(`
+	encrypted, err := crypto.Encrypt(c.AppSecret)
+	if err != nil {
+		slog.Warn("[oauth] encrypt app_secret failed, storing plaintext", "err", err)
+		encrypted = c.AppSecret
+	}
+	_, err = DB.Exec(`
 		INSERT INTO oauth_configs (provider, app_id, app_secret, extra)
 		VALUES (?,?,?,?)
 		ON CONFLICT(provider) DO UPDATE SET
@@ -95,7 +107,7 @@ func UpsertOAuthConfig(c *OAuthConfig) error {
 			app_secret=excluded.app_secret,
 			extra=excluded.extra,
 			updated_at=CURRENT_TIMESTAMP
-	`, c.Provider, c.AppID, c.AppSecret, c.Extra)
+	`, c.Provider, c.AppID, encrypted, c.Extra)
 	return err
 }
 
@@ -110,6 +122,9 @@ func ListOAuthConfigs() ([]OAuthConfig, error) {
 		var c OAuthConfig
 		if err := rows.Scan(&c.ID, &c.Provider, &c.AppID, &c.AppSecret, &c.Extra); err != nil {
 			continue
+		}
+		if decrypted, derr := crypto.Decrypt(c.AppSecret); derr == nil {
+			c.AppSecret = decrypted
 		}
 		out = append(out, c)
 	}

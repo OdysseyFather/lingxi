@@ -20,6 +20,10 @@ var termUpgrader = websocket.Upgrader{
 
 // TerminalWsHandler GET /api/terminal/ws?cwd=xxx
 func TerminalWsHandler(c *gin.Context) {
+	if !WsAuthCheck(c) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "ws authentication required"})
+		return
+	}
 	cwd := c.Query("cwd")
 	if cwd == "" {
 		home, _ := os.UserHomeDir()

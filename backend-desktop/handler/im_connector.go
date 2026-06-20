@@ -80,7 +80,7 @@ func EnableIMConnector(c *gin.Context) {
 		return
 	}
 	if connector.GlobalManager != nil {
-		if err := connector.GlobalManager.Start(conn.Platform, conn.Config); err != nil {
+		if err := connector.GlobalManager.StartWithAgent(conn.Platform, conn.Config, conn.AgentID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "db updated but start failed: " + err.Error()})
 			return
 		}

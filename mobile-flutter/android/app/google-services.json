@@ -1,0 +1,24 @@
+{
+  "project_info": {
+    "project_number": "000000000000",
+    "project_id": "lingxi-placeholder",
+    "storage_bucket": "lingxi-placeholder.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+        "android_client_info": {
+          "package_name": "com.lingxi.lingxi_mobile"
+        }
+      },
+      "api_key": [
+        {
+          "current_key": "placeholder_api_key_replace_with_real_one"
+        }
+      ],
+      "services": {}
+    }
+  ],
+  "configuration_version": "1"
+}

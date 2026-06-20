@@ -241,20 +241,6 @@ export const createChatSlice = (set, get) => ({
         break;
       }
       case 'task_update': {
-        const newTasks = Array.isArray(payload?.todos) ? payload.todos : [];
-        if (newTasks.length > 0) {
-          const existing = get().codingTasks;
-          let merged;
-          if (existing.length > 0 && newTasks.length > 0) {
-            const map = new Map(existing.map(t => [t.id, t]));
-            for (const t of newTasks) map.set(t.id, t);
-            merged = Array.from(map.values());
-          } else {
-            merged = newTasks;
-          }
-          set({ codingTasks: merged });
-          flushNow(set, get);
-        }
         break;
       }
       case 'ask_question': {
@@ -386,7 +372,15 @@ export const createChatSlice = (set, get) => ({
         }
         if (state.activeSessionId) {
           api.listMessages(state.activeSessionId).then((m) => {
-            set({ messages: m });
+            const existing = get().messages;
+            const merged = m.map((msg) => {
+              const prev = existing.find((e) => e.id === msg.id);
+              if (prev && prev.usage && !msg.usage) {
+                return { ...msg, usage: prev.usage };
+              }
+              return msg;
+            });
+            set({ messages: merged });
           }).catch(() => {});
         }
         break;
@@ -824,7 +818,6 @@ export const createChatSlice = (set, get) => ({
     set({
       messages: [...get().messages, localUserMsg],
       liveBlocks: [],
-      codingTasks: [],
       liveDiffs: [],
       isStreaming: true,
       startedAt: Date.now(),

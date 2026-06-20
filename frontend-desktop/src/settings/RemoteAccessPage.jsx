@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Smartphone, Plus, Copy, Trash2, PowerOff, ExternalLink, Clock, QrCode, Check, Globe, Loader2, Wifi, WifiOff } from 'lucide-react';
+import { Smartphone, Plus, Copy, Trash2, PowerOff, ExternalLink, Clock, QrCode, Check, Globe, Loader2, Wifi, WifiOff, RefreshCw, RotateCw, ShieldCheck, X, Bell, Send } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { api } from '../api/client';
 import { Button, Card, Input, Modal } from '../ui/primitives';
@@ -11,6 +11,54 @@ export default function RemoteAccessPage() {
   const [showGenerate, setShowGenerate] = useState(false);
   const [qrToken, setQrToken] = useState(null);
   const [saving, setSaving] = useState(false);
+
+  // 手机 App 配对
+  const [pairData, setPairData] = useState(null);
+  const [pairLoading, setPairLoading] = useState(false);
+  const [pairedDevices, setPairedDevices] = useState([]);
+
+  const loadPairData = useCallback(async () => {
+    try {
+      const devices = await api.listPairedDevices();
+      setPairedDevices(Array.isArray(devices) ? devices : []);
+    } catch {}
+  }, []);
+
+  const handleInitiatePair = async () => {
+    setPairLoading(true);
+    try {
+      const data = await api.pairInitiate();
+      setPairData(data);
+    } catch (e) {
+      alert('生成配对码失败: ' + (e?.message || '未知错误'));
+    } finally {
+      setPairLoading(false);
+    }
+  };
+
+  const handleUnpair = async (id) => {
+    try {
+      await api.unpairDevice(id);
+      loadPairData();
+    } catch {}
+  };
+
+  const handleRotate = async (id) => {
+    try {
+      await api.rotateDeviceToken(id);
+      loadPairData();
+    } catch {}
+  };
+
+  const handleRevokeAll = async () => {
+    if (!confirm('确定要撤销所有配对设备吗？所有手机都需要重新配对。')) return;
+    try {
+      await api.revokeAllDevices();
+      loadPairData();
+    } catch {}
+  };
+
+  useEffect(() => { loadPairData(); }, [loadPairData]);
 
   // 云端隧道状态
   const [tunnelStatus, setTunnelStatus] = useState({ connected: false, token: '', server_url: '' });
@@ -165,6 +213,146 @@ export default function RemoteAccessPage() {
           </Card>
         </>
       )}
+
+      {/* ─── 手机 App 配对 ─── */}
+      <div className="pt-4 border-t border-[color:var(--line)]">
+        <h3 className="text-sm font-bold text-[color:var(--text)] flex items-center gap-2 mb-1">
+          <Smartphone size={16} /> 手机 App 配对
+        </h3>
+        <p className="text-xs text-[color:var(--text-faint)] mb-4">
+          在手机端灵犀 App 扫描二维码或输入配对码，一次配对永久连接
+        </p>
+
+        <Card className="p-4 space-y-4">
+          {/* 配对码生成 */}
+          <div className="flex items-center justify-between">
+            <div className="text-sm font-medium text-[color:var(--text)]">
+              已配对设备
+              {pairedDevices.length > 0 && (
+                <span className="ml-2 text-xs text-[color:var(--text-faint)]">{pairedDevices.length} 个</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {pairedDevices.length > 0 && (
+                <Button size="sm" variant="ghost" onClick={handleRevokeAll} className="text-red-500 hover:text-red-600">
+                  <Trash2 size={12} className="mr-1" /> 全部撤销
+                </Button>
+              )}
+              <Button size="sm" onClick={handleInitiatePair} disabled={pairLoading}>
+                {pairLoading ? <Loader2 size={14} className="animate-spin mr-1" /> : <Plus size={14} className="mr-1" />}
+                配对新设备
+              </Button>
+            </div>
+          </div>
+
+          {/* 配对码展示 */}
+          {pairData && (
+            <div className="p-4 rounded-xl bg-[color:var(--accent-soft)] border border-[color:var(--accent)]/20 space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-medium text-[color:var(--text)]">配对码</div>
+                <button
+                  onClick={() => setPairData(null)}
+                  className="p-1 rounded-md hover:bg-[color:var(--bg)] text-[color:var(--text-faint)] transition"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+              <div className="flex flex-col sm:flex-row items-center gap-6">
+                {/* QR 码 */}
+                <div className="shrink-0 p-3 bg-white rounded-xl shadow-sm">
+                  <QRCodeSVG value={JSON.stringify(pairData.qr_data)} size={160} level="M" />
+                </div>
+                {/* 数字码 + 信息 */}
+                <div className="flex-1 space-y-3 text-center sm:text-left">
+                  <div>
+                    <div className="text-xs text-[color:var(--text-faint)] mb-1">6 位配对码</div>
+                    <div className="text-3xl font-bold tracking-[0.3em] text-[color:var(--accent)] font-mono">
+                      {pairData.code}
+                    </div>
+                  </div>
+                  <div className="text-xs text-[color:var(--text-faint)] space-y-1">
+                    <p>扫描二维码或在手机 App 中输入配对码</p>
+                    <p>配对码 5 分钟内有效</p>
+                    <p className="font-mono text-[11px]">局域网: {pairData.lan_ip}:{pairData.lan_port}</p>
+                  </div>
+                  <Button size="sm" variant="ghost" onClick={handleInitiatePair} disabled={pairLoading}>
+                    <RefreshCw size={12} className="mr-1" /> 刷新配对码
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 已配对设备列表 */}
+          {pairedDevices.length === 0 ? (
+            !pairData && (
+              <div className="py-6 text-center">
+                <ShieldCheck size={28} className="mx-auto text-[color:var(--text-faint)] mb-2" />
+                <p className="text-sm text-[color:var(--text-faint)]">暂无配对设备</p>
+                <p className="text-xs text-[color:var(--text-faint)] mt-1">点击"配对新设备"开始</p>
+              </div>
+            )
+          ) : (
+            <div className="space-y-2">
+              {pairedDevices.map((d) => (
+                <div
+                  key={d.id}
+                  className="flex items-center justify-between p-3 rounded-lg bg-[color:var(--bg-soft)] border border-[color:var(--line)]"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className={cn(
+                      'w-8 h-8 rounded-lg flex items-center justify-center text-white text-xs font-bold',
+                      d.platform === 'ios' ? 'bg-gray-800' : 'bg-emerald-600'
+                    )}>
+                      {d.platform === 'ios' ? 'iOS' : 'And'}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-[color:var(--text)] truncate">
+                        {d.device_name || d.label || '未命名设备'}
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-[color:var(--text-faint)]">
+                        <span className="font-mono">{d.token_preview}</span>
+                        {d.last_seen_at && (
+                          <span className="flex items-center gap-0.5">
+                            <Clock size={10} /> {formatTimeAgo(d.last_seen_at)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0 ml-3">
+                    <button
+                      onClick={() => handleRotate(d.id)}
+                      className="p-1.5 rounded-md hover:bg-[color:var(--accent-soft)] text-[color:var(--text-faint)] hover:text-[color:var(--accent)] transition"
+                      title="轮换 Token"
+                    >
+                      <RotateCw size={14} />
+                    </button>
+                    <button
+                      onClick={() => handleUnpair(d.id)}
+                      className="p-1.5 rounded-md hover:bg-red-50 dark:hover:bg-red-900/20 text-[color:var(--text-faint)] hover:text-red-500 transition"
+                      title="解除配对"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        <Card className="p-4 mt-3 bg-[color:var(--bg-soft)]">
+          <div className="text-xs text-[color:var(--text-faint)] space-y-1">
+            <p>• 配对后手机 App 可通过局域网或云端隧道访问灵犀</p>
+            <p>• 一次配对永久有效，设备丢失可在此解除或轮换 Token</p>
+            <p>• 支持多台手机同时配对</p>
+          </div>
+        </Card>
+
+        {/* 推送通知配置 */}
+        <PushConfigSection />
+      </div>
 
       {/* ─── 云端隧道（跨网络访问） ─── */}
       <div className="pt-4 border-t border-[color:var(--line)]">
@@ -406,4 +594,116 @@ function GenerateTokenModal({ onClose, onCreated }) {
       )}
     </Modal>
   );
+}
+
+function PushConfigSection() {
+  const [config, setConfig] = useState({ signaling_url: '', push_secret: '' });
+  const [editUrl, setEditUrl] = useState('');
+  const [editSecret, setEditSecret] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
+  const loadConfig = useCallback(async () => {
+    try {
+      const data = await api.getPushConfig();
+      setConfig(data);
+      setEditUrl(data.signaling_url || '');
+      setEditSecret('');
+    } catch {}
+  }, []);
+
+  useEffect(() => { loadConfig(); }, [loadConfig]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await api.setPushConfig({
+        signaling_url: editUrl,
+        push_secret: editSecret || config.push_secret,
+      });
+      await loadConfig();
+    } catch {}
+    setSaving(false);
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    try {
+      await api.testPush();
+    } catch {}
+    setTesting(false);
+  };
+
+  return (
+    <Card className="p-4 mt-3">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full flex items-center justify-between text-left"
+      >
+        <div className="flex items-center gap-2">
+          <Bell size={14} className="text-[color:var(--accent)]" />
+          <span className="text-xs font-bold text-[color:var(--text)]">推送通知</span>
+          <span className="text-[10px] text-[color:var(--text-faint)]">
+            {config.signaling_url ? '已配置' : '未配置'}
+          </span>
+        </div>
+        <span className="text-[color:var(--text-faint)] text-xs">{expanded ? '▲' : '▼'}</span>
+      </button>
+
+      {expanded && (
+        <div className="mt-3 space-y-3">
+          <p className="text-[11px] text-[color:var(--text-faint)]">
+            配置信令服务器推送密钥后，AI 回复完成时会通过 FCM 推送通知到手机端
+          </p>
+          <div>
+            <label className="block text-xs font-medium text-[color:var(--text)] mb-1">信令服务器地址</label>
+            <Input
+              value={editUrl}
+              onChange={(e) => setEditUrl(e.target.value)}
+              placeholder="wss://your-server/ws"
+              className="font-mono text-xs"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-[color:var(--text)] mb-1">推送密钥 (PUSH_SECRET)</label>
+            <Input
+              type="password"
+              value={editSecret}
+              onChange={(e) => setEditSecret(e.target.value)}
+              placeholder={config.push_secret ? '已设置 (留空不修改)' : '输入密钥'}
+              className="font-mono text-xs"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" onClick={handleSave} disabled={saving}>
+              {saving ? <Loader2 size={12} className="animate-spin mr-1" /> : null}
+              保存
+            </Button>
+            {config.signaling_url && (
+              <Button size="sm" variant="secondary" onClick={handleTest} disabled={testing}>
+                {testing ? <Loader2 size={12} className="animate-spin mr-1" /> : <Send size={12} className="mr-1" />}
+                发送测试推送
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function formatTimeAgo(dateStr) {
+  if (!dateStr) return '';
+  const date = new Date(dateStr.includes('T') ? dateStr : dateStr + 'Z');
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return '刚刚';
+  if (diffMin < 60) return `${diffMin} 分钟前`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour} 小时前`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 30) return `${diffDay} 天前`;
+  return date.toLocaleDateString('zh-CN');
 }

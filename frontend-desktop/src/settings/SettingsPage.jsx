@@ -1,6 +1,6 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
 import { useStore } from '../state/useStore';
-import { Cpu, BarChart3, Palette, BrainCircuit, Wifi, Info, UserCircle, LogOut, Shield, Calendar, ShieldCheck, Smartphone } from 'lucide-react';
+import { Cpu, BarChart3, Palette, BrainCircuit, Wifi, Info, UserCircle, LogOut, Shield, Calendar, ShieldCheck, Smartphone, Sparkles } from 'lucide-react';
 import { ProfilesPage } from './ProfilesPage';
 import { UsagePage } from './UsagePage';
 import { AppearancePage } from './AppearancePage';
@@ -8,6 +8,7 @@ import { MemoryPage } from './MemoryPage';
 import NexusSettingsPage from './NexusSettingsPage';
 const PermissionsPage = lazy(() => import('./PermissionsPage'));
 const RemoteAccessPage = lazy(() => import('./RemoteAccessPage'));
+const ProactiveAgentPage = lazy(() => import('./ProactiveAgentPage'));
 import { cn } from '../ui/cn';
 import { Button, Card } from '../ui/primitives';
 
@@ -19,6 +20,7 @@ const TABS = [
   { id: 'remote',     label: '远程访问',     icon: Smartphone },
   { id: 'nexus',      label: '网络与协作',   icon: Wifi },
   { id: 'usage',      label: '用量',         icon: BarChart3 },
+  { id: 'proactive',  label: '主动式 Agent', icon: Sparkles },
   { id: 'appearance', label: '外观',         icon: Palette },
   { id: 'about',      label: '关于',         icon: Info },
 ];
@@ -164,6 +166,7 @@ export function SettingsPage() {
         {tab === 'remote' && <Suspense fallback={<div className="p-6 text-sm text-[color:var(--text-faint)]">加载中…</div>}><RemoteAccessPage /></Suspense>}
         {tab === 'nexus' && <div className="p-6"><NexusSettingsPage /></div>}
         {tab === 'usage' && <UsagePage />}
+        {tab === 'proactive' && <Suspense fallback={<div className="p-6 text-sm text-[color:var(--text-faint)]">加载中…</div>}><ProactiveAgentPage /></Suspense>}
         {tab === 'appearance' && <AppearancePage />}
         {tab === 'about' && <AboutPage />}
       </div>

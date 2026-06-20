@@ -1,28 +1,40 @@
 package db
 
-import "time"
+import (
+	"log/slog"
+	"time"
+
+	"lingxi-agent/crypto"
+)
 
 // ─── IM Connectors ───────────────────────────────────────────────
 
 type IMConnector struct {
-	ID        int64     `json:"id"`
-	Name      string    `json:"name"`
-	Platform  string    `json:"platform"`
-	AgentID   int64     `json:"agent_id"`
-	Enabled   bool      `json:"enabled"`
-	Config    string    `json:"config"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID           int64     `json:"id"`
+	Name         string    `json:"name"`
+	Platform     string    `json:"platform"`
+	AgentID      int64     `json:"agent_id"`
+	Enabled      bool      `json:"enabled"`
+	Config       string    `json:"config"`
+	DecryptError string    `json:"decrypt_error,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 func UpsertIMConnector(id int64, name, platform string, agentID int64, configJSON string) (int64, error) {
+	encrypted, err := crypto.Encrypt(configJSON)
+	if err != nil {
+		slog.Warn("[im-connector] encrypt config failed, storing plaintext", "err", err)
+		encrypted = configJSON
+	}
+
 	if id > 0 {
 		_, err := DB.Exec(`UPDATE im_connectors SET name=?, platform=?, agent_id=?, config=?, updated_at=CURRENT_TIMESTAMP WHERE id=?`,
-			name, platform, agentID, configJSON, id)
+			name, platform, agentID, encrypted, id)
 		return id, err
 	}
 	res, err := DB.Exec(`INSERT INTO im_connectors (name, platform, agent_id, config) VALUES (?,?,?,?)`,
-		name, platform, agentID, configJSON)
+		name, platform, agentID, encrypted)
 	if err != nil {
 		return 0, err
 	}
@@ -52,6 +64,11 @@ func ListIMConnectors() ([]IMConnector, error) {
 			continue
 		}
 		c.Enabled = enabled == 1
+		if decrypted, derr := crypto.Decrypt(c.Config); derr == nil {
+			c.Config = decrypted
+		} else {
+			c.DecryptError = derr.Error()
+		}
 		result = append(result, c)
 	}
 	return result, nil
@@ -66,6 +83,11 @@ func GetIMConnectorByID(id int64) (*IMConnector, error) {
 		return nil, err
 	}
 	c.Enabled = enabled == 1
+	if decrypted, derr := crypto.Decrypt(c.Config); derr == nil {
+		c.Config = decrypted
+	} else {
+		c.DecryptError = derr.Error()
+	}
 	return &c, nil
 }
 
@@ -78,6 +100,11 @@ func GetIMConnector(platform string) (*IMConnector, error) {
 		return nil, err
 	}
 	c.Enabled = enabled == 1
+	if decrypted, derr := crypto.Decrypt(c.Config); derr == nil {
+		c.Config = decrypted
+	} else {
+		c.DecryptError = derr.Error()
+	}
 	return &c, nil
 }
 
@@ -93,24 +120,48 @@ func DeleteIMConnector(platform string) error {
 
 // ─── IM Sessions（群/用户 → session 映射）────────────────────────
 
-func GetOrCreateIMSession(platform, scopeKey, title string, ttlHours int) (int64, error) {
+func GetOrCreateIMSession(platform, scopeKey, title string, ttlHours int, agentID ...int64) (int64, error) {
 	var sessionID int64
-	var lastActive time.Time
+	var lastActiveStr string
 
 	err := DB.QueryRow(
 		`SELECT session_id, last_active FROM im_sessions WHERE platform=? AND scope_key=?`,
 		platform, scopeKey,
-	).Scan(&sessionID, &lastActive)
+	).Scan(&sessionID, &lastActiveStr)
 
 	if err == nil {
-		expired := ttlHours > 0 && time.Since(lastActive) > time.Duration(ttlHours)*time.Hour
+		expired := false
+		if ttlHours > 0 {
+			if lastActive, e := time.Parse("2006-01-02 15:04:05", lastActiveStr); e == nil {
+				expired = time.Since(lastActive) > time.Duration(ttlHours)*time.Hour
+				slog.Info("[im-session] found existing session",
+					"platform", platform, "scope_key", scopeKey,
+					"session_id", sessionID, "last_active", lastActiveStr,
+					"expired", expired)
+			} else {
+				slog.Warn("[im-session] failed to parse last_active",
+					"platform", platform, "scope_key", scopeKey,
+					"last_active_raw", lastActiveStr, "err", e)
+			}
+		}
 		if !expired {
 			DB.Exec(`UPDATE im_sessions SET last_active=CURRENT_TIMESTAMP WHERE platform=? AND scope_key=?`, platform, scopeKey)
+			// 确保已有会话也绑定了正确的智能体
+			if len(agentID) > 0 && agentID[0] > 0 {
+				DB.Exec(`UPDATE sessions SET agent_id=? WHERE id=? AND COALESCE(agent_id,0)=0`, agentID[0], sessionID)
+			}
 			return sessionID, nil
 		}
+	} else {
+		slog.Info("[im-session] no existing session found, creating new",
+			"platform", platform, "scope_key", scopeKey, "err", err)
 	}
 
-	res, e := DB.Exec(`INSERT INTO sessions (title) VALUES (?)`, title)
+	var aid int64
+	if len(agentID) > 0 {
+		aid = agentID[0]
+	}
+	res, e := DB.Exec(`INSERT INTO sessions (title, agent_id) VALUES (?, ?)`, title, aid)
 	if e != nil {
 		return 0, e
 	}

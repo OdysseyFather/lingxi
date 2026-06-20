@@ -20,10 +20,13 @@ type DingtalkConfig struct {
 
 // DingtalkConnector 实现钉钉 Stream 模式机器人
 type DingtalkConnector struct {
-	cfg    DingtalkConfig
-	cli    *streamclient.StreamClient
-	cancel context.CancelFunc
+	cfg     DingtalkConfig
+	cli     *streamclient.StreamClient
+	cancel  context.CancelFunc
+	agentID int64
 }
+
+func (d *DingtalkConnector) SetAgentID(id int64) { d.agentID = id }
 
 func NewDingtalkConnector(configJSON string) (*DingtalkConnector, error) {
 	cfg := DingtalkConfig{BaseConfig: DefaultBaseConfig()}
@@ -94,6 +97,7 @@ func (d *DingtalkConnector) onMessage(ctx context.Context, data *chatbot.BotCall
 		UserID:         data.SenderStaffId,
 		ConversationID: data.ConversationId,
 		Text:           text,
+		AgentID:        d.agentID,
 		BaseCfg:        d.cfg.BaseConfig,
 		ReplyFunc:      replyFunc,
 	}

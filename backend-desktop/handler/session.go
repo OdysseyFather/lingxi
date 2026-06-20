@@ -35,7 +35,7 @@ func ListSessions(c *gin.Context) {
 		err  error
 	)
 
-	baseSelect := `SELECT id, title, message_count, COALESCE(agent_id,0), COALESCE(pinned,0), COALESCE(folder,''), COALESCE(permission_mode,'trust'), COALESCE(project_path,''), created_at, updated_at FROM sessions`
+	baseSelect := `SELECT id, title, message_count, COALESCE(agent_id,0), COALESCE(pinned,0), COALESCE(folder,''), COALESCE(permission_mode,'trust'), COALESCE(project_path,''), COALESCE(summary,''), created_at, updated_at FROM sessions`
 	orderBy := ` ORDER BY COALESCE(pinned,0) DESC, updated_at DESC`
 
 	if agentIDStr != "" {
@@ -62,7 +62,7 @@ func ListSessions(c *gin.Context) {
 	sessions := make([]model.Session, 0)
 	for rows.Next() {
 		var s model.Session
-		if err := rows.Scan(&s.ID, &s.Title, &s.MessageCount, &s.AgentID, &s.Pinned, &s.Folder, &s.PermissionMode, &s.ProjectPath, &s.CreatedAt, &s.UpdatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Title, &s.MessageCount, &s.AgentID, &s.Pinned, &s.Folder, &s.PermissionMode, &s.ProjectPath, &s.Summary, &s.CreatedAt, &s.UpdatedAt); err != nil {
 			continue
 		}
 		sessions = append(sessions, s)
@@ -195,10 +195,30 @@ func ListMessages(c *gin.Context) {
 		return
 	}
 
-	rows, err := db.DB.Query(`
-		SELECT id, session_id, role, content, COALESCE(usage,''), COALESCE(feedback,''), COALESCE(pinned,0), created_at
-		FROM messages WHERE session_id=? ORDER BY id ASC
-	`, sessionID)
+	// 分页参数：before_id（光标）+ limit
+	beforeID, _ := strconv.ParseInt(c.Query("before_id"), 10, 64)
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	if limit <= 0 || limit > 200 {
+		limit = 0 // 0 = 不分页，返回全部（向后兼容）
+	}
+
+	var query string
+	var args []interface{}
+	if beforeID > 0 && limit > 0 {
+		query = `SELECT id, session_id, role, content, COALESCE(usage,''), COALESCE(feedback,''), COALESCE(pinned,0), created_at
+			FROM messages WHERE session_id=? AND id < ? ORDER BY id DESC LIMIT ?`
+		args = []interface{}{sessionID, beforeID, limit}
+	} else if limit > 0 {
+		query = `SELECT id, session_id, role, content, COALESCE(usage,''), COALESCE(feedback,''), COALESCE(pinned,0), created_at
+			FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?`
+		args = []interface{}{sessionID, limit}
+	} else {
+		query = `SELECT id, session_id, role, content, COALESCE(usage,''), COALESCE(feedback,''), COALESCE(pinned,0), created_at
+			FROM messages WHERE session_id=? ORDER BY id ASC`
+		args = []interface{}{sessionID}
+	}
+
+	rows, err := db.DB.Query(query, args...)
 	if err != nil {
 		c.Status(http.StatusInternalServerError)
 		return
@@ -213,6 +233,24 @@ func ListMessages(c *gin.Context) {
 		}
 		msgs = append(msgs, m)
 	}
+
+	// 分页查询是 DESC 排序，需要反转为 ASC
+	if limit > 0 {
+		for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+			msgs[i], msgs[j] = msgs[j], msgs[i]
+		}
+	}
+
+	// 分页模式下返回带 has_more 的结构
+	if limit > 0 {
+		hasMore := len(msgs) == limit
+		c.JSON(http.StatusOK, gin.H{
+			"messages": msgs,
+			"has_more": hasMore,
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, msgs)
 }
 

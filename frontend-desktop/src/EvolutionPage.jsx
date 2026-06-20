@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Dna, Trash2, RefreshCw, Brain, BookOpen, Wrench, Loader2, ChevronDown, ChevronUp, Zap, Clock, BarChart3, TrendingUp, Undo2, Search, Filter, Check, AlertCircle } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from 'recharts';
 import { api } from './api/client';
 import { useStore } from './state/useStore';
 import { Button, Badge, Card, Input } from './ui/primitives';
@@ -162,13 +163,7 @@ export default function EvolutionPage() {
 
       {/* Activity Chart */}
       {stats?.recent_days && Object.keys(stats.recent_days).length > 1 && (
-        <Card className="p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <BarChart3 size={14} className="text-[color:var(--text-faint)]" />
-            <span className="text-xs font-medium text-[color:var(--text-soft)]">近 30 天进化活动</span>
-          </div>
-          <MiniChart data={stats.recent_days} />
-        </Card>
+        <EvolutionCharts stats={stats} />
       )}
 
       {/* Filters */}
@@ -429,22 +424,109 @@ function StatCard({ icon: Icon, label, value, color }) {
 }
 
 function MiniChart({ data }) {
-  const entries = Object.entries(data).sort((a, b) => a[0].localeCompare(b[0]));
-  const max = Math.max(...entries.map(([, v]) => v), 1);
+  return null;
+}
+
+const PIE_COLORS = ['#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#6366f1', '#ec4899', '#14b8a6'];
+
+const ACTION_LABELS = {
+  create_memory: '创建记忆',
+  add_memory: '添加记忆',
+  create_knowledge: '创建知识',
+  add_knowledge: '添加知识',
+  fix_skill: '技能修复',
+  knowledge_extract: '知识提炼',
+  no_action: '无需进化',
+  failed: '失败',
+};
+
+function EvolutionCharts({ stats }) {
+  const trendData = useMemo(() => {
+    if (!stats.recent_days) return [];
+    return Object.entries(stats.recent_days)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([date, count]) => ({ date: date.slice(5), count }));
+  }, [stats.recent_days]);
+
+  const actionData = useMemo(() => {
+    if (!stats.by_action) return [];
+    return Object.entries(stats.by_action)
+      .filter(([, v]) => v > 0)
+      .map(([name, value]) => ({ name: ACTION_LABELS[name] || name, value }));
+  }, [stats.by_action]);
+
+  const triggerData = useMemo(() => {
+    if (!stats.by_trigger) return [];
+    return Object.entries(stats.by_trigger)
+      .filter(([, v]) => v > 0)
+      .map(([name, value]) => ({ name: TRIGGER_LABELS[name] || name, value }));
+  }, [stats.by_trigger]);
 
   return (
-    <div className="flex items-end gap-px h-16">
-      {entries.map(([date, count]) => (
-        <div key={date} className="flex-1 flex flex-col items-center group relative">
-          <div
-            className="w-full rounded-t bg-purple-500/60 hover:bg-purple-500/80 transition-colors min-h-[2px]"
-            style={{ height: `${(count / max) * 100}%` }}
-          />
-          <div className="absolute -top-8 left-1/2 -translate-x-1/2 hidden group-hover:block whitespace-nowrap text-[10px] px-1.5 py-0.5 rounded bg-[color:var(--bg-soft)] border border-[color:var(--line)] text-[color:var(--text-soft)] shadow-sm z-10">
-            {date.slice(5)}: {count}次
-          </div>
+    <div className="space-y-4">
+      <Card className="p-4">
+        <div className="flex items-center gap-2 mb-3">
+          <TrendingUp size={14} className="text-purple-500" />
+          <span className="text-xs font-medium text-[color:var(--text-soft)]">近 30 天进化趋势</span>
         </div>
-      ))}
+        <div className="h-40">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={trendData} margin={{ top: 5, right: 5, left: -20, bottom: 0 }}>
+              <defs>
+                <linearGradient id="evoGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
+                  <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <XAxis dataKey="date" tick={{ fontSize: 10 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fontSize: 10 }} axisLine={false} tickLine={false} allowDecimals={false} />
+              <Tooltip
+                contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid var(--line)', background: 'var(--bg-elev)' }}
+                labelStyle={{ fontSize: 11, color: 'var(--text-soft)' }}
+                formatter={(v) => [`${v} 次`, '进化']}
+              />
+              <Area type="monotone" dataKey="count" stroke="#8b5cf6" strokeWidth={2} fill="url(#evoGradient)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </Card>
+
+      {(actionData.length > 0 || triggerData.length > 0) && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {actionData.length > 0 && (
+            <Card className="p-4">
+              <div className="text-xs font-medium text-[color:var(--text-soft)] mb-2">按进化类型分布</div>
+              <div className="h-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={actionData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={60} innerRadius={30} paddingAngle={2}>
+                      {actionData.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} formatter={(v) => [`${v} 次`]} />
+                    <Legend wrapperStyle={{ fontSize: 10 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+          )}
+          {triggerData.length > 0 && (
+            <Card className="p-4">
+              <div className="text-xs font-medium text-[color:var(--text-soft)] mb-2">按触发源分布</div>
+              <div className="h-44">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={triggerData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={60} innerRadius={30} paddingAngle={2}>
+                      {triggerData.map((_, i) => <Cell key={i} fill={PIE_COLORS[(i + 3) % PIE_COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ fontSize: 11, borderRadius: 8 }} formatter={(v) => [`${v} 次`]} />
+                    <Legend wrapperStyle={{ fontSize: 10 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </Card>
+          )}
+        </div>
+      )}
     </div>
   );
 }

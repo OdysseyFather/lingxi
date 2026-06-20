@@ -15,6 +15,7 @@ import (
 	pdf "github.com/ledongthuc/pdf"
 	"github.com/nguyenthenguyen/docx"
 	"lingxi-agent/db"
+	"lingxi-agent/util"
 	"lingxi-agent/vectordb"
 )
 
@@ -485,7 +486,11 @@ func PreviewKnowledge(c *gin.Context) {
 	}
 
 	relPath, _ := item["file_path"].(string)
-	absPath := filepath.Join(knowledgeDir(), relPath)
+	absPath, pathErr := util.SafeJoinPath(knowledgeDir(), relPath)
+	if pathErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法文件路径"})
+		return
+	}
 
 	// For binary formats, try reading the extracted text file first
 	readPath := absPath

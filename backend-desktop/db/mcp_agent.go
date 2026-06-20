@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -193,8 +194,37 @@ func UpsertAgent(a *Agent) (int64, error) {
 }
 
 func DeleteAgent(id int64) error {
-	_, err := DB.Exec(`DELETE FROM agents WHERE id=? AND builtin=0`, id)
-	return err
+	tx, err := DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// 确认非内置
+	var builtin int
+	if e := tx.QueryRow(`SELECT builtin FROM agents WHERE id=?`, id).Scan(&builtin); e != nil {
+		return e
+	}
+	if builtin == 1 {
+		return fmt.Errorf("cannot delete builtin agent")
+	}
+
+	// 级联删除关联数据
+	tx.Exec(`DELETE FROM scheduled_tasks WHERE agent_id=?`, id)
+	tx.Exec(`DELETE FROM memories WHERE agent_id=?`, id)
+	tx.Exec(`DELETE FROM evolution_logs WHERE agent_id=?`, id)
+	tx.Exec(`DELETE FROM agent_nexus_config WHERE agent_id=?`, id)
+	tx.Exec(`DELETE FROM agent_personalities WHERE agent_id=?`, id)
+
+	// 级联置空（保留记录但解除关联）
+	tx.Exec(`UPDATE sessions SET agent_id=0 WHERE agent_id=?`, id)
+	tx.Exec(`UPDATE im_connectors SET agent_id=0 WHERE agent_id=?`, id)
+	tx.Exec(`UPDATE a2a_conversations SET local_agent_id=0 WHERE local_agent_id=?`, id)
+
+	// 删除 agent 本身
+	tx.Exec(`DELETE FROM agents WHERE id=?`, id)
+
+	return tx.Commit()
 }
 
 // ─── Sessions ↔ Agent ─────────────────────────────────────────────

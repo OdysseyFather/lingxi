@@ -25,7 +25,7 @@ func LocalOriginCORS() gin.HandlerFunc {
 		if allowed && origin != "" {
 			c.Header("Access-Control-Allow-Origin", origin)
 			c.Header("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
-			c.Header("Access-Control-Allow-Headers", "Content-Type,Authorization")
+			c.Header("Access-Control-Allow-Headers", "Content-Type,Authorization,X-Pair-Token")
 			c.Header("Access-Control-Allow-Credentials", "true")
 			c.Header("Access-Control-Max-Age", "86400")
 		}

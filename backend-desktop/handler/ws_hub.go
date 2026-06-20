@@ -7,9 +7,15 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+)
+
+const (
+	wsPingInterval = 20 * time.Second
+	wsPongTimeout  = 40 * time.Second
 )
 
 // WSMessage 是通过 WebSocket 发送的消息结构
@@ -24,6 +30,7 @@ type wsClient struct {
 	conn       *websocket.Conn
 	mu         sync.Mutex
 	sessionIDs map[int64]bool // 该连接订阅的所有 sessionId
+	deviceID   string         // 手机端配对设备 ID（空=桌面端）
 }
 
 func (c *wsClient) writeMsg(msg WSMessage) {
@@ -99,6 +106,19 @@ func SendNotification(title, body string) {
 	globalHub.BroadcastAll("notification", string(payload))
 }
 
+// ConnectedDeviceIDs 返回当前通过 WS 在线的手机端设备 ID 集合
+func ConnectedDeviceIDs() map[string]bool {
+	globalHub.mu.RLock()
+	defer globalHub.mu.RUnlock()
+	ids := make(map[string]bool)
+	for _, c := range globalHub.clients {
+		if c.deviceID != "" {
+			ids[c.deviceID] = true
+		}
+	}
+	return ids
+}
+
 // BroadcastEvent 把任意事件广播给所有连接（payload 自动 JSON 序列化）
 func BroadcastEvent(event string, payload any) {
 	b, _ := json.Marshal(payload)
@@ -111,6 +131,8 @@ func BroadcastWSEvent(event, data string) {
 }
 
 var upgrader = websocket.Upgrader{
+	// WS 安全由 WsAuthCheck 在 Upgrade 之前校验（localhost 放行 / ticket/token 认证），
+	// Origin 检查放宽以支持手机 App LAN 直连和隧道场景
 	CheckOrigin: func(r *http.Request) bool {
 		origin := r.Header.Get("Origin")
 		if origin == "" {
@@ -122,10 +144,13 @@ var upgrader = websocket.Upgrader{
 			strings.HasPrefix(origin, "app://") {
 			return true
 		}
-		// 允许局域网 IP 访问（手机远程控制等场景）
 		if strings.HasPrefix(origin, "http://10.") ||
 			strings.HasPrefix(origin, "http://172.") ||
 			strings.HasPrefix(origin, "http://192.168.") {
+			return true
+		}
+		// 携带了有效 ticket/pair_token 的连接信任其 origin
+		if r.URL.Query().Get("ticket") != "" || r.URL.Query().Get("pair_token") != "" {
 			return true
 		}
 		slog.Warn("rejected origin", "value", origin)
@@ -138,6 +163,10 @@ var upgrader = websocket.Upgrader{
 // 前端可发送 {"type":"subscribe","sessionId":123} 订阅更多 session，
 // 或 {"type":"unsubscribe","sessionId":123} 取消订阅。
 func WsHandler(c *gin.Context) {
+	if !WsAuthCheck(c) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "ws authentication required"})
+		return
+	}
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		slog.Warn("upgrade error", "err", err)
@@ -147,6 +176,7 @@ func WsHandler(c *gin.Context) {
 	client := &wsClient{
 		conn:       conn,
 		sessionIDs: make(map[int64]bool),
+		deviceID:   c.Query("device_id"),
 	}
 
 	// 从 query 参数初始化订阅的 session
@@ -163,12 +193,43 @@ func WsHandler(c *gin.Context) {
 		conn.Close()
 	}()
 
+	// 设置 Pong 处理器：每收到 Pong 就延长读取超时
+	conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+		return nil
+	})
+
+	// 后台定时发送 Ping 帧，保持连接活跃（移动网络 NAT 通常 30-60s 超时）
+	pingDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(wsPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				client.mu.Lock()
+				err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+				client.mu.Unlock()
+				if err != nil {
+					return
+				}
+			case <-pingDone:
+				return
+			}
+		}
+	}()
+	defer close(pingDone)
+
 	// 读取客户端控制消息
 	for {
 		_, msg, err := conn.ReadMessage()
 		if err != nil {
 			break
 		}
+		// 收到任何消息都延长读取超时
+		conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+
 		var cmd struct {
 			Type      string `json:"type"`
 			SessionID int64  `json:"sessionId"`

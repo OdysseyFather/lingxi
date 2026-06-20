@@ -262,6 +262,8 @@ func BuildGroupSystemPrompt(speaker db.GroupMember, p *db.AgentPersonality) stri
 	b.WriteString("- 话题自然结束可在开头加 [CLOSE]（少用）。\n")
 	b.WriteString("\n# 工具\n")
 	b.WriteString("- 需要时用 Bash/Read/技能，群里只说人话结论，不贴命令路径。\n")
+	b.WriteString("\n# 语言规则\n")
+	b.WriteString("- **所有输出必须使用中文（简体中文），包括思考过程（thinking）。** 禁止使用英文思考或回复。\n")
 	return b.String()
 }
 

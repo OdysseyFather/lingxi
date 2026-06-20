@@ -18,6 +18,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"lingxi-agent/config"
 	"lingxi-agent/db"
+	"lingxi-agent/util"
 	"lingxi-agent/model"
 )
 
@@ -929,11 +930,10 @@ func unzip(data []byte, destDir string) error {
 		return err
 	}
 	for _, f := range r.File {
-		cleanName := filepath.Clean(f.Name)
-		if strings.HasPrefix(cleanName, "..") {
+		target, pathErr := util.SafeJoinPath(destDir, f.Name)
+		if pathErr != nil {
 			continue
 		}
-		target := filepath.Join(destDir, cleanName)
 		if f.FileInfo().IsDir() {
 			// 目录必须带执行位，否则无法进入和读取其中文件
 			dirMode := f.Mode() | 0111

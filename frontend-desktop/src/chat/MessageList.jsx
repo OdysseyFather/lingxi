@@ -144,6 +144,15 @@ const cardItem = {
 };
 
 function Empty({ profileName }) {
+  const SCENES = [
+    { title: '写作', prompt: '帮我润色这段文字，让它更生动', icon: '✍️', from: 'from-orange-400', to: 'to-amber-500' },
+    { title: '编程', prompt: '帮我写一段 Python 代码实现快速排序', icon: '💻', from: 'from-blue-400', to: 'to-cyan-500' },
+    { title: '翻译', prompt: '把下面这段话翻译成英文', icon: '🌐', from: 'from-purple-400', to: 'to-pink-500' },
+    { title: '总结', prompt: '帮我总结一下下面这段内容的要点', icon: '📋', from: 'from-emerald-400', to: 'to-teal-500' },
+    { title: '分析', prompt: '帮我分析这个问题的可行解决方案', icon: '🔍', from: 'from-rose-400', to: 'to-red-500' },
+    { title: '创意', prompt: '给我一些有趣的创意点子', icon: '💡', from: 'from-yellow-400', to: 'to-orange-500' },
+  ];
+
   const EXAMPLE_GROUPS = [
     { title: '创作写作', icon: Sparkles, color: 'from-violet-500 to-purple-600', items: [
       '帮我把这周的会议纪要整理成行动项',
@@ -169,13 +178,13 @@ function Empty({ profileName }) {
   return (
     <div className="h-full flex flex-col items-center justify-center px-6 py-10 text-center">
       <motion.div
-        className="relative mb-8"
+        className="relative mb-6 sm:mb-8"
         initial={{ opacity: 0, scale: 0.8 }}
         animate={{ opacity: 1, scale: 1 }}
         transition={{ duration: 0.6, ease: [.22,1,.36,1] }}
       >
-        <div className="ai-core-ring rounded-3xl bg-gradient-to-br from-[color:var(--accent)] to-[#5e8bff] text-white flex items-center justify-center shadow-glow" style={{ width: 80, height: 80 }}>
-          <Sparkles size={32} />
+        <div className="ai-core-ring rounded-3xl bg-gradient-to-br from-[color:var(--accent)] to-[#5e8bff] text-white flex items-center justify-center shadow-glow" style={{ width: 72, height: 72 }}>
+          <Sparkles size={28} />
         </div>
         <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-2 border-[color:var(--bg)] flex items-center justify-center">
           <div className="w-1.5 h-1.5 rounded-full bg-white" style={{ animation: 'breathe 1.6s ease-in-out infinite' }} />
@@ -183,7 +192,7 @@ function Empty({ profileName }) {
       </motion.div>
 
       <motion.h2
-        className="text-3xl font-bold tracking-tight"
+        className="text-2xl sm:text-3xl font-bold tracking-tight"
         variants={heroContainer}
         initial="initial"
         animate="animate"
@@ -198,7 +207,7 @@ function Empty({ profileName }) {
       </motion.h2>
 
       <motion.p
-        className="mt-3 text-[color:var(--text-soft)] text-base max-w-md"
+        className="mt-3 text-[color:var(--text-soft)] text-sm sm:text-base max-w-md"
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.6, duration: 0.4, ease: [.22,1,.36,1] }}
@@ -206,8 +215,32 @@ function Empty({ profileName }) {
         {profileName ? `当前接入：${profileName}` : '你的智能 AI 桌面助理，随时为你查信息、写内容、整理思路'}
       </motion.p>
 
+      {/* 移动端：场景入口网格（豆包风格） */}
       <motion.div
-        className="mt-8 grid grid-cols-1 sm:grid-cols-2 gap-3 w-full max-w-2xl"
+        className="mt-6 grid grid-cols-3 gap-2.5 w-full max-w-md sm:hidden"
+        variants={cardStagger}
+        initial="initial"
+        animate="animate"
+      >
+        {SCENES.map((s) => (
+          <motion.button
+            key={s.title}
+            variants={cardItem}
+            onClick={() => sendMessage({ message: s.prompt })}
+            className={cn(
+              'aspect-square rounded-2xl bg-gradient-to-br text-white p-3 flex flex-col items-start justify-between shadow-md active:scale-95 transition-transform',
+              s.from, s.to
+            )}
+          >
+            <span className="text-2xl">{s.icon}</span>
+            <span className="text-sm font-bold tracking-tight">{s.title}</span>
+          </motion.button>
+        ))}
+      </motion.div>
+
+      {/* 桌面端：分组示例卡片 */}
+      <motion.div
+        className="mt-8 hidden sm:grid sm:grid-cols-2 gap-3 w-full max-w-2xl"
         variants={cardStagger}
         initial="initial"
         animate="animate"
@@ -239,7 +272,7 @@ function Empty({ profileName }) {
       </motion.div>
 
       <motion.div
-        className="mt-6 flex items-center gap-4 text-[11px] text-[color:var(--text-faint)]"
+        className="mt-6 hidden sm:flex items-center gap-4 text-[11px] text-[color:var(--text-faint)]"
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         transition={{ delay: 1.2, duration: 0.5 }}

@@ -274,6 +274,7 @@ backend-desktop/
 │   ├── tasks.go         # 后台任务管理
 │   ├── memory.go        # 长期记忆 CRUD + 消息固定
 │   ├── transcribe.go    # 语音识别（本地 whisper.cpp 优先，回退远端 API）
+│   ├── pair_auth.go     # 手机配对认证中间件 + WS 一次性票据 + 配对 API
 │   └── ws_hub.go        # WebSocket Hub
 ├── connector/           # IM 连接器实现
 ├── model/model.go       # 数据模型
@@ -810,3 +811,114 @@ PORT=3099 DB_PATH=/tmp/lingxi-instance2/smart-agent.db FRONTEND_DIST=../frontend
 - [x] **隧道配置持久化 + 自动重连**：信令地址和 token 存储到 `kv_store`，`AutoStartH5Tunnel()` 应用启动时自动恢复
 - [x] **灵犀主模式移动端适配**：AppShell 响应式布局（滑出侧边栏/移动端顶栏/底部智能体选择器）+ 微信浏览器兼容（`isH5Mobile()` 多策略检测）
 - [x] **设置页云端隧道面板**：RemoteAccessPage 新增云端隧道区块（信令地址配置 + 连接/断开 + 隧道 URL 显示 + 二维码生成）
+
+### 手机 App 配对认证（v2026-06 Phase 24）
+- [x] **PairTokenAuthMiddleware**：Gin 中间件，对非 localhost 请求强制 `X-Pair-Token` 认证，localhost 请求自动放行（Electron 桌面端 + h5_tunnel 本地代理不受影响）
+- [x] **路径豁免**：`/api/ping`、`/api/health`、`/api/pair/complete`、`/api/auth/guest` 等公开端点免认证
+- [x] **WS 一次性票据**：`POST /api/auth/ws-ticket` 生成 60 秒有效票据，避免 pair_token 泄漏到 WS URL 日志
+- [x] **配对 API**：PC 端 `POST /api/pair/initiate`（生成 challenge UUID + 6 位数字码 + QR 数据），手机端 `POST /api/pair/complete`（返回永久 pair_token）
+- [x] **设备管理 API**：列表 / 解绑 / token 轮换 / FCM 推送 token 注册 / 一键撤销全部
+- [x] **h5_access_tokens 表扩展**：新增 permanent/device_id/platform/device_name/push_token/last_seen_at 列，永久 token 跳过过期检查
+- [x] **配对挑战清理 goroutine**：每 60 秒清理过期挑战（5 分钟 TTL），防止内存泄漏
+- [x] **WS 认证增强**：WsHandler 和 TerminalWsHandler 入口增加 `WsAuthCheck`，非 localhost 需 ticket 或 pair_token
+- [x] **CORS 更新**：`Access-Control-Allow-Headers` 增加 `X-Pair-Token`
+
+### Flutter 手机端骨架（v2026-06 Phase 25）
+- [x] **Flutter 项目骨架**：`mobile-flutter/` 目录，Flutter 3.24+ / Dart 3.5+，Provider 状态管理
+- [x] **ApiClient**：HTTP 请求封装（自动注入 `X-Pair-Token`，401 统一处理，RESTful CRUD 方法）
+- [x] **WsClient**：WebSocket 客户端（one-time ticket 认证，自动重连，session 订阅/取消订阅，ping 保活）
+- [x] **ConnectionManager**：LAN/WAN 自动切换（优先 LAN 直连，回退 WAN 隧道代理，30s 心跳检测，SharedPreferences 持久化）
+- [x] **PairService**：QR 扫码配对 + 6 位码手动配对，支持 LAN 直连和 WAN 回退
+- [x] **PairScreen**：配对页面（QR 扫码 tab + 手动输码 tab，mobile_scanner 集成）
+- [x] **HomeScreen**：首页（会话列表 + 下拉刷新 + 智能体选择器 + 连接状态指示 + 左滑删除）
+- [x] **ChatScreen**：对话页面（WS 流式消息集成 + Markdown 渲染 + 思考块折叠 + 图片粘贴/拍照 + 发送/中止按钮 + sticky-to-bottom 滚动）
+- [x] **SettingsScreen**：设置页（LAN/WAN 连接状态 + 智能体列表 + 解除配对 + 重连）
+- [x] **MessageBubble**：消息气泡（flutter_markdown 渲染 + 代码高亮 + 图片缩略图 + 复制按钮）
+- [x] **ThinkingIndicator**：思考中指示器（折叠/展开思考内容）
+- [x] **数据模型**：Session / Message / LiveBlock / Agent，对齐后端 JSON 格式
+- [x] **Android 网络安全配置**：`network_security_config.xml` 允许 192.168/10.0/172.16 局域网明文 HTTP
+
+### 推送通知（v2026-06 Phase 26）
+- [x] **信令服务器 /push 端点**：接收 PC 端推送请求，通过 FCM Legacy HTTP API 发送到手机端（`Authorization: Bearer <PUSH_SECRET>` 鉴权）
+- [x] **后端推送集成**：AI 回复完成（`done` 事件）后异步检测已配对设备的 push_token，通过信令服务器中转 FCM 推送
+- [x] **推送配置 API**：`GET/PUT /api/push/config`（信令地址+密钥）+ `POST /api/push/test`（测试推送），kv_store 持久化
+- [x] **前端推送配置 UI**：RemoteAccessPage 新增"推送通知"折叠面板（信令地址+密钥配置+测试推送按钮）
+- [x] **Flutter FCM 集成**：firebase_messaging + flutter_local_notifications，前台/后台/冷启动三种通知场景处理
+- [x] **Flutter push token 注册**：配对成功和应用恢复时自动注册 FCM token 到 PC 后端，token 刷新时自动更新
+- [x] **通知点击跳转**：点击通知携带 session_id，跳转到对应对话页面
+
+### Flutter 手机端 Chat 增强（v2026-06 Phase 27）
+- [x] **代码块语法高亮**：`CodeBlockWidget`（flutter_highlight + github/atom-one-dark 主题 + 语言标签 + 复制按钮 + 横向滚动）
+- [x] **工具调用卡片**：`ToolCard`（颜色编码：文件=蓝/编辑=紫/终端=绿/搜索=橙 + 折叠详情 + 耗时 + running 动画）
+- [x] **工具组聚合**：`ToolGroupCard`（连续同类工具自动聚合折叠组 "Read ×5" + 总耗时）
+- [x] **思考过程折叠块**：`ThinkingBlock`（折叠/展开 + 预览 + 紫色主题 + live 呼吸脉冲）
+- [x] **RAG 引用脚注**：`CitationFooter`（引用来源列表 + 编号 + 折叠 + 标题/摘要）
+- [x] **WS 事件块级处理**：`_handleWsEvent` 重写为块级架构，AppState 维护 `List<LiveBlock>`
+- [x] **流式渲染增强**：ChatScreen 实时渲染思考块/工具卡片/Markdown，工具组自动聚合
+- [x] **消息气泡多块渲染**：MessageBubble 支持 `Message.blocks` 结构化块列表
+- [x] **消息反馈**：thumbs up/down（持久化 + 选中高亮 + 取消切换）
+- [x] **流式状态栏增强**：AppBar 显示详细状态（思考中/执行工具名/回复中）
+- [x] **消息编辑/重发**：长按用户消息弹出编辑对话框，保存后自动删除后续消息并重发
+- [x] **消息固定 Pin**：消息操作栏 Pin 按钮，已固定消息显示金色图钉标记
+- [x] **APK 构建成功**：Flutter 3.27.4 + Android SDK 34，Release APK 71.2MB
+
+### Flutter 手机端视觉重做（v2026-06 Phase 28）
+- [x] **Design Tokens**：`app_colors.dart`（品牌色/语义色/工具色/渐变/暗色映射）+ `app_dimens.dart`（圆角/间距/字号/头像统一定义）+ `app_theme.dart`（Light/Dark 双主题工厂）
+- [x] **Widgets 全面重写**：`message_bubble`（蓝紫用户气泡/浅灰蓝 AI 气泡/固定/反馈/编辑操作）、`thinking_block`（金色折叠 chip）、`tool_card`（6 色降饱和编码 + ToolGroupCard 聚合）、`citation_block`（引用块蓝色折叠）
+- [x] **新增 Widgets**：`streaming_cursor`（金色闪烁竖条）、`skeleton_loader`（shimmer 骨架屏）、`recommendation_chips`（后续问题胶囊）
+- [x] **ChatScreen 重做**：胶囊浮起 Composer（圆角+阴影+图片选择）+ 红色停止按钮 + 流式渲染（金色光标+工具组聚合+思考块折叠）+ 精致空状态欢迎页（推荐提示词 chip）
+- [x] **HomeScreen 重做**：智能体 Chip 选择器 + 连接状态 Dot + 会话卡片化（渐变头像+时间格式化+置顶图标）+ 滑动删除确认 + NavigationBar 底栏
+- [x] **PairScreen 重做**：渐变 Hero 背景 + 胶囊 Tab 切换 + QR 扫描区 + 手动输码
+- [x] **SettingsScreen 重做**：分组卡片 + 连接信息 + 设备管理 + 版本信息
+
+### 飞书机器人流式卡片消息（v2026-06 Phase 29）
+- [x] **StreamReplyFunc 接口扩展**：`IMMessage` 新增可选 `StreamReplyFunc func(chunk string, done bool) error`，支持流式回复的平台设置此字段
+- [x] **飞书流式卡片 API 封装**：`feishu_streaming.go` 实现完整生命周期——创建卡片实体（CardKit v1）→ 发送卡片消息 → 定期批量追加文本（PUT element content）→ 完成
+- [x] **流式推送控制**：`feishuStreamSender` 内部维护 flush timer（可配置间隔，默认 80ms）+ 严格递增 sequence + 累积文本前缀扩展 + tenant_access_token 自动刷新缓存
+- [x] **RunClaudeStreaming**：`handler/chat.go` 新增流式调用函数，每次收到 text_delta 时实时回调 onChunk，生成结束时调用 onChunk("", true)，持久化逻辑与 RunClaudeSync 一致
+- [x] **Dispatcher 流式路径**：`Dispatch()` 检测 `StreamReplyFunc != nil` 时走 `runClaudeStream`，流式模式下不发"收到"确认消息
+- [x] **FeishuConfig 扩展**：新增 `streaming_enabled` / `streaming_card_title` / `streaming_flush_ms` 三个可配置项
+- [x] **向后兼容**：`streaming_enabled` 默认 false（不改配置不启用），钉钉/企微保持原有同步路径，流式失败 fallback 到错误提示
+- [x] **其他平台预留**：`ClaudeStreamRunner` 接口 + `SetClaudeStreamRunner` 注入点，任意平台实现 `func(chunk, done)` 即可启用流式
+
+### Flutter 手机端 WS 稳定性修复（v2026-06 Phase 30）
+- [x] **WsClient 握手等待**：使用 `await _channel!.ready` 等待 WebSocket 握手完成后再标记 `_connected = true`，避免假连接状态导致顶部红条闪烁
+- [x] **指数退避重连**：重连间隔从固定 3 秒改为 2^attempt 秒（上限 30 秒），连接成功重置计数器，避免网络短暂不可用时重连风暴
+- [x] **并发连接防护**：`_connecting` flag + `_doConnect` 入口守卫，防止多个 Timer/heartbeat 同时触发连接
+- [x] **ConnectionManager 增强**：心跳和网络变化事件检查 `wsClient.connecting` 状态，避免打断正在进行的重连；网络变化防抖从 2s 加到 5s；`_probing` 锁防止并发探测
+- [x] **断线提示防抖加长**：AppState `onDisconnected` 防抖从 2s 增加到 4s，并检测 `connecting` 状态，避免重连过程中顶部红条闪现
+- [x] **reconnectNow() 公开方法**：外部可主动触发重连（重置退避计数），供 heartbeat 检测 WS 断开但 HTTP 正常时调用
+- [x] **后端 WS Ping/Pong 保活**：WsHandler 新增 `wsPingInterval=20s`（Ping 帧）+ `wsPongTimeout=40s`（读取超时），Pong handler 重置 deadline，确保移动网络 NAT 不超时断连
+- [x] **Flutter 心跳加强**：客户端 ping 间隔从 25s 缩短到 15s，且无论 `_subscribedSessions` 是否为空都发送保活消息，避免空闲连接被 NAT 静默断开
+- [x] **后端接口自动化测试**：58 个测试覆盖 WS Hub（12）/ 认证中间件（5）/ Sessions CRUD（7）/ Messages 分页（5）/ Agents（1）/ Memories（2）/ Knowledge（3）/ Skills（3）/ File Browser（5）/ Scheduled Tasks（1）/ Chat 验证（5）/ Health（2），使用独立临时 SQLite 数据库，互不干扰可重复运行
+- [x] **WS 认证简化**：移除 ticket 中间步骤，WsAuthCheck 新增 `pair_token` query 参数直接认证；Flutter WsClient 移除 ApiClient 依赖和 getWsTicket 调用，WS URL 直接拼接 `?pair_token=xxx` 一步连接；旧 ticket 方式保留为兼容回退
+
+### Flutter 手机端全面重构（v2026-06 Phase 31）
+- [x] **飞书流式消息修复**：`feishu_streaming.go` 新增 `frozenThinking`/`frozenTool` 字段，确保 PUT content 为前缀扩展
+- [x] **移动端 ask_question 支持**：`LiveBlock` 扩展 + `AskQuestionCard` Widget + ChatScreen 实时渲染
+- [x] **消息消失修复**：`done` 事件延迟 1.5s 后 `loadMessages`，解决竞态
+- [x] **5 Tab 底部导航**：HomeScreen 重构为 BottomNavigationBar + IndexedStack（对话/智能体/发现/我的/设置）
+- [x] **全局消息搜索**：`SearchMessagesScreen`（防抖搜索 + API + 结果卡片 + 跳转会话）
+- [x] **TTS 朗读**：`flutter_tts` 集成 + 消息长按菜单"朗读"
+- [x] **多文件上传**：`file_picker` 集成，附件 strip 预览 + 多文件发送
+- [x] **消息重生成**：长按菜单"重生成"，自动定位前一条用户消息并重发
+- [x] **智能体详情页**：`AgentDetailScreen`（Hero header + 描述 + 参数 + 开始对话）
+- [x] **技能市场页**：`SkillListScreen`（搜索 + 已安装标记 + 列表卡片）
+- [x] **知识库页**：`KnowledgeListScreen`（语义搜索 + 分类颜色 + 相关度展示）
+- [x] **发现页增强**：四宫格入口 + 热门智能体横滚 + 使用技巧推荐卡片
+- [x] **用量统计页**：`UsageScreen`（时段筛选 + 总费用 Hero + token/请求统计 + 消费记录）
+- [x] **长期记忆管理**：`MemoryScreen`（记忆列表 + 添加/删除 + 分类标签）
+- [x] **首次启动引导**：`OnboardingScreen`（3 页滑动引导 + 渐变背景 + 进度指示器）
+- [x] **Accessibility 增强**：Semantics 标签 + animated 底部导航指示器
+- [x] **图片缓存**：`cached_network_image` 集成
+- [x] **Android SDK 升级**：minSdkVersion 24 + compileSdk 36 + Kotlin 2.1.0
+- [x] **Release APK**：76.9MB 构建验证通过
+
+### Flutter 手机端 ask_question 交互修复（v2026-06 Phase 32）
+- [x] **完全对齐 PC 端交互逻辑**：重写 `ask_question_card.dart`，新增 `ChoiceCard`（选择块）/ `InputCard`（输入块）/ `PendingInteractivePlaceholder`（流式占位），与 PC 端 `SingleChoiceBlock` / `SingleInputBlock` / `PendingInteractivePlaceholder` 一一对应
+- [x] **选择后发送普通消息**：`ChoiceCard._submit` 格式化为 `[选择结果] 标题: 选项A, 选项B` 通过 `sendMessage` 发送（与 PC 端完全一致），不再使用 `submitQuestionAnswer` 特殊 API
+- [x] **输入后发送普通消息**：`InputCard._submit` 格式化为 `[信息回复] 标题:\n字段: 值` 通过 `sendMessage` 发送
+- [x] **本地 submitted 状态**：交互卡片的已提交状态由组件内部 `_submitted` 管理（非来自 props），历史消息重新加载后卡片恢复为可交互状态（与 PC 端一致）
+- [x] **流式期间显示占位符**：流式阶段检测到 choice/input JSON 后显示 `PendingInteractivePlaceholder`（"正在生成交互选项..."），流式结束后变为可交互卡片（与 PC 端 live 逻辑一致）
+- [x] **splitInteractiveBlocks 解析器**：`message_bubble.dart` 新增 Dart 版交互块解析器，支持 ` ```json ` 围栏和裸 JSON 花括号配对两种格式检测 `choice`/`input` JSON
+- [x] **三层渲染覆盖**：MessageBubble `_buildContentWithInteractive`（无 blocks 历史消息）+ `_addContentWithInteractive`（有 blocks 的 text 块）+ ChatScreen 流式 text 块，确保任何场景下 JSON 都正确渲染为交互 UI

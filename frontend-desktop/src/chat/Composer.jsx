@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { Send, ImagePlus, BookOpen, Square, Cpu, Coins, Slash, Languages, FileText, Lightbulb, Code2, SearchCheck, RefreshCw, Wrench, Mail, Sparkles, GitCompare, Database, TestTube, Mic, MicOff, Loader2, Paperclip, X, Camera, Monitor } from 'lucide-react';
+import { Send, ImagePlus, BookOpen, Square, Cpu, Coins, Slash, Languages, FileText, Lightbulb, Code2, SearchCheck, RefreshCw, Wrench, Mail, Sparkles, GitCompare, Database, TestTube, Mic, MicOff, Loader2, Paperclip, X, Camera, Monitor, Globe } from 'lucide-react';
 import { useStore } from '../state/useStore';
 import { Button, Tooltip } from '../ui/primitives';
 import { cn, isH5Mobile } from '../ui/cn';
@@ -19,6 +19,7 @@ const SLASH_COMMANDS = [
   { cmd: '/compare', label: '对比分析', desc: '对比两个方案的优劣', prompt: '请对比以下方案，分析各自的优缺点：\n\n方案 A：\n方案 B：', icon: GitCompare },
   { cmd: '/sql', label: 'SQL', desc: '根据描述生成 SQL', prompt: '请根据以下描述生成 SQL 查询语句：\n\n', icon: Database },
   { cmd: '/test', label: '写测试', desc: '生成单元测试', prompt: '请为以下代码编写单元测试：\n\n```\n\n```', icon: TestTube },
+  { cmd: '/search', label: '联网搜索', desc: '打开深度联网搜索页面', prompt: '', icon: Globe, action: 'open_deep_search' },
 ];
 
 const TEXT_EXTENSIONS = new Set([
@@ -37,6 +38,7 @@ function getFileExt(name) {
 
 export function Composer({ useKB: controlledUseKB, setUseKB: setControlledUseKB } = {}) {
   const sendMessage = useStore((s) => s.sendMessage);
+  const setView = useStore((s) => s.setView);
   const abort = useStore((s) => s.abort);
   const isStreaming = useStore((s) => s.isStreaming);
   const messages = useStore((s) => s.messages);
@@ -172,6 +174,12 @@ export function Composer({ useKB: controlledUseKB, setUseKB: setControlledUseKB 
   }, [filteredCommands, text]);
 
   const applySlashCommand = useCallback((cmd) => {
+    if (cmd.action === 'open_deep_search') {
+      setText('');
+      setSlashOpen(false);
+      setView('search');
+      return;
+    }
     setText(cmd.prompt);
     setSlashOpen(false);
     requestAnimationFrame(() => {

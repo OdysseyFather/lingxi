@@ -118,7 +118,7 @@ export function UsagePage() {
       {/* 四格概览 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard icon={<Coins size={18} />} label="本期费用" value={`$${(summary.cost_usd || 0).toFixed(4)}`} sub={`今日 $${(today.cost_usd || 0).toFixed(4)}`} hint={summary.has_estimated ? '含估算' : null} />
-        <StatCard icon={<Cpu size={18} />} label="输入 token" value={formatNum(summary.input_tokens || 0)} sub={`今日 ${formatNum(today.input_tokens || 0)}`} />
+        <StatCard icon={<Cpu size={18} />} label="输入 token" value={formatNum(summary.input_tokens || 0)} sub={`缓存命中 ${formatNum(summary.cache_read_tokens || 0)}`} />
         <StatCard icon={<Cpu size={18} />} label="输出 token" value={formatNum(summary.output_tokens || 0)} sub={`今日 ${formatNum(today.output_tokens || 0)}`} />
         <StatCard icon={<BarChart3 size={18} />} label="请求数" value={summary.requests || 0} sub={`今日 ${today.requests || 0}`} />
       </div>

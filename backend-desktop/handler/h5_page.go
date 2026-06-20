@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"strings"
 
+	"lingxi-agent/db"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,6 +24,13 @@ func ServeH5Page(c *gin.Context) {
 		c.String(http.StatusOK, h5TunnelRedirectHTML)
 		return
 	}
+
+	// 验证 token 并设置 cookie（让 SPA 后续请求自动带上认证）
+	rec, err := db.ValidateH5Token(token)
+	if err == nil && rec != nil {
+		c.SetCookie("lingxi_token", token, 30*24*3600, "/", "", false, false)
+	}
+
 	c.String(http.StatusOK, h5RedirectHTML)
 }
 

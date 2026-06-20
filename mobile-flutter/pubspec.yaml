@@ -1,0 +1,42 @@
+name: lingxi_mobile
+description: 灵犀 AI Agent 手机端
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.5.0
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  provider: ^6.1.2
+  http: ^1.2.2
+  web_socket_channel: ^3.0.1
+  shared_preferences: ^2.3.2
+  mobile_scanner: ^5.2.3
+  flutter_markdown: ^0.7.4
+  flutter_highlight: ^0.7.0
+  image_picker: ^1.1.2
+  path_provider: ^2.1.4
+  flutter_image_compress: ^2.3.0
+  permission_handler: ^11.3.1
+  connectivity_plus: ^6.0.5
+  flutter_local_notifications: ^17.2.4
+  firebase_core: ^3.6.0
+  firebase_messaging: ^15.1.4
+  url_launcher: ^6.3.1
+  flutter_tts: ^4.2.5
+  file_picker: ^11.0.2
+  cached_network_image: ^3.4.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bufio"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
@@ -12,6 +13,15 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+// sanitizePath 校验路径不含 null byte 并清理路径分隔符。
+// filebrowser 允许访问用户机器上的目录，但拒绝恶意构造的路径。
+func sanitizePath(p string) (string, error) {
+	if strings.ContainsRune(p, 0) {
+		return "", fmt.Errorf("path contains null byte")
+	}
+	return filepath.Clean(p), nil
+}
 
 type fileEntry struct {
 	Name  string `json:"name"`
@@ -29,9 +39,14 @@ func ListDirectory(c *gin.Context) {
 	}
 
 	dirPath = expandHome(dirPath)
+	dirPath, err := sanitizePath(dirPath)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法路径"})
+		return
+	}
 
-	info, err := os.Stat(dirPath)
-	if err != nil || !info.IsDir() {
+	info, statErr := os.Stat(dirPath)
+	if statErr != nil || !info.IsDir() {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无效目录路径"})
 		return
 	}
@@ -92,6 +107,11 @@ func ReadFileContent(c *gin.Context) {
 	}
 
 	filePath = expandHome(filePath)
+	filePath, pathErr := sanitizePath(filePath)
+	if pathErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法路径"})
+		return
+	}
 
 	info, err := os.Stat(filePath)
 	if err != nil {
@@ -136,6 +156,11 @@ func WriteFileContent(c *gin.Context) {
 	}
 
 	filePath := expandHome(body.Path)
+	filePath, pathErr := sanitizePath(filePath)
+	if pathErr != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法路径"})
+		return
+	}
 
 	info, err := os.Stat(filePath)
 	if err != nil {

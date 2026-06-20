@@ -1175,7 +1175,7 @@ export function UsageFooter({ usageJSON, modelOverride }) {
   }, [usageJSON]);
   if (!usage) return null;
 
-  const totalIn = (usage.input_tokens || 0) + (usage.cache_read_tokens || 0);
+  const totalIn = (usage.input_tokens || 0) + (usage.cache_read_tokens || 0) + (usage.cache_write_tokens || 0);
   const out = usage.output_tokens || 0;
   const cost = usage.cost_usd || 0;
   const ms = usage.duration_ms || 0;
@@ -1203,6 +1203,9 @@ export function UsageFooter({ usageJSON, modelOverride }) {
       )}
       {usage.cache_read_tokens > 0 && (
         <Badge tone="success">cache hit {formatNum(usage.cache_read_tokens)}</Badge>
+      )}
+      {usage.cache_write_tokens > 0 && (
+        <Badge tone="warning">cache write {formatNum(usage.cache_write_tokens)}</Badge>
       )}
     </div>
   );

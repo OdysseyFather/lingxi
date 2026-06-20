@@ -354,6 +354,9 @@ function SessionItem({ session, active, batchMode, checked, onToggle, onClick, o
         ) : (
           <>
             <div className="text-sm truncate">{session.title || '新对话'}</div>
+            {session.summary && (
+              <div className="text-[10px] text-[color:var(--text-soft)] truncate mt-0.5 italic">{session.summary}</div>
+            )}
             <div className="text-[10px] text-[color:var(--text-faint)] truncate flex items-center gap-1.5">
               <span>{session.message_count || 0} 条</span>
               <span className="opacity-50">·</span>

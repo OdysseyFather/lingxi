@@ -807,6 +807,27 @@ cd electron && npm install && npm start
 
 ---
 
+## 📱 手机端 App（Flutter）
+
+灵犀提供 Flutter 手机端 App（`mobile-flutter/` 目录），作为桌面端的瘦客户端：
+
+- **配对连接**：QR 扫码或 6 位配对码一键配对，支持局域网直连和广域网隧道
+- **永久配对**：一次配对永久使用，无需每次重新认证
+- **完整对话**：流式消息、Markdown 渲染、思考过程折叠、代码高亮
+- **智能体切换**：从桌面端同步所有智能体，一键切换
+- **图片附件**：拍照/相册选图，自动压缩上传
+
+> 手机端依赖桌面端运行，所有 AI 计算和数据存储在桌面本地完成。
+
+```bash
+# 构建手机端（需要 Flutter SDK）
+cd mobile-flutter
+flutter pub get
+flutter run
+```
+
+---
+
 ## 📜 许可协议
 
 本项目采用 **个人使用与学习许可**，禁止商业用途。详见 [LICENSE](LICENSE)。

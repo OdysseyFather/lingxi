@@ -29,11 +29,12 @@ const ScheduledTasksPage = lazyRetry(() => import('../ScheduledTasksPage'));
 const WorkflowPage = lazyRetry(() => import('../WorkflowPage'));
 const NexusPage = lazyRetry(() => import('../nexus/NexusPage'));
 const EvolutionPage = lazyRetry(() => import('../EvolutionPage'));
+const DeepSearchPage = lazyRetry(() => import('../DeepSearchPage'));
 
 const LoginPage = lazyRetry(() => import('../LoginPage'));
 import EvolutionProgressPanel from './EvolutionProgressPanel';
 import { cn, isH5Mobile } from './cn';
-import { MessageSquare, Settings as SettingsIcon, Brain, BookOpen, MessageCircle, Plug, Sparkles, PanelLeftClose, PanelLeftOpen, Clock, Workflow, Globe, LogOut, User, UserPlus, Check, X, Dna, Menu, Plus } from 'lucide-react';
+import { MessageSquare, Settings as SettingsIcon, Brain, BookOpen, MessageCircle, Plug, Sparkles, PanelLeftClose, PanelLeftOpen, Clock, Workflow, Globe, LogOut, User, UserPlus, Check, X, Dna, Menu, Plus, Search } from 'lucide-react';
 import { api, wsClient } from '../api/client';
 
 const SHORTCUTS = [
@@ -109,6 +110,7 @@ const NAV_TABS = [
 
 // 右侧辅助导航（仅图标）
 const RIGHT_TABS = [
+  { id: 'search', label: '搜索', icon: Search },
   { id: 'nexus', label: 'Nexus', icon: Globe },
   { id: 'im', label: 'IM', icon: MessageCircle },
   { id: 'workflow', label: '工作流', icon: Workflow },
@@ -459,6 +461,7 @@ export function AppShell() {
   }
 
 
+
   const showSidebar = view === 'chat';
 
   return (
@@ -684,6 +687,11 @@ export function AppShell() {
             {view === 'evolution' && (
               <motion.div key="evolution" className="flex-1 overflow-auto scrollable bg-[color:var(--bg)] p-6" {...pageMotion}>
                 <EvolutionPage />
+              </motion.div>
+            )}
+            {view === 'search' && (
+              <motion.div key="search" className="flex-1 flex flex-col min-h-0" {...pageMotion}>
+                <DeepSearchPage />
               </motion.div>
             )}
           </AnimatePresence>

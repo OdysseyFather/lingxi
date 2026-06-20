@@ -32,10 +32,13 @@ type WecomConfig struct {
 
 // WecomConnector 实现企业微信 Webhook 回调机器人
 type WecomConnector struct {
-	cfg    WecomConfig
-	router gin.IRouter
-	cancel context.CancelFunc
+	cfg     WecomConfig
+	router  gin.IRouter
+	cancel  context.CancelFunc
+	agentID int64
 }
+
+func (w *WecomConnector) SetAgentID(id int64) { w.agentID = id }
 
 // wecomXMLMsg 企业微信推送的 XML 消息体
 type wecomXMLMsg struct {
@@ -157,6 +160,7 @@ func (w *WecomConnector) handleMessage(c *gin.Context) {
 		UserID:         msg.FromUserName,
 		ConversationID: msg.FromUserName,
 		Text:           msg.Content,
+		AgentID:        w.agentID,
 		BaseCfg:        w.cfg.BaseConfig,
 		ReplyFunc:      replyFunc,
 	}

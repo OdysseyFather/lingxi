@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  Link2, Plus, Pencil, Trash2, Power, PowerOff, Loader2, Info, Radio, Send, TestTube,
+  Link2, Plus, Pencil, Trash2, Power, PowerOff, Loader2, Info, Radio, Send, TestTube, Zap,
 } from 'lucide-react';
 import { Button, Card, Badge, Modal, Input, Select } from './ui/primitives';
 import { cn } from './ui/cn';
@@ -41,13 +41,16 @@ function ConnectorForm({ initial, onSave, onCancel, agents }) {
   const [agentId, setAgentId] = useState(initial?.agent_id || 0);
   const [fields, setFields] = useState(() => {
     if (initial?.parsedConfig) {
-      const { session_mode, session_ttl_hours, ...rest } = initial.parsedConfig;
+      const { session_mode, session_ttl_hours, streaming_enabled, streaming_card_title, streaming_flush_ms, ...rest } = initial.parsedConfig;
       return rest;
     }
     return {};
   });
   const [sessionMode, setSessionMode] = useState(initial?.parsedConfig?.session_mode || 'per_group');
   const [ttlHours, setTtlHours] = useState(initial?.parsedConfig?.session_ttl_hours ?? 24);
+  const [streamingEnabled, setStreamingEnabled] = useState(initial?.parsedConfig?.streaming_enabled ?? false);
+  const [streamingCardTitle, setStreamingCardTitle] = useState(initial?.parsedConfig?.streaming_card_title || '');
+  const [streamingFlushMs, setStreamingFlushMs] = useState(initial?.parsedConfig?.streaming_flush_ms ?? 80);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -61,9 +64,16 @@ function ConnectorForm({ initial, onSave, onCancel, agents }) {
     }
     setSaving(true);
     try {
-      const config = isWebhookOnly
+      let config = isWebhookOnly
         ? { ...fields }
         : { ...fields, session_mode: sessionMode, session_ttl_hours: Number(ttlHours) };
+      if (platform === 'feishu') {
+        config.streaming_enabled = streamingEnabled;
+        if (streamingEnabled) {
+          config.streaming_card_title = streamingCardTitle || '灵犀';
+          config.streaming_flush_ms = Number(streamingFlushMs) || 80;
+        }
+      }
       const r = await fetch('/api/im-connectors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -146,6 +156,47 @@ function ConnectorForm({ initial, onSave, onCancel, agents }) {
                 <label className="text-[11px] text-[color:var(--text-soft)] shrink-0">上下文有效期（小时）</label>
                 <Input type="number" min="0" max="720" className="w-16 text-xs" value={ttlHours} onChange={e => setTtlHours(e.target.value)} />
                 <span className="text-[10px] text-[color:var(--text-faint)]">0 表示永不重置</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {platform === 'feishu' && (
+          <div className="space-y-2 pt-1 border-t border-[color:var(--line)]">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Zap size={13} className="text-amber-500" />
+                <span className="text-[11px] font-medium text-[color:var(--text-soft)]">流式卡片回复</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStreamingEnabled(!streamingEnabled)}
+                className={cn(
+                  'relative w-9 h-5 rounded-full transition-colors duration-200',
+                  streamingEnabled ? 'bg-[color:var(--accent)]' : 'bg-[color:var(--line)]'
+                )}
+              >
+                <span className={cn(
+                  'absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200',
+                  streamingEnabled && 'translate-x-4'
+                )} />
+              </button>
+            </div>
+            {streamingEnabled && (
+              <div className="ml-5 space-y-1.5">
+                <div className="text-[10px] text-[color:var(--text-faint)] leading-relaxed">
+                  开启后 AI 回复将以飞书卡片形式逐字流式输出（打字机效果），需要飞书客户端 7.20+
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-[color:var(--text-faint)] mb-0.5 block">卡片标题</label>
+                    <Input className="text-xs" placeholder="灵犀" value={streamingCardTitle} onChange={e => setStreamingCardTitle(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-[color:var(--text-faint)] mb-0.5 block">推送间隔 (ms)</label>
+                    <Input type="number" className="text-xs w-full" min="50" max="500" value={streamingFlushMs} onChange={e => setStreamingFlushMs(e.target.value)} />
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -298,6 +349,9 @@ function ConnectorCard({ connector, onToggle, onEdit, onDelete }) {
           <div className="flex-1 min-w-0">
             <div className="font-medium">{connector.name || platform?.label || connector.platform}</div>
             <div className="flex items-center gap-1.5 mt-0.5">
+              {connector.decrypt_error && (
+                <Badge tone="destructive" title={connector.decrypt_error}>配置密钥失效</Badge>
+              )}
               {isWebhook && <Badge tone="default">Webhook</Badge>}
               {!isWebhook && connector.running ? (
                 <Badge tone="success"><Radio size={10} className="animate-pulse" /> 运行中</Badge>
@@ -337,6 +391,9 @@ function ConnectorCard({ connector, onToggle, onEdit, onDelete }) {
           <div className="flex gap-4 mt-3 pt-3 border-t border-[color:var(--line)] text-xs text-[color:var(--text-faint)]">
             <span>会话模式：{SESSION_MODES.find(m => m.value === (connector.parsedConfig?.session_mode || 'per_group'))?.label || '按群共享'}</span>
             <span>TTL：{connector.parsedConfig?.session_ttl_hours || 24}h</span>
+            {connector.platform === 'feishu' && connector.parsedConfig?.streaming_enabled && (
+              <span className="flex items-center gap-1 text-amber-500"><Zap size={10} /> 流式卡片</span>
+            )}
           </div>
         )}
       </Card>

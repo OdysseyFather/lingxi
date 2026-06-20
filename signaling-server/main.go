@@ -1,12 +1,18 @@
 package main
 
 import (
+	"crypto"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -730,6 +736,27 @@ func handleTunnelWebSocket(w http.ResponseWriter, r *http.Request, token, subPat
 		Data: json.RawMessage(openData),
 	})
 
+	// 启动 ping ticker 防止 NAT/防火墙超时断开隧道 WS
+	pingDone := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := mobileConn.WriteControl(
+					websocket.PingMessage, nil, time.Now().Add(5*time.Second),
+				); err != nil {
+					return
+				}
+			case <-twsConn.closeCh:
+				return
+			case <-pingDone:
+				return
+			}
+		}
+	}()
+
 	// 读取手机端发来的 WS 消息，转发给桌面端
 	for {
 		_, msgBytes, err := mobileConn.ReadMessage()
@@ -746,6 +773,7 @@ func handleTunnelWebSocket(w http.ResponseWriter, r *http.Request, token, subPat
 			Data: json.RawMessage(fwdData),
 		})
 	}
+	close(pingDone)
 }
 
 func base64Encode(data []byte) string {
@@ -761,6 +789,266 @@ func base64Decode(s string) ([]byte, error) {
 func handlePeers(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(hub.listOnlinePeers())
+}
+
+// ─── FCM 推送 ────────────────────────────────────────────────────
+
+// ─── FCM v1 API（OAuth2 Service Account） ───────────────────────────
+
+// fcmTokenCache 缓存 OAuth2 access token
+var fcmTokenCache struct {
+	mu          sync.Mutex
+	accessToken string
+	expiresAt   time.Time
+}
+
+// serviceAccountJSON 从环境变量解析 Firebase service account
+type serviceAccount struct {
+	Type         string `json:"type"`
+	ProjectID    string `json:"project_id"`
+	ClientEmail  string `json:"client_email"`
+	PrivateKey   string `json:"private_key"`
+	TokenURI     string `json:"token_uri"`
+}
+
+// base64urlEncode 不填充的 base64url 编码
+func base64urlEncode(data []byte) string {
+	return strings.TrimRight(base64.URLEncoding.EncodeToString(data), "=")
+}
+
+// getServiceAccount 从环境变量解析 Firebase service account
+// 优先使用 FCM_SERVICE_ACCOUNT_JSON（内联 JSON），回退到 FCM_SERVICE_ACCOUNT_FILE（文件路径）
+func getServiceAccount() (*serviceAccount, error) {
+	raw := os.Getenv("FCM_SERVICE_ACCOUNT_JSON")
+	if raw == "" {
+		path := os.Getenv("FCM_SERVICE_ACCOUNT_FILE")
+		if path != "" {
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("read service account file: %w", err)
+			}
+			raw = string(b)
+		}
+	}
+	if raw == "" {
+		return nil, fmt.Errorf("FCM_SERVICE_ACCOUNT_JSON or FCM_SERVICE_ACCOUNT_FILE not set")
+	}
+	var sa serviceAccount
+	if err := json.Unmarshal([]byte(raw), &sa); err != nil {
+		return nil, fmt.Errorf("parse service account: %w", err)
+	}
+	return &sa, nil
+}
+
+// signJWT 使用 RSA 私钥签名 JWT
+func signJWT(sa *serviceAccount) (string, error) {
+	now := time.Now()
+	header := base64urlEncode([]byte(`{"alg":"RS256","typ":"JWT"}`))
+
+	claims := map[string]interface{}{
+		"iss":   sa.ClientEmail,
+		"scope": "https://www.googleapis.com/auth/firebase.messaging",
+		"aud":   sa.TokenURI,
+		"iat":   now.Unix(),
+		"exp":   now.Add(3600 * time.Second).Unix(),
+	}
+	claimsJSON, _ := json.Marshal(claims)
+	payload := base64urlEncode(claimsJSON)
+
+	signingInput := header + "." + payload
+
+	// Firebase console 导出的 private_key 中 \n 可能是字面字符串而非换行符
+	privateKey := strings.ReplaceAll(sa.PrivateKey, "\\n", "\n")
+	block, _ := pem.Decode([]byte(privateKey))
+	if block == nil {
+		return "", fmt.Errorf("failed to decode PEM block")
+	}
+	key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return "", fmt.Errorf("parse private key: %w", err)
+	}
+	rsaKey, ok := key.(*rsa.PrivateKey)
+	if !ok {
+		return "", fmt.Errorf("not an RSA private key")
+	}
+
+	hashed := sha256.Sum256([]byte(signingInput))
+	sig, err := rsa.SignPKCS1v15(nil, rsaKey, crypto.SHA256, hashed[:])
+	if err != nil {
+		return "", fmt.Errorf("sign: %w", err)
+	}
+
+	return signingInput + "." + base64urlEncode(sig), nil
+}
+
+// getFCMAccessToken 获取或刷新 OAuth2 access token
+func getFCMAccessToken() (string, error) {
+	fcmTokenCache.mu.Lock()
+	defer fcmTokenCache.mu.Unlock()
+
+	if fcmTokenCache.accessToken != "" && time.Now().Before(fcmTokenCache.expiresAt.Add(-60*time.Second)) {
+		return fcmTokenCache.accessToken, nil
+	}
+
+	sa, err := getServiceAccount()
+	if err != nil {
+		return "", err
+	}
+
+	jwt, err := signJWT(sa)
+	if err != nil {
+		return "", err
+	}
+
+	tokenURI := sa.TokenURI
+	if tokenURI == "" {
+		tokenURI = "https://oauth2.googleapis.com/token"
+	}
+
+	resp, err := http.PostForm(tokenURI, url.Values{
+		"grant_type": {"urn:ietf:params:oauth:grant-type:jwt-bearer"},
+		"assertion":  {jwt},
+	})
+	if err != nil {
+		return "", fmt.Errorf("token request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var tokenResp struct {
+		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
+		TokenType   string `json:"token_type"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
+		return "", fmt.Errorf("decode token response: %w", err)
+	}
+	if tokenResp.AccessToken == "" {
+		return "", fmt.Errorf("empty access token, status=%d", resp.StatusCode)
+	}
+
+	fcmTokenCache.accessToken = tokenResp.AccessToken
+	fcmTokenCache.expiresAt = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
+
+	log.Printf("[fcm-v1] obtained access token, expires in %ds", tokenResp.ExpiresIn)
+	return tokenResp.AccessToken, nil
+}
+
+// sendFCMv1 使用 FCM HTTP v1 API 发送推送
+func sendFCMv1(projectID, accessToken, deviceToken, title, body string, data map[string]string) error {
+	msg := map[string]interface{}{
+		"message": map[string]interface{}{
+			"token": deviceToken,
+			"notification": map[string]string{
+				"title": title,
+				"body":  body,
+			},
+			"android": map[string]interface{}{
+				"priority": "high",
+				"notification": map[string]string{
+					"sound": "default",
+				},
+			},
+			"apns": map[string]interface{}{
+				"payload": map[string]interface{}{
+					"aps": map[string]interface{}{
+						"sound":            "default",
+						"content-available": 1,
+					},
+				},
+			},
+		},
+	}
+	if len(data) > 0 {
+		msg["message"].(map[string]interface{})["data"] = data
+	}
+
+	b, _ := json.Marshal(msg)
+	apiURL := fmt.Sprintf("https://fcm.googleapis.com/v1/projects/%s/messages:send", projectID)
+	req, _ := http.NewRequest("POST", apiURL, strings.NewReader(string(b)))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("[fcm-v1] send error: %v", err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		respBody, _ := io.ReadAll(resp.Body)
+		log.Printf("[fcm-v1] send failed status=%d body=%s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("fcm-v1 status %d", resp.StatusCode)
+	}
+	tokenPreview := deviceToken
+	if len(tokenPreview) > 12 {
+		tokenPreview = tokenPreview[:8] + "..." + tokenPreview[len(tokenPreview)-4:]
+	}
+	log.Printf("[fcm-v1] sent to token=%s", tokenPreview)
+	return nil
+}
+
+// handlePush 接收来自 PC 端的推送请求，转发到 FCM v1
+// POST /push
+// Header: Authorization: Bearer <pc_secret>
+// Body: { "tokens": ["fcm_token1", ...], "title": "...", "body": "...", "data": {...} }
+func handlePush(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	pcSecret := os.Getenv("PUSH_SECRET")
+	if pcSecret == "" {
+		http.Error(w, "push not configured", http.StatusServiceUnavailable)
+		return
+	}
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") || authHeader[7:] != pcSecret {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// FCM v1 API 需要 service account
+	accessToken, err := getFCMAccessToken()
+	if err != nil {
+		log.Printf("[push] FCM access token error: %v", err)
+		http.Error(w, "FCM not configured: "+err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+
+	sa, _ := getServiceAccount()
+	if sa == nil || sa.ProjectID == "" {
+		http.Error(w, "FCM project_id not found in service account", http.StatusServiceUnavailable)
+		return
+	}
+
+	var req struct {
+		Tokens []string          `json:"tokens"`
+		Title  string            `json:"title"`
+		Body   string            `json:"body"`
+		Data   map[string]string `json:"data"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	if len(req.Tokens) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"sent": 0})
+		return
+	}
+
+	sent := 0
+	for _, token := range req.Tokens {
+		if sendFCMv1(sa.ProjectID, accessToken, token, req.Title, req.Body, req.Data) == nil {
+			sent++
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"sent": sent, "total": len(req.Tokens)})
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -783,6 +1071,7 @@ func main() {
 	http.HandleFunc("/ws", handleWS)
 	http.HandleFunc("/api/peers", handlePeers)
 	http.HandleFunc("/health", handleHealth)
+	http.HandleFunc("/push", handlePush)
 	http.HandleFunc("/tunnel/", handleTunnelHTTP)
 
 	tlsCert := os.Getenv("TLS_CERT")

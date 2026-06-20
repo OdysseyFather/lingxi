@@ -18,14 +18,22 @@ type FeishuConfig struct {
 	BaseConfig
 	AppID     string `json:"app_id"`
 	AppSecret string `json:"app_secret"`
+
+	// 流式卡片配置
+	StreamingEnabled   bool   `json:"streaming_enabled"`    // 是否启用流式卡片
+	StreamingCardTitle string `json:"streaming_card_title"` // 卡片标题，默认"灵犀"
+	StreamingFlushMs   int    `json:"streaming_flush_ms"`   // 推送间隔毫秒，默认 80
 }
 
 // FeishuConnector 实现飞书 WebSocket 长连接机器人
 type FeishuConnector struct {
-	cfg    FeishuConfig
-	client *lark.Client
-	cancel context.CancelFunc
+	cfg     FeishuConfig
+	client  *lark.Client
+	cancel  context.CancelFunc
+	agentID int64
 }
+
+func (f *FeishuConnector) SetAgentID(id int64) { f.agentID = id }
 
 func NewFeishuConnector(configJSON string) (*FeishuConnector, error) {
 	cfg := FeishuConfig{BaseConfig: DefaultBaseConfig()}
@@ -90,7 +98,20 @@ func (f *FeishuConnector) onMessage(ctx context.Context, event *larkim.P2Message
 		return nil
 	}
 
-	slog.Debug("received message from", "value", senderID, "value", text)
+	slog.Info("[feishu] received message",
+		"sender", senderID,
+		"chat_id", chatID,
+		"msg_id", msgID,
+		"text", text,
+		"chat_type", func() string {
+			if msgData.ChatType != nil { return *msgData.ChatType }
+			return ""
+		}(),
+		"msg_type", func() string {
+			if msgData.MessageType != nil { return *msgData.MessageType }
+			return ""
+		}(),
+	)
 
 	replyFunc := func(reply string) error {
 		return f.sendReply(ctx, msgID, chatID, reply)
@@ -101,9 +122,18 @@ func (f *FeishuConnector) onMessage(ctx context.Context, event *larkim.P2Message
 		UserID:         senderID,
 		ConversationID: chatID,
 		Text:           text,
+		AgentID:        f.agentID,
 		BaseCfg:        f.cfg.BaseConfig,
 		ReplyFunc:      replyFunc,
 	}
+
+	// 启用流式卡片时，注入 StreamCallback 并立即发送思考提示
+	if f.cfg.StreamingEnabled {
+		sender := newFeishuStreamSender(f.cfg.AppID, f.cfg.AppSecret, chatID, msgID, f.cfg)
+		sender.SendAck()
+		msg.StreamCallback = sender.OnStreamCallback
+	}
+
 	// 飞书回调同样要求快速返回，Claude 调用异步执行
 	Dispatch(msg)
 	return nil

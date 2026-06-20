@@ -34,7 +34,7 @@ func (m *Manager) LoadFromDB() {
 	}
 	for _, c := range connectors {
 		if c.Enabled {
-			if err := m.Start(c.Platform, c.Config); err != nil {
+			if err := m.StartWithAgent(c.Platform, c.Config, c.AgentID); err != nil {
 				slog.Warn("[connector manager] start  error", "platform", c.Platform, "err", err)
 			}
 		}
@@ -43,6 +43,11 @@ func (m *Manager) LoadFromDB() {
 
 // Start 启动指定平台的连接器（已在运行则先停止再重启）
 func (m *Manager) Start(platform, configJSON string) error {
+	return m.StartWithAgent(platform, configJSON, 0)
+}
+
+// StartWithAgent 启动连接器并绑定智能体
+func (m *Manager) StartWithAgent(platform, configJSON string, agentID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -55,6 +60,11 @@ func (m *Manager) Start(platform, configJSON string) error {
 	conn, err := m.buildConnector(platform, configJSON)
 	if err != nil {
 		return err
+	}
+
+	// 注入 agentID 到连接器
+	if setter, ok := conn.(interface{ SetAgentID(int64) }); ok {
+		setter.SetAgentID(agentID)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

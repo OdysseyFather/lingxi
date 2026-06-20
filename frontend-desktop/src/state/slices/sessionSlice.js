@@ -4,65 +4,27 @@ export const createSessionSlice = (set, get) => ({
   sessions: [],
   activeSessionId: null,
   setActiveSession: async (id) => {
-    const isCoding = get().appMode === 'coding';
-
-    if (isCoding) {
-      // 切换会话前：如果当前有正在流式输出的内容，先把 liveBlocks 合并为 assistant 消息保留
-      const prevLive = get().codingLiveBlocks;
-      const prevStreaming = get().codingIsStreaming;
-      const prevSid = get().activeSessionId;
-      if (prevStreaming && prevLive.length > 0 && prevSid) {
-        const remaining = prevLive.filter((b) => b.text || b.type === 'tool');
-        if (remaining.length > 0) {
-          const partialMsg = {
-            id: -Date.now(),
-            session_id: prevSid,
-            role: 'assistant',
-            content: JSON.stringify(remaining),
-            created_at: new Date().toISOString(),
-          };
-          set({ codingMessages: [...get().codingMessages, partialMsg] });
-        }
-      }
-    }
-
     set({
       activeSessionId: id,
-      messages: [], liveBlocks: [], codingTasks: [], liveDiffs: [],
-      codingMessages: [], codingLiveBlocks: [],
-      codingIsStreaming: false, codingAgentState: 'IDLE',
-      codingPendingQuestions: [], codingCurrentQuestionIdx: 0,
-      codingAnswers: {}, codingQuestionsSubmitted: false,
-      subAgents: [],
+      messages: [], liveBlocks: [], liveDiffs: [],
     });
     if (id) {
       wsClient.subscribe(id);
       const msgs = await api.listMessages(id).catch(() => []);
-      if (isCoding) {
-        set({ codingMessages: msgs });
-      } else {
-        set({ messages: msgs });
-      }
+      set({ messages: msgs });
     }
   },
   refreshSessions: async () => {
     const agentId = get().activeAgentId;
-    const appMode = get().appMode;
-    const mode = appMode === 'coding' ? 'coding' : undefined;
-    const projectPath = appMode === 'coding' ? get().codingProjectPath : undefined;
-    const sessions = await api.listSessions(agentId, mode, projectPath || undefined).catch(() => []);
+    const sessions = await api.listSessions(agentId).catch(() => []);
     set({ sessions });
     return sessions;
   },
   createSession: async (titleOrPayload) => {
     const activeAgentId = get().activeAgentId || 0;
-    const appMode = get().appMode;
-    const mode = appMode === 'coding' ? 'coding' : '';
-    const projectPath = appMode === 'coding' ? (get().codingProjectPath || '') : '';
-    const permissionMode = appMode === 'coding' ? (get().codingPermissionMode || 'trust') : 'trust';
     const payload = typeof titleOrPayload === 'string'
-      ? { title: titleOrPayload || '新对话', agent_id: activeAgentId, mode, project_path: projectPath, permission_mode: permissionMode }
-      : { title: '新对话', agent_id: activeAgentId, mode, project_path: projectPath, permission_mode: permissionMode, ...(titleOrPayload || {}) };
+      ? { title: titleOrPayload || '新对话', agent_id: activeAgentId }
+      : { title: '新对话', agent_id: activeAgentId, ...(titleOrPayload || {}) };
     const r = await api.createSession(payload);
     await get().refreshSessions();
     await get().setActiveSession(r.id);
@@ -130,7 +92,7 @@ export const createSessionSlice = (set, get) => ({
   },
   setActiveAgent: async (agentId) => {
     localStorage.setItem('lingxi-active-agent', String(agentId));
-    set({ activeAgentId: agentId, activeSessionId: null, messages: [], liveBlocks: [], codingTasks: [], liveDiffs: [] });
+    set({ activeAgentId: agentId, activeSessionId: null, messages: [], liveBlocks: [], liveDiffs: [] });
     const sessions = await get().refreshSessions();
     if (sessions.length > 0) {
       await get().setActiveSession(sessions[0].id);

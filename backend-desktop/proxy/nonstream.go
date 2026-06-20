@@ -126,6 +126,12 @@ func TransformNonStreamResponse(oaiBody []byte, requestModel string) ([]byte, er
 	if resp.Usage != nil {
 		usage["input_tokens"] = resp.Usage.PromptTokens
 		usage["output_tokens"] = resp.Usage.CompletionTokens
+		if resp.Usage.PromptTokensDetails != nil {
+			usage["cache_read_input_tokens"] = resp.Usage.PromptTokensDetails.CachedTokens
+		}
+		if resp.Usage.CompletionTokensDetails != nil {
+			usage["output_tokens"] += resp.Usage.CompletionTokensDetails.ReasoningTokens
+		}
 	}
 
 	result := anthropicResponse{

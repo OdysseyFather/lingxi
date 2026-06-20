@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   BookOpen, Upload, Trash2, Eye, Loader2, CheckCircle2, AlertCircle,
   FileText, MessageCircle, BarChart3, X, FolderUp, Pencil, CheckSquare, Square, Plus, Settings2,
-  Search, Database, FolderSync, RefreshCw, Zap,
+  Search, Database, FolderSync, RefreshCw, Zap, Globe,
 } from 'lucide-react';
 import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, SkeletonCard } from './ui/primitives';
 import { cn } from './ui/cn';
@@ -58,6 +58,13 @@ export default function KnowledgePage() {
   const [showCatMgr, setShowCatMgr] = useState(false);
   const [newCatName, setNewCatName] = useState('');
 
+  // Web 导入状态
+  const [showWebImport, setShowWebImport] = useState(false);
+  const [webUrls, setWebUrls] = useState('');
+  const [webCategory, setWebCategory] = useState('docs');
+  const [webTags, setWebTags] = useState('');
+  const [webImporting, setWebImporting] = useState(false);
+  const [webResult, setWebResult] = useState(null);
   const CATEGORY_MAP = {
     ...DEFAULT_CATEGORY_MAP,
     ...Object.fromEntries(categories.map(c => [c.name, { label: c.name, icon: FileText }])),
@@ -80,6 +87,38 @@ export default function KnowledgePage() {
   };
 
   useEffect(() => { fetchItems(); fetchCategories(); }, []);
+
+  const handleWebImport = async () => {
+    const urls = webUrls.split('\n').map(u => u.trim()).filter(Boolean);
+    if (urls.length === 0) return;
+    setWebImporting(true);
+    setWebResult(null);
+    try {
+      if (urls.length === 1) {
+        const res = await fetch('/api/knowledge/from-url', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: urls[0], category: webCategory, tags: webTags || '[]' }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '导入失败');
+        setWebResult({ success: 1, total: 1, results: [{ url: urls[0], title: data.title }] });
+      } else {
+        const res = await fetch('/api/knowledge/from-urls', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ urls, category: webCategory, tags: webTags || '[]' }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '导入失败');
+        setWebResult(data);
+      }
+      fetchItems();
+    } catch (e) {
+      setWebResult({ error: e.message });
+    }
+    setWebImporting(false);
+  };
 
   const addCategory = async () => {
     if (!newCatName.trim()) return;
@@ -220,6 +259,7 @@ export default function KnowledgePage() {
         {[
           { id: 'list', label: `文件列表${items.length ? ` (${items.length})` : ''}`, icon: BookOpen },
           { id: 'upload', label: '上传文件', icon: Upload },
+          { id: 'web', label: '网页导入', icon: Globe },
           { id: 'search', label: '语义搜索', icon: Search },
           { id: 'index', label: '索引与监控', icon: Database },
         ].map(t => {
@@ -405,6 +445,63 @@ export default function KnowledgePage() {
 
       {activeTab === 'search' && <SemanticSearchPanel />}
       {activeTab === 'index' && <IndexManagementPanel />}
+
+      {activeTab === 'web' && (
+        <div className="max-w-xl">
+          <Card className="p-5 space-y-4">
+            <div>
+              <div className="font-medium mb-1 text-[color:var(--text)]">从网页导入知识</div>
+              <p className="text-xs text-[color:var(--text-soft)]">输入网页 URL，灵犀会自动抓取正文并导入知识库。每行一个 URL，最多 20 个。</p>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-[color:var(--text-soft)] mb-1 block">网页 URL</label>
+              <Textarea
+                value={webUrls}
+                onChange={(e) => setWebUrls(e.target.value)}
+                placeholder={"https://example.com/article\nhttps://blog.example.com/post"}
+                rows={4}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-xs font-medium text-[color:var(--text-soft)] mb-1 block">分类</label>
+                <Select value={webCategory} onChange={(e) => setWebCategory(e.target.value)}>
+                  <option value="docs">文档</option>
+                  <option value="qa">问答</option>
+                  <option value="data">数据</option>
+                  {categories.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                </Select>
+              </div>
+              <div>
+                <label className="text-xs font-medium text-[color:var(--text-soft)] mb-1 block">标签（可选）</label>
+                <Input value={webTags} onChange={(e) => setWebTags(e.target.value)} placeholder="用逗号分隔" />
+              </div>
+            </div>
+            <Button onClick={handleWebImport} disabled={webImporting || !webUrls.trim()}>
+              {webImporting ? <><Loader2 size={14} className="animate-spin mr-1" />导入中...</> : <><Globe size={14} className="mr-1" />开始导入</>}
+            </Button>
+
+            {webResult && (
+              <div className="mt-3 p-3 rounded-lg bg-[color:var(--bg-soft)] text-sm">
+                {webResult.error ? (
+                  <div className="text-red-500 flex items-center gap-1"><AlertCircle size={14} />{webResult.error}</div>
+                ) : (
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-1 text-[color:var(--accent)]">
+                      <CheckCircle2 size={14} />成功导入 {webResult.success}/{webResult.total} 篇
+                    </div>
+                    {webResult.results?.map((r, i) => (
+                      <div key={i} className="text-xs text-[color:var(--text-soft)] truncate">
+                        {r.error ? <span className="text-red-400">{r.url}: {r.error}</span> : <span>{r.title || r.url}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </Card>
+        </div>
+      )}
 
       <PreviewModal item={previewItem} onClose={() => setPreviewItem(null)} />
       <EditKnowledgeModal item={editItem} onClose={() => setEditItem(null)} onSaved={() => { setEditItem(null); fetchItems(); }} categories={categories} onChangeCategory={updateItemCategory} />

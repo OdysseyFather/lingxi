@@ -63,6 +63,8 @@ export const api = {
   forkSession: (id) => req('POST', `/api/sessions/${id}/fork`),
   listMessages: (id) => req('GET', `/api/sessions/${id}/messages`),
   setSessionAgent: (id, agent_id) => req('POST', `/api/sessions/${id}/agent`, { agent_id }),
+  getSessionTokenStats: (id) => req('GET', `/api/sessions/${id}/token-stats`),
+  summarizeSession: (id) => req('POST', `/api/sessions/${id}/summarize`),
 
   // messages
   updateMessage: (id, content) => req('PUT', `/api/messages/${id}`, { content }),
@@ -73,41 +75,6 @@ export const api = {
   abortChat: (sessionId) => req('POST', '/api/chat/abort', { sessionId: String(sessionId) }),
   restoreSession: (sessionId, messageId, workingDir, revertCode) =>
     req('POST', `/api/sessions/${sessionId}/restore`, { messageId, workingDir, revertCode }),
-
-  // coding chat (独立于通用 chat)
-  sendCodingChat: (payload) => req('POST', '/api/coding/chat', payload),
-  submitCodingAnswerBatch: (payload) => req('POST', '/api/coding/chat/answer-batch', payload),
-  submitCodingPermissionResponse: (payload) => req('POST', '/api/coding/chat/permission-response', payload),
-
-  // coding checkpoints
-  createCheckpoint: (sessionId, messageId) => req('POST', '/api/coding/checkpoint', { sessionId: String(sessionId), messageId }),
-  rollbackCheckpoint: (checkpointId) => req('POST', `/api/coding/rollback/${checkpointId}`),
-  listCheckpoints: (sessionId) => req('GET', `/api/coding/checkpoints/${sessionId}`),
-  getCheckpointFiles: (checkpointId) => req('GET', `/api/coding/checkpoint-files/${checkpointId}`),
-
-  // coding custom agents (sub-agent templates)
-  listCodingAgents: () => req('GET', '/api/coding/agents'),
-  saveCodingAgent: (agent) => req('POST', '/api/coding/agents', agent),
-  deleteCodingAgent: (id) => req('DELETE', `/api/coding/agents/${id}`),
-
-  // coding custom agents update
-  updateCodingAgent: (id, agent) => req('PUT', `/api/coding/agents/${id}`, agent),
-
-  // coding plugins
-  getCodingPlugins: () => req('GET', '/api/coding/plugins'),
-  saveCodingPlugins: (paths) => req('PUT', '/api/coding/plugins', { paths }),
-
-  // coding hooks config
-  getCodingHooksConfig: () => req('GET', '/api/coding/hooks-config'),
-  saveCodingHooksConfig: (config) => req('PUT', '/api/coding/hooks-config', config),
-
-  // coding prompt config
-  getCodingPromptConfig: () => req('GET', '/api/coding/prompt-config'),
-  saveCodingPromptConfig: (body) => req('PUT', '/api/coding/prompt-config', body),
-
-  // coding permission config
-  getCodingPermConfig: () => req('GET', '/api/coding/perm-config'),
-  saveCodingPermConfig: (config) => req('PUT', '/api/coding/perm-config', config),
 
   // providers + profiles
   listProviders: () => req('GET', '/api/providers'),
@@ -167,6 +134,8 @@ export const api = {
     if (!res.ok) throw new Error(data.error || '知识库上传失败');
     return data;
   },
+  importKnowledgeFromURL: (data) => req('POST', '/api/knowledge/from-url', data),
+  batchImportKnowledgeFromURLs: (data) => req('POST', '/api/knowledge/from-urls', data),
 
   // usage
   getUsage: (range = '7d') => req('GET', `/api/usage?range=${range}`),
@@ -295,14 +264,14 @@ export const api = {
   searchFileNames: (dirPath, query) =>
     req('GET', `/api/files/search-names?path=${encodeURIComponent(dirPath || '')}&query=${encodeURIComponent(query)}`),
 
-  // ── Coding 模式 ──────────────────────────────────────────────
-  getCodingChanges: (dirPath) => req('GET', `/api/coding/changes?path=${encodeURIComponent(dirPath || '')}`),
-  getCodingDiff: (dirPath, file) => req('GET', `/api/coding/diff?path=${encodeURIComponent(dirPath || '')}&file=${encodeURIComponent(file)}`),
-  getCodingBranch: (dirPath) => req('GET', `/api/coding/branch?path=${encodeURIComponent(dirPath || '')}`),
-
   // ── 数据备份 ─────────────────────────────────────────────────
   exportBackup: () => `${BASE}/api/backup/export`,
   healthCheck: () => req('GET', '/api/health'),
+
+  // ── 主动式 Agent ────────────────────────────────────────────
+  getProactiveConfig: () => req('GET', '/api/proactive/config'),
+  updateProactiveConfig: (config) => req('PUT', '/api/proactive/config', config),
+  triggerDigest: () => req('POST', '/api/proactive/trigger-digest'),
 
   // ── 批量技能导出 ──────────────────────────────────────────────
   batchExportSkills: (ids) => req('POST', '/api/skills/batch-export', { ids }),
@@ -343,6 +312,21 @@ export const api = {
   // ── H5 云端隧道 ───────────────────────────────────────────────
   enableH5Tunnel: (data) => req('POST', '/api/h5-tunnel/enable', data),
   getH5TunnelStatus: () => req('GET', '/api/h5-tunnel/status'),
+
+  // ── 手机 App 配对 ─────────────────────────────────────────────
+  pairInitiate: () => req('POST', '/api/pair/initiate'),
+  pairComplete: (data) => req('POST', '/api/pair/complete', data),
+  pairVerify: () => req('POST', '/api/pair/verify'),
+  listPairedDevices: () => req('GET', '/api/pair/devices'),
+  unpairDevice: (id) => req('DELETE', `/api/pair/devices/${id}`),
+  rotateDeviceToken: (id) => req('POST', `/api/pair/devices/${id}/rotate`),
+  registerPushToken: (id, data) => req('POST', `/api/pair/devices/${id}/push-token`, data),
+  revokeAllDevices: () => req('POST', '/api/pair/revoke-all'),
+
+  // 推送通知配置
+  getPushConfig: () => req('GET', '/api/push/config'),
+  setPushConfig: (data) => req('PUT', '/api/push/config', data),
+  testPush: () => req('POST', '/api/push/test'),
 };
 
 // ─── WebSocket ────────────────────────────────────────────────────

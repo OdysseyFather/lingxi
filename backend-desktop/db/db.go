@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"lingxi-agent/config"
+	"lingxi-agent/crypto"
 
 	_ "github.com/ncruces/go-sqlite3/driver"
 	_ "github.com/ncruces/go-sqlite3/embed"
@@ -580,19 +581,125 @@ func migrate() {
 		)`)
 		recordMigration(7, "coding_agents – custom sub-agent templates for Coding View")
 	}
+	if v < 8 {
+		migrateSecretsToAESGCM()
+		recordMigration(8, "encrypt secrets – AES-GCM encrypt im_connectors.config, oauth_configs.app_secret, kv push_secret")
+	}
 }
 
-// seedBuiltinAgent 插入内置「通用助理」agent（id=1）
+// migrateSecretsToAESGCM 加密所有明文存储的密钥（一次性迁移）
+// 注意：必须先收集所有待加密记录再关闭 rows，然后再执行 UPDATE，
+// 否则 SQLite 在 rows 迭代期间执行写操作会导致锁死。
+func migrateSecretsToAESGCM() {
+	var migrated int
+
+	type idVal struct {
+		id  int64
+		val string
+	}
+
+	// 1. im_connectors.config — 先收集再更新
+	var connectors []idVal
+	rows, err := DB.Query(`SELECT id, config FROM im_connectors WHERE config != '' AND config NOT LIKE 'enc:v1:%'`)
+	if err == nil {
+		for rows.Next() {
+			var item idVal
+			if rows.Scan(&item.id, &item.val) == nil {
+				connectors = append(connectors, item)
+			}
+		}
+		rows.Close()
+	}
+	for _, item := range connectors {
+		if encrypted, e := crypto.Encrypt(item.val); e == nil {
+			DB.Exec(`UPDATE im_connectors SET config=? WHERE id=?`, encrypted, item.id)
+			migrated++
+		}
+	}
+
+	// 2. oauth_configs.app_secret — 先收集再更新
+	var oauthConfigs []idVal
+	rows2, err := DB.Query(`SELECT id, app_secret FROM oauth_configs WHERE app_secret != '' AND app_secret NOT LIKE 'enc:v1:%'`)
+	if err == nil {
+		for rows2.Next() {
+			var item idVal
+			if rows2.Scan(&item.id, &item.val) == nil {
+				oauthConfigs = append(oauthConfigs, item)
+			}
+		}
+		rows2.Close()
+	}
+	for _, item := range oauthConfigs {
+		if encrypted, e := crypto.Encrypt(item.val); e == nil {
+			DB.Exec(`UPDATE oauth_configs SET app_secret=? WHERE id=?`, encrypted, item.id)
+			migrated++
+		}
+	}
+
+	// 3. kv_store push_secret
+	var pushSecret string
+	if DB.QueryRow(`SELECT value FROM kv_store WHERE key='push_secret' AND value != '' AND value NOT LIKE 'enc:v1:%'`).Scan(&pushSecret) == nil {
+		if encrypted, e := crypto.Encrypt(pushSecret); e == nil {
+			DB.Exec(`UPDATE kv_store SET value=? WHERE key='push_secret'`, encrypted)
+			migrated++
+		}
+	}
+
+	if migrated > 0 {
+		slog.Info("[migration-8] encrypted secrets", "count", migrated)
+	}
+}
+
+// seedBuiltinAgent 插入内置预置 Agent（幂等：仅当没有 builtin Agent 时才插入）
 func seedBuiltinAgent() {
 	var cnt int
 	DB.QueryRow(`SELECT COUNT(1) FROM agents WHERE builtin=1`).Scan(&cnt)
 	if cnt > 0 {
 		return
 	}
-	_, err := DB.Exec(`INSERT INTO agents (name, avatar, description, system_prompt, allow_all, builtin)
-		VALUES ('通用助理', '✦', '默认通用智能助理，开箱即用、无任何限制。', '', 1, 1)`)
-	if err != nil {
-		slog.Warn("seed builtin agent error", "err", err)
+
+	type seed struct {
+		name, avatar, desc, prompt string
+	}
+	seeds := []seed{
+		{
+			name:   "通用助理",
+			avatar: "✦",
+			desc:   "默认通用智能助理，开箱即用、无任何限制。",
+			prompt: "",
+		},
+		{
+			name:   "写作搭档",
+			avatar: "✍️",
+			desc:   "帮你润色文案、撰写邮件、创作内容，支持多种文体风格。",
+			prompt: "你是一位专业的中文写作助手。擅长润色、改写、续写各类文本。回答时注重文字的优美和逻辑性。根据用户需求调整风格（正式/活泼/学术/商务）。",
+		},
+		{
+			name:   "翻译专家",
+			avatar: "🌐",
+			desc:   "中英日韩多语言互译，保留原文语气和专业术语。",
+			prompt: "你是一位精通中、英、日、韩四种语言的翻译专家。翻译时保留原文的语气、风格和专业术语。如果用户没有指定目标语言，默认将中文翻译为英文、将外文翻译为中文。",
+		},
+		{
+			name:   "学习教练",
+			avatar: "🎓",
+			desc:   "用通俗易懂的方式解释复杂概念，帮你高效学习新知识。",
+			prompt: "你是一位耐心的学习教练。善于用类比、举例、分步讲解的方式帮助用户理解复杂概念。回答时先给出简短总结，再展开详细解释。鼓励用户提问。",
+		},
+		{
+			name:   "创意伙伴",
+			avatar: "💡",
+			desc:   "头脑风暴、创意发散、方案构思，激发你的灵感。",
+			prompt: "你是一位富有创造力的思维伙伴。擅长头脑风暴、发散思维、跨界联想。回答时提供多个不同角度的方案或创意，用简洁有力的方式表达。不要自我审查，大胆提出非常规想法。",
+		},
+	}
+
+	for _, s := range seeds {
+		_, err := DB.Exec(`INSERT INTO agents (name, avatar, description, system_prompt, allow_all, builtin) VALUES (?, ?, ?, ?, 1, 1)`,
+			s.name, s.avatar, s.desc, s.prompt)
+		if err != nil {
+			slog.Warn("seed builtin agent error", "name", s.name, "err", err)
+		}
 	}
 }
 
