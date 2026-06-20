@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'providers/app_state.dart';
+import 'providers/user_preferences.dart';
 import 'screens/pair_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/onboarding_screen.dart';
@@ -21,9 +22,20 @@ void main() async {
 
   _safeInitFirebase();
 
+  final prefs = UserPreferences();
+  await prefs.init();
+  // 应用通知开关到 PushService
+  PushService().notificationsEnabled = prefs.notifyEnabled;
+  prefs.addListener(() {
+    PushService().notificationsEnabled = prefs.notifyEnabled;
+  });
+
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => AppState()..init(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AppState()..init()),
+        ChangeNotifierProvider.value(value: prefs),
+      ],
       child: const LingxiApp(),
     ),
   );
@@ -62,11 +74,21 @@ class _LingxiAppState extends State<LingxiApp> {
 
   @override
   Widget build(BuildContext context) {
+    final prefs = context.watch<UserPreferences>();
     return MaterialApp(
       title: '灵犀',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.light(),
       darkTheme: AppTheme.dark(),
+      themeMode: prefs.themeMode,
+      builder: (context, child) {
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: TextScaler.linear(prefs.fontScale),
+          ),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       home: Consumer<AppState>(
         builder: (context, state, _) {
           if (!_onboardingChecked || state.connecting) {

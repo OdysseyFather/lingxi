@@ -16,6 +16,9 @@ class PushService {
   bool _firebaseAvailable = false;
   FirebaseMessaging? _messaging;
 
+  /// 通知开关（受 UserPreferences 控制）
+  bool notificationsEnabled = true;
+
   Function(int sessionId)? onNotificationTap;
 
   Future<void> init() async {
@@ -119,6 +122,7 @@ class PushService {
   }
 
   void _onForegroundMessage(RemoteMessage message) {
+    if (!notificationsEnabled) return;
     final notification = message.notification;
     if (notification == null) return;
 

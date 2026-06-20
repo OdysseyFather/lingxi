@@ -313,18 +313,64 @@ class AppState extends ChangeNotifier {
 
   // ── 消息 ────────────────────────────────────────────────────
 
+  /// 合并后端返回的消息列表与本地 optimistic 消息
+  ///
+  /// 修复 bug:done 事件后 1.5s 加载消息时,后端可能尚未持久化最新 assistant 消息,
+  /// 导致界面上消息瞬间消失再恢复。策略：
+  /// 1. 优先用后端数据
+  /// 2. 如果本地最后一条 assistant 消息的 ID 是本地时间戳（>= 2020-01-01 ms），
+  ///    且后端最新消息的尾部内容不包含本地消息的内容,则保留本地这条
+  List<Message> _mergeMessagesWithLocal(List<Message> fetched) {
+    if (_messages.isEmpty) return fetched;
+
+    // 找到本地最后一条 assistant 消息
+    Message? localLast;
+    for (int i = _messages.length - 1; i >= 0; i--) {
+      if (_messages[i].role == 'assistant') {
+        localLast = _messages[i];
+        break;
+      }
+    }
+    if (localLast == null) return fetched;
+
+    // 本地 optimistic 消息特征：ID 是 millisecondsSinceEpoch（很大的数）
+    // 服务器消息 ID 通常是自增整数（较小）
+    final isOptimistic = localLast.id > 1577808000000; // 2020-01-01 ms 阈值
+    if (!isOptimistic) return fetched;
+
+    // 检查后端是否已经返回了这条消息（内容前缀匹配）
+    final localPrefix = localLast.content.length > 50
+        ? localLast.content.substring(0, 50)
+        : localLast.content;
+
+    for (final m in fetched) {
+      if (m.role == 'assistant' && m.content.startsWith(localPrefix)) {
+        // 后端已持久化,使用后端版本
+        return fetched;
+      }
+    }
+
+    // 后端还没返回这条消息,保留本地版本附加到 fetched 末尾
+    return [...fetched, localLast];
+  }
+
   Future<void> loadMessages(int sessionId) async {
     try {
       // 默认加载最新 50 条
       final result = await apiClient.listMessagesPaged(sessionId, limit: 50);
-      _messages = (result['messages'] as List).map((j) => Message.fromJson(j)).toList();
+      final fetched = (result['messages'] as List).map((j) => Message.fromJson(j)).toList();
+
+      // 合并策略：如果本地有 optimistic assistant 消息（id 为时间戳，远大于服务器 id），
+      // 且后端返回的消息中没有匹配的最新 assistant 内容,则保留本地版本,避免消息瞬间消失。
+      _messages = _mergeMessagesWithLocal(fetched);
       _hasMoreMessages = result['has_more'] == true;
       notifyListeners();
     } catch (_) {
       // fallback: 无分页接口时走旧逻辑
       try {
         final data = await apiClient.listMessages(sessionId);
-        _messages = data.map((j) => Message.fromJson(j)).toList();
+        final fetched = data.map((j) => Message.fromJson(j)).toList();
+        _messages = _mergeMessagesWithLocal(fetched);
         _hasMoreMessages = false;
         notifyListeners();
       } catch (_) {}
@@ -642,10 +688,10 @@ class AppState extends ChangeNotifier {
         _streaming = false;
         _liveBlocks = [];
         notifyListeners();
-        // 延迟重载：给后端 1.5s 持久化时间，避免竞态导致消息消失
+        // 延迟重载：给后端 2s 持久化时间，使用合并策略避免竞态导致消息消失
         if (_activeSession != null) {
           final sid = _activeSession!.id;
-          Future.delayed(const Duration(milliseconds: 1500), () {
+          Future.delayed(const Duration(milliseconds: 2000), () {
             if (_activeSession?.id == sid && !_streaming) {
               loadMessages(sid);
             }

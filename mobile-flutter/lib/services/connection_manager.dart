@@ -28,6 +28,11 @@ class ConnectionManager {
   String get activeUrl => _mode == ConnectionMode.lan ? _lanUrl : _wanUrl;
   String get pairToken => _pairToken;
 
+  /// 手动触发重连
+  void reconnectNow() {
+    wsClient.reconnectNow();
+  }
+
   ConnectionManager({required this.apiClient, required this.wsClient});
 
   /// 从持久化中恢复配对信息
