@@ -98,10 +98,19 @@ lingxi-agent/
 │   │   ├── group_chat.go     # 群聊 HTTP API（创建/列表/发言/撤回/分页消息/邀请处理）
 │   │   ├── group_upload.go   # 群聊图片上传（POST /api/group-chats/upload）
 │   │   ├── agent_personality.go # Agent 群聊人格 CRUD（GET/PUT /api/agents/:id/personality）
-│   │   ├── coding_chat.go    # Coding 模式独立聊天 handler（POST /api/coding/chat + answer-batch）
-│   │   ├── coding_prompt.go  # Coding 专属 system prompt（纯编程助手，无身份伪装）
-│   │   ├── terminal.go       # PTY 终端 WebSocket handler（creack/pty）
 │   │   ├── pair_auth.go      # 手机配对认证中间件 + WS 一次性票据 + 配对 API
+│   │   ├── push_notify.go    # 推送通知（FCM v1 + /api/push/config + /api/push/test）
+│   │   ├── proactive.go      # 主动式 Agent（日报 + 未完成任务追踪 + 定时调度）
+│   │   ├── deep_search.go    # 深度联网搜索（DuckDuckGo + Wikipedia 多源 + LLM 综合 + SSE）
+│   │   ├── knowledge_web.go  # 网页知识采集（go-readability + 自动入库索引）
+│   │   ├── token_stats.go    # Token 水位 + 自动摘要压缩（/api/sessions/:id/token-stats + summarize）
+│   │   ├── terminal.go       # PTY 终端 WebSocket handler（creack/pty）
+│   │   ├── permission.go      # 权限分级（low/medium/high）配置 + 安全 hooks
+│   │   ├── pty_unix.go       # Unix PTY 实现
+│   │   ├── pty_windows.go    # Windows PTY 实现
+│   │   ├── quick_chat.go     # Spotlight 快捷对话
+│   │   ├── tasks.go          # 后台任务列表 + 删除
+│   │   ├── router_status.go  # 路由器状态查询
 │   │   └── ws_hub.go         # WebSocket Hub
 │   ├── connector/            # IM 平台对接（企微/钉钉/飞书，飞书支持流式卡片消息）
 │   ├── model/                # 数据模型
@@ -165,40 +174,11 @@ lingxi-agent/
 │   │   │   ├── MemoryPage.jsx     # 长期记忆管理
 │   │   │   ├── NexusSettingsPage.jsx # 网络与协作设置
 │   │   │   └── UsagePage.jsx       # 用量 + 预算预警
-│   │   ├── ModeSelector.jsx    # 启动模式选择页（灵犀 vs Coding）
-│   │   ├── code/              # 编程视图（Coding Agent，独立模式）
-│   │   │   ├── CodingShell.jsx      # 独立模式布局壳
-│   │   │   ├── CodingChatView.jsx   # 对话主视图（cc-haha 风格）
-│   │   │   ├── CodingComposer.jsx   # 输入栏（文件chip+模型选择器+Run/Stop）
-│   │   │   ├── CodingToolCard.jsx   # 工具调用卡片（颜色编码 + diff）
-│   │   │   ├── CodingIconBar.jsx    # 左侧极窄图标栏
-│   │   │   ├── CodingSidebar.jsx    # 左侧会话侧边栏
-│   │   │   ├── CodingTabBar.jsx     # 顶部多tab会话栏
-│   │   │   ├── AskQuestionBlock.jsx # Agent提问交互块
-│   │   │   ├── PermissionBlock.jsx  # 权限确认块
-│   │   │   ├── TaskTodoList.jsx     # Task Todo List面板
-│   │   │   ├── AgentTeamPanel.jsx   # Agent Teams协作面板
-│   │   │   ├── WorkspaceChanges.jsx # 右侧文件变更面板
-│   │   │   ├── DiffViewer.jsx       # Diff渲染组件
-│   │   │   ├── FileSidebar.jsx      # 文件树侧栏（暖色调 + 搜索过滤 + 拖拽引用）
-│   │   │   ├── AskQuestionWizard.jsx # 渐进式批量问题向导（逐个展示+汇总确认+一次性提交）
-│   │   │   ├── AgentsWindow.jsx     # Cursor 风格 Sub-agent 监控面板
-│   │   │   ├── TerminalPanel.jsx   # 集成终端面板（xterm.js + PTY WebSocket，多标签页）
-│   │   │   ├── CodingSettingsPage.jsx # Coding 专属设置页（独立于主界面）
-│   │   │   ├── CodingErrorBoundary.jsx # Coding View 专用 ErrorBoundary
-│   │   │   ├── WorkspacePanel.jsx  # 左侧工作空间面板（mini/expanded + 文件树/任务 tab）
-│   │   │   ├── AgentStatusCard.jsx # Agent 状态卡片（头像/名称/连接状态）
-│   │   │   ├── DrawerPanel.jsx     # 右侧抽屉面板（代码预览/Diff Review 多标签页）
-│   │   │   ├── AgentMessageCard.jsx # 分层消息卡片（思考/工具/正文/变更 四层）
-│   │   │   ├── DiffReviewView.jsx  # Diff 逐块审查（hunk 级 Accept/Reject）
-│   │   │   ├── PlanCard.jsx        # 可编辑任务计划（拖拽排序/新增/确认执行）
-│   │   │   ├── ModeSwitcher.jsx    # Normal/Plan/Think 模式切换器
-│   │   │   ├── PermissionSettingsPanel.jsx # 权限设置面板（trust/managed/strict）
-│   │   │   ├── RemoteAccessPanel.jsx # 远程接入配对码面板
-│   │   │   ├── MobileRemoteView.jsx # 手机 H5 远程查看/审批 UI
-│   │   │   ├── permissionConfig.js # 工具风险等级定义 + 自动审批逻辑
-│   │   │   ├── codingThemes.js    # 5 套 Coding 主题（CSS 变量体系）
-│   │   │   └── keyboardShortcuts.js # 全局快捷键定义
+│   │   ├── DeepSearchPage.jsx    # 深度搜索独立页（进度时间线 + 来源卡片 + 引用胶囊）
+│   │   ├── EvolutionPage.jsx      # 自我进化日志 + Recharts 可视化（AreaChart/PieChart）
+│   │   ├── ProactiveAgentPage.jsx # 主动式 Agent 配置页（日报 + 未完成任务追踪）
+│   │   ├── TokenWaterLevel.jsx    # Token 水位可视化组件
+│   │   ├── SessionTemplates.jsx   # 快速开始对话模板
 │   │   ├── nexus/            # Agent 间对话（Project Nexus）
 │   │   │   ├── NexusPage.jsx        # 双栏界面（左侧对话列表 + 右侧发现/对话视图，无联系人）
 │   │   │   ├── A2AConversationView.jsx # Agent 对话观察视图
@@ -210,7 +190,7 @@ lingxi-agent/
 │   │   ├── ui/AgentAvatar.jsx      # emoji / 图片头像统一组件
 │   │   ├── WorkflowPage.jsx        # 可视化工作流编排（拖拽节点式编辑器）
 │   │   ├── SkillsPage.jsx
-│   │   ├── KnowledgePage.jsx
+│   │   ├── KnowledgePage.jsx       # 知识库（含「网页导入」tab）
 │   │   ├── MCPPage.jsx
 │   │   ├── IMConnectorPage.jsx
 │   │   └── ScheduledTasksPage.jsx  # 定时任务管理
@@ -504,18 +484,23 @@ flutter build apk --debug      # Debug APK (~200MB)
 | GET | /api/dream/status | GetDreamStatus | 巩固运行状态 |
 | POST | /api/dream/trigger | TriggerDream | 手动触发记忆巩固 |
 | GET | /api/agents/:id/dream/history | GetAgentDreamHistory | 巩固历史日志 |
-| GET | /api/files/list | ListDirectory | 列出目录内容（Coding View 文件树） |
+| GET | /api/files/list | ListDirectory | 列出目录内容 |
 | GET | /api/files/read | ReadFileContent | 读取文件内容 |
-| PUT | /api/files/write | WriteFileContent | 写入文件内容（CodePreview 编辑保存） |
+| PUT | /api/files/write | WriteFileContent | 写入文件内容 |
 | GET | /api/files/project | GetProjectInfo | 获取项目信息 |
 | GET | /api/files/search | SearchFiles | 全局文件内容搜索（path+query+glob） |
 | GET | /api/files/search-names | SearchFileNames | 按文件名搜索 |
-| GET | /api/coding/changes | GetWorkspaceChanges | git status 文件变更列表 |
-| GET | /api/coding/diff | GetFileDiff | 文件 git diff |
-| GET | /api/coding/branch | GetGitBranch | 当前 git 分支 |
 | GET | /api/terminal/ws | TerminalWsHandler | PTY 终端 WebSocket（多标签页交互式 shell） |
-| POST | /api/coding/chat | CodingChat | Coding 模式独立聊天入口 |
-| POST | /api/coding/chat/answer-batch | CodingChatAnswerBatch | 批量问题答案提交 |
+| POST | /api/search/deep | DeepSearch | 深度联网搜索（SSE 流式 + DuckDuckGo + Wikipedia + LLM 综合） |
+| POST | /api/knowledge/from-url | KnowledgeFromURL | 网页知识采集（go-readability 提取 + 入库索引） |
+| GET | /api/sessions/:id/token-stats | GetTokenStats | 会话 Token 水位统计 |
+| POST | /api/sessions/:id/summarize | SummarizeSession | 自动摘要压缩长会话 |
+| GET | /api/proactive/config | GetProactiveConfig | 主动式 Agent 配置 |
+| PUT | /api/proactive/config | SetProactiveConfig | 更新主动式 Agent 配置 |
+| POST | /api/push/config | SetPushConfig | 配置 FCM 推送 |
+| POST | /api/push/test | TestPush | 测试推送 |
+| POST | /api/pair/init | PairInit | 手机配对初始化（生成 6 位码） |
+| POST | /api/pair/verify | PairVerify | 手机配对验证 |
 | GET | /api/health | HealthCheck | 结构化健康检查 |
 | GET | /api/backup/export | ExportBackup | 导出数据库备份 |
 | POST | /api/pair/initiate | PairInitiateHandler | 发起配对（返回 challenge+code+QR） |
@@ -668,6 +653,30 @@ xattr -cr "/Applications/灵犀.app"
 - **索引状态面板（已索引文档数/分块数/进度条/最后更新时间）**
 - **文件夹监控（fsnotify 自动检测变化 + 增量索引 + 监控目录管理 UI）**
 - **嵌入模型配置 UI（API 地址 + 模型名称）**
+- **网页知识采集（`POST /api/knowledge/from-url` + go-readability 提取正文 + 自动入库索引）**
+- **KnowledgePage 新增「网页导入」tab**
+
+### 主动式 Agent + 深度搜索 + Token 水位
+- **主动式 Agent（`backend-desktop/handler/proactive.go`）**
+  - 日报生成（每日总结当天会话要点主动推送）
+  - 未完成任务追踪（跨会话记忆未完成工作主动提醒）
+  - 定时调度（周期性自动执行，无需手动触发）
+  - 上下文感知（根据当前活跃窗口/浏览器自动调整建议）
+  - ProactiveAgentPage 配置页 + /api/proactive/config
+- **深度联网搜索（`backend-desktop/handler/deep_search.go`）**
+  - `/api/search/deep` SSE 流式接口
+  - 多源并发（DuckDuckGo + Wikipedia + 其他可扩展源）
+  - LLM 综合合并去重 + 提炼要点 + 生成摘要
+  - 引用追踪（每个结论标注来源 URL，可点击溯源）
+  - DeepSearchPage 前端（进度时间线 + 来源卡片 + 引用胶囊）
+  - `/search` 斜杠命令一键跳转深度搜索
+- **Token 水位 + 自动摘要压缩（`backend-desktop/handler/token_stats.go`）**
+  - 实时 Token 计数（input/output/cache/reasoning 全维度）
+  - 水位可视化（会话卡片 Token 进度条）
+  - 临近阈值自动摘要压缩历史消息
+  - 会话卡片预览（鼠标 hover 显示会话摘要）
+  - `/api/sessions/:id/token-stats` + `/api/sessions/:id/summarize`
+- **EvolutionPage Recharts 可视化**：AreaChart 进化趋势 + PieChart 类型/触发源分布
 
 ### 屏幕感知主动助手 + Screen Agent
 - **Spotlight 悬浮窗（Cmd+Shift+Space 全局唤出，alwaysOnTop 独立窗口）**
@@ -686,7 +695,7 @@ xattr -cr "/Applications/灵犀.app"
 ### UI/UX
 - 6 套主题（light/dark/midnight/cyber/aurora/cosmos）
 - AnimatePresence 页面切换动画
-- **顶部导航栏（主导航 6 项：对话/编程/智能体/技能/知识库/MCP + 辅助导航 5 项，layoutId 动画指示器）**
+- **顶部导航栏（主导航 5 项：对话/智能体/技能/知识库/MCP + 辅助导航：search/deep-search/evolution/proactive/nexus/im/workflow/scheduled/settings，layoutId 动画指示器）**
 - 会话重命名（双击编辑）+ **会话置顶**
 - **会话批量删除**
 - **会话批量导出（选中多个会话导出为 Markdown ZIP 包）**
@@ -761,6 +770,12 @@ xattr -cr "/Applications/灵犀.app"
 - **定时任务调度修复（Go 侧时间比较，15 秒检查间隔，时区兼容）**
 - **后台任务管理（GET /api/tasks、DELETE /api/tasks/:id）**
 - **挂起任务机制（Agent 向用户请求信息时挂起，前端提交后继续）**
+- **手机配对认证（pair_auth.go：6 位配对码 + WS 一次性票据 + /api/pair/init + /api/pair/verify + 加密 token 持久化）**
+- **推送通知（push_notify.go：FCM v1 + /api/push/config + /api/push/test + 客户端通知开关）**
+- **加密密钥（crypto/secret.go：safeStorage 本地加密，密钥永不离开设备）**
+- **飞书流式卡片消息（connector/feishu_streaming.go：CardKit v1 + 80ms flush + 交互按钮回调）**
+- **会话批量导出 ZIP（选中多个会话导出为 Markdown ZIP 包）**
+- **H5 公网云端隧道（HTTP+WebSocket 反向代理 + 微信浏览器兼容 + QR 扫码 + 6 位配对码）**
 
 ### 工程化改进
 - **结构化日志（log/slog JSON 格式，LOG_LEVEL 环境变量配置）**
@@ -776,6 +791,8 @@ xattr -cr "/Applications/灵犀.app"
 - **React.lazy 懒加载（非默认页按需加载）**
 - **Modal 焦点陷阱 + ARIA 无障碍**
 - **WS 流式 token 50ms 缓冲刷新（减少 React 重渲染）**
+- **后端自动化测试（api_extended_test.go + api_integration_test.go + ws_hub_test.go + pair_auth_test.go + cache_test.go + middleware_test.go，覆盖 WS 协议/配对认证/缓存/CORS）**
+- **OpenAI 协议代理 cache/reasoning token 透传修复**
 
 ### 灵犀 4 大功能改造（2026-05）
 - **定时任务时区 BUG 修复**：fmtTimeForSQLite 改为 UTC 写入 + scan 时统一 Local() 化，避免 next_run_at 永远在未来而永不触发
@@ -831,6 +848,38 @@ xattr -cr "/Applications/灵犀.app"
 - **定时任务页面重构**：渐变 Hero 卡片 + 4 格统计 + 任务卡片（智能体头像/倒计时/进度/hover 操作栏）+ 时间线风格执行记录
 - **用量统计增强**：费用趋势折线图 + 按智能体聚合（头像 + 占比进度条）+ 后端 GroupUsageByAgent / GroupUsageCostByDay + 双列布局
 - **Screen Agent 浏览器控制入口**：面板新增"浏览器"模式 tab + Playwright MCP 就绪状态 + 快捷操作
+
+### 移除 Coding View + 多模块大规模重做（v2026-06 大重做）
+- **移除 Coding View 全部模块**：删除 `backend-desktop/handler/coding.go / coding_chat.go / coding_agents.go / coding_prompt.go / checkpoint.go` + `frontend-desktop/src/code/` 整目录 + `frontend-desktop/src/state/slices/codingSlice.js / codingChatSlice.js` + `frontend-desktop/src/ModeSelector.jsx` + `electron/resources/sdk-runner/`
+- **主动式 Agent（proactive.go）**：日报 / 未完成任务追踪 / 定时调度 / 上下文感知主动建议
+- **Token 水位 + 自动摘要压缩（token_stats.go）**：实时 Token 计数 + 水位可视化 + 临近阈值自动摘要 + 会话卡片预览（`/api/sessions/:id/token-stats` + `/api/sessions/:id/summarize`）
+- **Web 知识采集（knowledge_web.go）**：`/api/knowledge/from-url` + go-readability 正文提取 + 自动入库索引
+- **深度联网搜索（deep_search.go）**：`/api/search/deep` SSE + DuckDuckGo + Wikipedia 多源并发 + LLM 综合 + 引用追踪（DeepSearchPage 前端 + `/search` 斜杠命令）
+- **Token 使用量透传修复**：OpenAI 协议代理 cache/reasoning token 透传
+- **飞书流式卡片消息（feishu_streaming.go）**：CardKit v1 + 80ms flush
+- **配对认证（pair_auth.go + pair_auth_test.go）**：6 位配对码 + WS 一次性票据 + `/api/pair/init` + `/api/pair/verify`
+- **推送通知（push_notify.go）**：FCM v1 + `/api/push/config` + `/api/push/test`
+- **加密模块（crypto/secret.go）**：safeStorage 本地加密，密钥永不离开设备
+- **会话批量导出 ZIP**：`489a9ad` 落地
+- **H5 公网云端隧道**：`6a99638` 落地
+- **Flutter 手机端深度重做（对标豆包/千问）**：
+  - ConversationTab 三段式首页（场景 6 宫格 + 卡片会话 + 底部新对话胶囊）
+  - DiscoverTab 分类横滑 + Hero Banner + 横滑 Agent 推荐 + 使用技巧
+  - ChatScreen Composer 浮起式胶囊 + Hero 欢迎页 + 渐变 ShaderMask
+  - 视觉系统升级：3 级阴影 + 6 种场景渐变 + 圆角统一 20px + 用户气泡品牌色渐变
+  - 8 项高级交互：打字机 / Hero 转场 / 交错动画 / 按压反馈 / 骨架屏 / 滚动视差 / 自定义刷新 / 光标呼吸
+  - Tab 懒加载（IndexedStack 动态构建）
+  - DeepSearchScreen + 发现页深度搜索入口
+  - 个性化设置（user_preferences.dart）：主题模式 / 字体大小 0.85x~1.5x / 通知 / 提示音 / 触感反馈 / 回车发送
+  - iOS 风格分组卡片设置页 + Agent 回复消失修复（_mergeMessagesWithLocal 合并策略 + 2s 延迟）
+- **EvolutionPage Recharts 可视化**：AreaChart 趋势 + PieChart 类型/触发源分布
+- **KnowledgePage 网页导入 tab**
+- **MessageList Empty 移动端 6 宫格场景入口**
+- **SessionTemplates 快速开始对话模板**
+
+---
+
+> **历史档案**：以下 Phase 5-22 是 Coding View 演进历史，**该功能已在 v2026-06 大重做中整体移除**。保留这些记录仅供追溯设计演进，不再代表当前代码状态。所有 `coding_*` 路由、`/code/` 目录、`codingSlice` 状态切片均已被删除。
 
 ### Coding View 全面重做（v2026-05 Phase 5）
 - **独立模式架构**：Coding View 提升为与灵犀主模式并肩的独立应用模式（`appMode: 'main' | 'coding'`），首次启动 ModeSelector 选择页，随时可切换
