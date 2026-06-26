@@ -151,16 +151,23 @@ func (w *WecomConnector) handleMessage(c *gin.Context) {
 
 	slog.Debug("received message from", "from_user_name", msg.FromUserName, "content", msg.Content)
 
+	// 检测 @所有人：企业微信 XML 没有专门字段，通过消息文本检测
+	isMentionAll := strings.Contains(msg.Content, "@所有人") || strings.Contains(msg.Content, "@all")
+
 	replyFunc := func(reply string) error {
 		return w.sendTextMsg(msg.FromUserName, reply)
 	}
 
+	// 企业微信 XML 消息中 FromUserName 是企业内的 userid
+	// 企微不直接提供群名/用户昵称，后续可通过通讯录 API 扩展
 	imMsg := IMMessage{
 		Platform:       "wecom",
 		UserID:         msg.FromUserName,
 		ConversationID: msg.FromUserName,
+		ConvType:       "private",
 		Text:           msg.Content,
 		AgentID:        w.agentID,
+		IsMentionAll:   isMentionAll,
 		BaseCfg:        w.cfg.BaseConfig,
 		ReplyFunc:      replyFunc,
 	}

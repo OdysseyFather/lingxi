@@ -327,6 +327,125 @@ export const api = {
   getPushConfig: () => req('GET', '/api/push/config'),
   setPushConfig: (data) => req('PUT', '/api/push/config', data),
   testPush: () => req('POST', '/api/push/test'),
+
+  // ── Bundle 导出/导入 ─────────────────────────────────────────
+  exportAgentBundleUrl: (id) => `/api/agents/${id}/export-bundle`,
+  importAgentBundle: async (file) => {
+    const form = new FormData();
+    form.append('bundle', file);
+    const res = await fetch('/api/agents/import-bundle', { method: 'POST', credentials: 'include', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '导入失败');
+    return data;
+  },
+};
+
+// ─── 灵犀社区平台 API ────────────────────────────────────────────────
+// 默认连接 http://localhost:8090（用户可配置）
+// 通过 localStorage.lingxi_community_url 切换服务器
+function getCommunityBase() {
+  if (typeof localStorage !== 'undefined' && localStorage.lingxi_community_url) {
+    return localStorage.lingxi_community_url;
+  }
+  return 'http://localhost:8090';
+}
+
+function communityHeaders() {
+  const token = (typeof localStorage !== 'undefined' && localStorage.lingxi_community_token) || '';
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': token ? `Bearer ${token}` : '',
+  };
+}
+
+async function communityReq(method, path, body) {
+  const opts = {
+    method,
+    headers: communityHeaders(),
+  };
+  if (body !== undefined && body !== null) opts.body = JSON.stringify(body);
+  const res = await fetch(getCommunityBase() + path, opts);
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+  if (!res.ok) {
+    const errMsg = data.error || `HTTP ${res.status}`;
+    const err = new Error(errMsg);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+export const community = {
+  // ── 认证 ──────────────────────────────────────────────────────
+  registerAnon: () => communityReq('POST', '/community/auth/anon'),
+  getMe: () => communityReq('GET', '/community/auth/me'),
+  updateMe: (data) => communityReq('PUT', '/community/auth/me', data),
+  isLoggedIn: () => !!(typeof localStorage !== 'undefined' && localStorage.lingxi_community_token),
+
+  // ── Agent 浏览 ────────────────────────────────────────────────
+  listAgents: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return communityReq('GET', `/community/agents${qs ? '?' + qs : ''}`);
+  },
+  getAgent: (id) => communityReq('GET', `/community/agents/${id}`),
+  getLeaderboard: (kind = 'hot', limit = 20) =>
+    communityReq('GET', `/community/leaderboard?kind=${kind}&limit=${limit}`),
+  downloadBundleUrl: (id) => `${getCommunityBase()}/community/agents/${id}/bundle`,
+
+  // ── Agent 发布 ────────────────────────────────────────────────
+  publishAgent: async (formData) => {
+    // multipart 不带 Content-Type 让浏览器自动设置 boundary
+    const token = (typeof localStorage !== 'undefined' && localStorage.lingxi_community_token) || '';
+    const res = await fetch(getCommunityBase() + '/community/agents', {
+      method: 'POST',
+      headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '发布失败');
+    return data;
+  },
+  updateAgent: (id, data) => communityReq('PUT', `/community/agents/${id}`, data),
+  deleteAgent: (id) => communityReq('DELETE', `/community/agents/${id}`),
+  listMyAgents: () => communityReq('GET', '/community/agents/mine'),
+
+  // ── 评分 ──────────────────────────────────────────────────────
+  rateAgent: (id, score, review = '') =>
+    communityReq('POST', `/community/agents/${id}/rate`, { score, review }),
+  listRatings: (id) => communityReq('GET', `/community/agents/${id}/ratings`),
+
+  // ── 评论 ──────────────────────────────────────────────────────
+  createComment: (agentId, content, parentId = null) =>
+    communityReq('POST', `/community/agents/${agentId}/comments`, { content, parent_id: parentId }),
+  listComments: (agentId) => communityReq('GET', `/community/agents/${agentId}/comments`),
+  deleteComment: (id) => communityReq('DELETE', `/community/comments/${id}`),
+
+  // ── 用户/关注 ──────────────────────────────────────────────────
+  getUser: (id) => communityReq('GET', `/community/users/${id}`),
+  followUser: (id) => communityReq('POST', `/community/users/${id}/follow`),
+  unfollowUser: (id) => communityReq('DELETE', `/community/users/${id}/follow`),
+  listFollowing: (id) => communityReq('GET', `/community/users/${id}/following`),
+  listFollowers: (id) => communityReq('GET', `/community/users/${id}/followers`),
+
+  // ── 邀请码 ────────────────────────────────────────────────────
+  createInvocation: (agentId, dailyLimit = 50, expiresAt = null) =>
+    communityReq('POST', `/community/agents/${agentId}/invocations`, {
+      daily_limit: dailyLimit,
+      expires_at: expiresAt,
+    }),
+  listAgentInvocations: (agentId) =>
+    communityReq('GET', `/community/agents/${agentId}/invocations`),
+  listMyInvocations: () => communityReq('GET', '/community/invocations/mine'),
+  toggleInvocation: (code, isActive) =>
+    communityReq('POST', `/community/invocations/${code}/toggle`, { is_active: isActive }),
+  deleteInvocation: (code) => communityReq('DELETE', `/community/invocations/${code}`),
+  getInvocationInfo: (code) => communityReq('GET', `/community/invocations/${code}`),
+  invokeAgent: (code, payload) =>
+    communityReq('POST', `/community/invocations/${code}/invoke`, payload),
+  listInvocationLogs: () => communityReq('GET', '/community/invocations/logs/mine'),
 };
 
 // ─── WebSocket ────────────────────────────────────────────────────

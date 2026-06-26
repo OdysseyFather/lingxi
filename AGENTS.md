@@ -761,7 +761,7 @@ xattr -cr "/Applications/灵犀.app"
 - **自动获取可用模型列表**（POST /api/api-profiles/fetch-models，输入 API key 后自动查询供应商 /models 端点，返回可用模型列表供用户选择）
 - **供应商预设配置**（内置 DeepSeek/Qwen/GLM/Moonshot/Doubao 等供应商的 base_url 和推荐模型列表，减少用户手动配置错误）
 - MCP 工具管理（stdio/SSE/HTTP）+ 配置导出
-- IM 集成（企业微信/钉钉/飞书）
+- IM 集成（企业微信/钉钉/飞书，支持 @所有人 消息过滤配置）
 - **Windows 构建支持（NSIS 安装包 + Portable）**
 - **OpenAI 兼容模型技能识别增强（自动注入已安装技能清单到 system prompt）**
 - **防死循环保护（禁止调用 Cursor 专有工具，避免 tool_use 循环）**

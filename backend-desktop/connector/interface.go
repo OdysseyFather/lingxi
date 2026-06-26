@@ -37,6 +37,8 @@ type BaseConfig struct {
 	SessionMode SessionMode `json:"session_mode"`
 	// SessionTTLHours 不活跃多少小时后自动开启新 session，0 表示永不重置，默认 24
 	SessionTTLHours int `json:"session_ttl_hours"`
+	// ReplyToMentionAll 是否回复 @所有人 的消息，默认 false（不回复）
+	ReplyToMentionAll bool `json:"reply_to_mention_all"`
 	// AgentID 绑定的智能体 ID（从 im_connectors.agent_id 注入，不在 JSON 配置中）
 	AgentID int64 `json:"-"`
 }
@@ -53,9 +55,13 @@ func DefaultBaseConfig() BaseConfig {
 type IMMessage struct {
 	Platform       string // "dingtalk" | "feishu" | "wecom"
 	UserID         string // 发送者 ID
+	UserName       string // 发送者昵称（可选，部分平台可获取）
 	ConversationID string // 会话/群 ID（用于区分多用户上下文）
+	ConvTitle      string // 群名/会话标题（可选，部分平台可获取）
+	ConvType       string // 会话类型："group"=群聊, "private"=私聊, ""=未知
 	Text           string // 消息正文
 	AgentID        int64  // 绑定的智能体 ID（来自 IM 连接器配置）
+	IsMentionAll   bool   // 是否为 @所有人 触发（非 @机器人）
 	BaseCfg        BaseConfig
 	// ReplyFunc 由各平台连接器实现，dispatcher 调用它发送回复（一次性完整回复）
 	ReplyFunc func(text string) error

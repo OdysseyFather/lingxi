@@ -317,9 +317,10 @@ class AppState extends ChangeNotifier {
   ///
   /// 修复 bug:done 事件后 1.5s 加载消息时,后端可能尚未持久化最新 assistant 消息,
   /// 导致界面上消息瞬间消失再恢复。策略：
-  /// 1. 优先用后端数据
-  /// 2. 如果本地最后一条 assistant 消息的 ID 是本地时间戳（>= 2020-01-01 ms），
-  ///    且后端最新消息的尾部内容不包含本地消息的内容,则保留本地这条
+  /// 合并策略：done 事件后后端必然已持久化 assistant 消息，
+  /// 只要 fetched 包含 assistant 消息就用 fetched 替换本地 optimistic 版本，
+  /// 避免本地纯文本 content 与后端 blocks JSON content 无法匹配导致重复显示。
+  /// 仅当后端还没返回 assistant 消息时才保留本地版本（网络延迟兜底）。
   List<Message> _mergeMessagesWithLocal(List<Message> fetched) {
     if (_messages.isEmpty) return fetched;
 
@@ -338,19 +339,14 @@ class AppState extends ChangeNotifier {
     final isOptimistic = localLast.id > 1577808000000; // 2020-01-01 ms 阈值
     if (!isOptimistic) return fetched;
 
-    // 检查后端是否已经返回了这条消息（内容前缀匹配）
-    final localPrefix = localLast.content.length > 50
-        ? localLast.content.substring(0, 50)
-        : localLast.content;
-
-    for (final m in fetched) {
-      if (m.role == 'assistant' && m.content.startsWith(localPrefix)) {
-        // 后端已持久化,使用后端版本
-        return fetched;
-      }
+    // 后端只要返回了任何 assistant 消息，就认为已持久化完成，直接用 fetched
+    // （本地 optimistic 只是过渡显示，done 事件后后端必然已写入）
+    final hasAssistant = fetched.any((m) => m.role == 'assistant');
+    if (hasAssistant) {
+      return fetched;
     }
 
-    // 后端还没返回这条消息,保留本地版本附加到 fetched 末尾
+    // 后端还没返回 assistant 消息（罕见，可能持久化延迟），保留本地版本避免消息瞬间消失
     return [...fetched, localLast];
   }
 

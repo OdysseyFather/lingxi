@@ -84,6 +84,13 @@ func Dispatch(msg IMMessage) {
 		return
 	}
 
+	// @所有人 消息过滤：如果配置不回复 @所有人 且当前消息为 @所有人 触发，则静默丢弃
+	if msg.IsMentionAll && !msg.BaseCfg.ReplyToMentionAll {
+		slog.Info("[dispatch] skipping @all message (reply_to_mention_all=false)",
+			"platform", msg.Platform, "user", msg.UserID, "conv", msg.ConversationID)
+		return
+	}
+
 	cfg := msg.BaseCfg
 	if cfg.SessionMode == "" {
 		cfg.SessionMode = SessionModePerGroup
@@ -125,6 +132,9 @@ func Dispatch(msg IMMessage) {
 			cfg.SessionTTLHours = 24
 		}
 
+		// 构建 IM 来源上下文，注入到用户消息前面
+		messageText := buildIMContextPrefix(msg) + msg.Text
+
 		slog.Info("dispatch platform= mode= scope", "platform", msg.Platform, "session_mode", cfg.SessionMode, "value", scopeKey)
 
 		var sessionID int64
@@ -147,7 +157,7 @@ func Dispatch(msg IMMessage) {
 
 			if msg.StreamCallback != nil && runClaudeStreamCtxExt != nil {
 				// 扩展路径：thinking/tool/text 全部透传
-				_, streamErr = runClaudeStreamCtxExt(ctx, msg.Text, sessionID, func(kind StreamKind, payload string, done bool) {
+				_, streamErr = runClaudeStreamCtxExt(ctx, messageText, sessionID, func(kind StreamKind, payload string, done bool) {
 					if ctx.Err() != nil {
 						return
 					}
@@ -172,10 +182,10 @@ func Dispatch(msg IMMessage) {
 					}
 				}
 
-				if runClaudeStreamCtx != nil {
-					_, streamErr = runClaudeStreamCtx(ctx, msg.Text, sessionID, onChunk)
-				} else if runClaudeStream != nil {
-					_, streamErr = runClaudeStream(msg.Text, sessionID, onChunk)
+			if runClaudeStreamCtx != nil {
+				_, streamErr = runClaudeStreamCtx(ctx, messageText, sessionID, onChunk)
+			} else if runClaudeStream != nil {
+				_, streamErr = runClaudeStream(messageText, sessionID, onChunk)
 				}
 			}
 
@@ -192,8 +202,9 @@ func Dispatch(msg IMMessage) {
 		}
 
 		// 非流式路径
+		var finalReply string
 		if runClaudeCtx != nil {
-			reply, _, err := runClaudeCtx(ctx, msg.Text, sessionID)
+			reply, _, err := runClaudeCtx(ctx, messageText, sessionID)
 			if err != nil {
 				if ctx.Err() != nil {
 					slog.Info("[dispatch] task cancelled", "scope", scopeKey)
@@ -208,17 +219,17 @@ func Dispatch(msg IMMessage) {
 			if ctx.Err() != nil {
 				return
 			}
-			reply = filterStateMarkers(reply)
-			if reply == "" {
-				reply = "好的，已处理完成。"
+			finalReply = filterStateMarkers(reply)
+			if finalReply == "" {
+				finalReply = "好的，已处理完成。"
 			}
 			if msg.ReplyFunc != nil {
-				if err := msg.ReplyFunc(reply); err != nil {
+				if err := msg.ReplyFunc(finalReply); err != nil {
 					slog.Warn("ReplyFunc error", "err", err)
 				}
 			}
 		} else {
-			reply, _, err := runClaude(msg.Text, sessionID)
+			reply, _, err := runClaude(messageText, sessionID)
 			if err != nil {
 				slog.Warn("RunClaudeSync error", "err", err)
 				if msg.ReplyFunc != nil {
@@ -229,12 +240,12 @@ func Dispatch(msg IMMessage) {
 			if ctx.Err() != nil {
 				return
 			}
-			reply = filterStateMarkers(reply)
-			if reply == "" {
-				reply = "好的，已处理完成。"
+			finalReply = filterStateMarkers(reply)
+			if finalReply == "" {
+				finalReply = "好的，已处理完成。"
 			}
 			if msg.ReplyFunc != nil {
-				if err := msg.ReplyFunc(reply); err != nil {
+				if err := msg.ReplyFunc(finalReply); err != nil {
 					slog.Warn("ReplyFunc error", "err", err)
 				}
 			}
@@ -268,6 +279,56 @@ func buildSessionTitle(msg IMMessage) string {
 		return string(runes[:30]) + "…"
 	}
 	return title
+}
+
+// buildIMContextPrefix 构建 IM 消息来源上下文前缀，注入到用户消息前面。
+// AI 可以据此知道消息来自哪个平台、哪个群、谁发送的。
+func buildIMContextPrefix(msg IMMessage) string {
+	var parts []string
+
+	// 平台名称映射
+	platformName := msg.Platform
+	switch msg.Platform {
+	case "dingtalk":
+		platformName = "钉钉"
+	case "feishu":
+		platformName = "飞书"
+	case "wecom":
+		platformName = "企业微信"
+	}
+	parts = append(parts, "平台: "+platformName)
+
+	// 会话类型
+	switch msg.ConvType {
+	case "group":
+		parts = append(parts, "消息类型: 群聊消息")
+	case "private":
+		parts = append(parts, "消息类型: 私聊消息")
+	}
+
+	// 群名
+	if msg.ConvTitle != "" {
+		parts = append(parts, "群名: "+msg.ConvTitle)
+	}
+
+	// 群/会话 ID
+	if msg.ConversationID != "" {
+		parts = append(parts, "会话ID: "+msg.ConversationID)
+	}
+
+	// 发送者
+	if msg.UserName != "" {
+		parts = append(parts, "发送者: "+msg.UserName)
+	}
+	if msg.UserID != "" {
+		parts = append(parts, "发送者ID: "+msg.UserID)
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return "[IM消息来源] " + strings.Join(parts, " | ") + "\n\n"
 }
 
 // filterStateMarkers 移除 AI 输出中的内部状态标记 JSON 片段

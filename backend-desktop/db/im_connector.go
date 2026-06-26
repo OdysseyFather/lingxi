@@ -146,9 +146,11 @@ func GetOrCreateIMSession(platform, scopeKey, title string, ttlHours int, agentI
 		}
 		if !expired {
 			DB.Exec(`UPDATE im_sessions SET last_active=CURRENT_TIMESTAMP WHERE platform=? AND scope_key=?`, platform, scopeKey)
-			// 确保已有会话也绑定了正确的智能体
+			// 强制同步 IMConnector 配置的 agent_id 到 session
+			// 之前用 COALESCE(agent_id,0)=0 条件导致切换绑定 agent 后旧 session 不更新，
+			// runner 反查 sessions.agent_id 拿到旧值，system_prompt 不注入
 			if len(agentID) > 0 && agentID[0] > 0 {
-				DB.Exec(`UPDATE sessions SET agent_id=? WHERE id=? AND COALESCE(agent_id,0)=0`, agentID[0], sessionID)
+				DB.Exec(`UPDATE sessions SET agent_id=? WHERE id=?`, agentID[0], sessionID)
 			}
 			return sessionID, nil
 		}

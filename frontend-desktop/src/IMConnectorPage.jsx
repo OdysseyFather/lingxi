@@ -41,13 +41,14 @@ function ConnectorForm({ initial, onSave, onCancel, agents }) {
   const [agentId, setAgentId] = useState(initial?.agent_id || 0);
   const [fields, setFields] = useState(() => {
     if (initial?.parsedConfig) {
-      const { session_mode, session_ttl_hours, streaming_enabled, streaming_card_title, streaming_flush_ms, ...rest } = initial.parsedConfig;
+      const { session_mode, session_ttl_hours, reply_to_mention_all, streaming_enabled, streaming_card_title, streaming_flush_ms, ...rest } = initial.parsedConfig;
       return rest;
     }
     return {};
   });
   const [sessionMode, setSessionMode] = useState(initial?.parsedConfig?.session_mode || 'per_group');
   const [ttlHours, setTtlHours] = useState(initial?.parsedConfig?.session_ttl_hours ?? 24);
+  const [replyToMentionAll, setReplyToMentionAll] = useState(initial?.parsedConfig?.reply_to_mention_all ?? false);
   const [streamingEnabled, setStreamingEnabled] = useState(initial?.parsedConfig?.streaming_enabled ?? false);
   const [streamingCardTitle, setStreamingCardTitle] = useState(initial?.parsedConfig?.streaming_card_title || '');
   const [streamingFlushMs, setStreamingFlushMs] = useState(initial?.parsedConfig?.streaming_flush_ms ?? 80);
@@ -66,7 +67,7 @@ function ConnectorForm({ initial, onSave, onCancel, agents }) {
     try {
       let config = isWebhookOnly
         ? { ...fields }
-        : { ...fields, session_mode: sessionMode, session_ttl_hours: Number(ttlHours) };
+        : { ...fields, session_mode: sessionMode, session_ttl_hours: Number(ttlHours), reply_to_mention_all: replyToMentionAll };
       if (platform === 'feishu') {
         config.streaming_enabled = streamingEnabled;
         if (streamingEnabled) {
@@ -158,6 +159,30 @@ function ConnectorForm({ initial, onSave, onCancel, agents }) {
                 <span className="text-[10px] text-[color:var(--text-faint)]">0 表示永不重置</span>
               </div>
             )}
+          </div>
+        )}
+
+        {!isWebhookOnly && (
+          <div className="flex items-center justify-between pt-1">
+            <div>
+              <div className="text-[11px] font-medium text-[color:var(--text-soft)]">@所有人 时是否回复</div>
+              <div className="text-[10px] text-[color:var(--text-faint)] leading-relaxed mt-0.5">
+                关闭时，群内 @所有人 的消息不会触发 AI 回复，仅 @机器人 时才响应
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setReplyToMentionAll(!replyToMentionAll)}
+              className={cn(
+                'relative w-9 h-5 rounded-full transition-colors duration-200 shrink-0 ml-3',
+                replyToMentionAll ? 'bg-[color:var(--accent)]' : 'bg-[color:var(--line)]'
+              )}
+            >
+              <span className={cn(
+                'absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200',
+                replyToMentionAll && 'translate-x-4'
+              )} />
+            </button>
           </div>
         )}
 
@@ -391,6 +416,7 @@ function ConnectorCard({ connector, onToggle, onEdit, onDelete }) {
           <div className="flex gap-4 mt-3 pt-3 border-t border-[color:var(--line)] text-xs text-[color:var(--text-faint)]">
             <span>会话模式：{SESSION_MODES.find(m => m.value === (connector.parsedConfig?.session_mode || 'per_group'))?.label || '按群共享'}</span>
             <span>TTL：{connector.parsedConfig?.session_ttl_hours || 24}h</span>
+            <span>@所有人：{connector.parsedConfig?.reply_to_mention_all ? '回复' : '忽略'}</span>
             {connector.platform === 'feishu' && connector.parsedConfig?.streaming_enabled && (
               <span className="flex items-center gap-1 text-amber-500"><Zap size={10} /> 流式卡片</span>
             )}

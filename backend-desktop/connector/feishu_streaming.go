@@ -85,22 +85,21 @@ type feishuStreamSender struct {
 	chatID    string
 	msgID     string // 原消息 ID
 
-	mu             sync.Mutex
-	cardID         string
-	replyMsgID     string // 卡片消息的 message_id
-	ackMsgID       string // "💭 正在思考..." 消息的 ID
-	sequence       int
-	fullText       string
-	thinkingText   string
-	toolText       string
+	mu         sync.Mutex
+	cardID     string
+	replyMsgID string // 卡片消息的 message_id
+	ackMsgID   string // "💭 正在思考..." 消息的 ID
+	sequence   int
 
-	// 飞书 streaming_mode 要求每次 PUT 的 content 是前一次的前缀扩展（只追加不删除），
-	// 否则客户端会从头重新渲染，导致"重复说话"的视觉效果。
-	// frozenThinking / frozenTool 在对应阶段结束后冻结为最终文本，后续 flush 不再变化。
-	frozenThinking string
-	frozenTool     string
-	thinkingDone   bool
-	toolDone       bool
+	// 严格追加式内容管理：lastFlushed 保存上一次成功 flush 到飞书的内容，
+	// pendingAppend 保存自上次 flush 以来新增的内容。
+	// 每次 flush 时发送 lastFlushed + pendingAppend，成功后把 pendingAppend 合并进 lastFlushed。
+	// 这样确保每次发给飞书的内容一定是上次的前缀扩展，不会触发重新渲染。
+	lastFlushed   string
+	pendingAppend string
+
+	// 阶段状态：用于格式化不同类型的内容
+	currentPhase string // "thinking" | "tool" | "text" | ""
 
 	pendingFlush  bool
 	flushTimer    *time.Timer
@@ -145,32 +144,26 @@ func (s *feishuStreamSender) SendAck() {
 	s.mu.Unlock()
 }
 
-// OnStreamCallback 新版多类型流式回调
+// OnStreamCallback 新版多类型流式回调。
+// 飞书卡片只展示正文文本，thinking 和 tool 阶段不输出到卡片内容。
+// thinking 阶段由 SendAck 发送的"💭 正在思考..."文本消息代替。
+// tool 调用完全隐藏，用户只看到最终的回复文本。
 func (s *feishuStreamSender) OnStreamCallback(kind StreamKind, payload string, done bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	switch kind {
 	case KindThinking:
-		s.thinkingText += payload
+		s.currentPhase = "thinking"
+		// thinking 内容不输出到卡片，由 ack 消息("💭 正在思考...")代替
 	case KindTool:
-		// thinking -> tool 阶段切换时，冻结 thinking 文本
-		if !s.thinkingDone && s.thinkingText != "" {
-			s.thinkingDone = true
-			s.frozenThinking = s.thinkingText
-		}
-		s.toolText += payload
+		s.currentPhase = "tool"
+		// tool 调用不输出到卡片，用户不需要看到技术细节
 	case KindText:
-		// thinking/tool -> text 阶段切换时，冻结前序文本
-		if !s.thinkingDone && s.thinkingText != "" {
-			s.thinkingDone = true
-			s.frozenThinking = s.thinkingText
+		if payload != "" {
+			s.currentPhase = "text"
+			s.pendingAppend += payload
 		}
-		if !s.toolDone && s.toolText != "" {
-			s.toolDone = true
-			s.frozenTool = s.toolText
-		}
-		s.fullText += payload
 	}
 
 	if done {
@@ -182,22 +175,25 @@ func (s *feishuStreamSender) OnStreamCallback(kind StreamKind, payload string, d
 		return s.flushLocked()
 	}
 
-	if s.cardID == "" {
-		if err := s.initCard(); err != nil {
-			return err
-		}
-		s.deleteAck()
-	}
-
-	s.pendingFlush = true
-	if s.flushTimer == nil {
-		s.flushTimer = time.AfterFunc(s.flushInterval, func() {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			if err := s.flushLocked(); err != nil {
-				slog.Warn("[feishu-stream] flush error", "err", err)
+	// 只有 text 阶段才初始化卡片和触发 flush
+	if s.currentPhase == "text" && s.pendingAppend != "" {
+		if s.cardID == "" {
+			if err := s.initCard(); err != nil {
+				return err
 			}
-		})
+			s.deleteAck()
+		}
+
+		s.pendingFlush = true
+		if s.flushTimer == nil {
+			s.flushTimer = time.AfterFunc(s.flushInterval, func() {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				if err := s.flushLocked(); err != nil {
+					slog.Warn("[feishu-stream] flush error", "err", err)
+				}
+			})
+		}
 	}
 	return nil
 }
@@ -245,7 +241,7 @@ func (s *feishuStreamSender) initCard() error {
 
 func (s *feishuStreamSender) flushLocked() error {
 	if s.cardID == "" {
-		if s.fullText == "" && s.thinkingText == "" && s.toolText == "" {
+		if s.pendingAppend == "" {
 			return nil
 		}
 		if err := s.initCard(); err != nil {
@@ -257,59 +253,30 @@ func (s *feishuStreamSender) flushLocked() error {
 	s.flushTimer = nil
 	s.pendingFlush = false
 
+	if s.pendingAppend == "" && !s.done {
+		return nil
+	}
+
 	token, err := GetTenantToken(s.appID, s.appSecret)
 	if err != nil {
 		return err
 	}
 
-	// 构建多 element 内容
-	content := s.buildStreamContent()
+	// 严格前缀扩展：新内容 = 上次已确认的内容 + 本次新增
+	content := s.lastFlushed + s.pendingAppend
 	if content == "" {
-		return nil
+		content = "✅ 完成"
 	}
 
 	s.sequence++
-	return s.updateElement(token, content, s.sequence)
-}
-
-// buildStreamContent 构建飞书卡片 streaming element 内容。
-// 关键约束：每次返回的内容必须是上次的前缀扩展（只追加不删除），
-// 否则飞书客户端会从头重新渲染导致"重复说话"。
-func (s *feishuStreamSender) buildStreamContent() string {
-	var parts []string
-
-	// thinking 部分：使用冻结文本（阶段结束后）或当前累积文本（阶段进行中）
-	thinkingContent := s.thinkingText
-	if s.thinkingDone {
-		thinkingContent = s.frozenThinking
-	}
-	if thinkingContent != "" {
-		label := "💭 思考中..."
-		if s.thinkingDone {
-			label = "💭 思考完成"
-		}
-		parts = append(parts, fmt.Sprintf("<font color='grey'>%s</font>\n> %s",
-			label, strings.ReplaceAll(thinkingContent, "\n", "\n> ")))
+	if err := s.updateElement(token, content, s.sequence); err != nil {
+		return err
 	}
 
-	// tool 部分：同理使用冻结文本
-	toolContent := s.toolText
-	if s.toolDone {
-		toolContent = s.frozenTool
-	}
-	if toolContent != "" {
-		parts = append(parts, fmt.Sprintf("🔧 **工具调用**\n```\n%s\n```", toolContent))
-	}
-
-	if s.fullText != "" {
-		parts = append(parts, s.fullText)
-	}
-
-	if s.done && len(parts) == 0 {
-		parts = append(parts, "✅ 完成")
-	}
-
-	return strings.Join(parts, "\n\n---\n\n")
+	// flush 成功，合并 pendingAppend 到 lastFlushed
+	s.lastFlushed = content
+	s.pendingAppend = ""
+	return nil
 }
 
 // ── 飞书 API 调用 ────────────────────────────────────────────
@@ -327,7 +294,7 @@ func (s *feishuStreamSender) buildCardJSON() string {
 			"update_multi": true,
 			"width_mode":   "default",
 			"summary": map[string]interface{}{
-				"content": "正在回复...",
+				"content": "",
 			},
 		},
 		"header": map[string]interface{}{

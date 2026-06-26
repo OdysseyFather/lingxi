@@ -594,7 +594,7 @@ PORT=3099 DB_PATH=/tmp/lingxi-instance2/smart-agent.db FRONTEND_DIST=../frontend
 - [x] **信令服务器 relay_multi 多播**：一份 data 同时分发给多个 peer，群聊广播成本从 O(N) 往返降为 O(1)
 
 ### 平台
-- [x] IM 集成（企业微信/钉钉/飞书）
+- [x] IM 集成（企业微信/钉钉/飞书，支持 @所有人 消息过滤配置）
 - [x] MCP 工具管理
 - [x] **纯 Go 协议转换代理**（`backend-desktop/proxy/`：Anthropic ↔ OpenAI 双向转换，流式/非流式/Tool use/思考链/多模态，零启动延迟、零外部依赖，替代 Python LiteLLM）
 - [x] **Go 代理预启动**（激活 OpenAI 协议接入点时自动预启动代理，< 1ms 就绪）

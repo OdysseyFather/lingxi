@@ -257,6 +257,8 @@ func main() {
 	api.GET("/agents/distill/records/:id/files/*filepath", handler.DownloadDistillRecordFile)
 	api.GET("/agents/:id", handler.GetAgent)
 	api.DELETE("/agents/:id", handler.DeleteAgent)
+	api.GET("/agents/:id/export-bundle", handler.ExportAgentBundleHandler)
+	api.POST("/agents/import-bundle", handler.ImportAgentBundleHandler)
 	api.POST("/sessions/:id/agent", handler.SetSessionAgent)
 	api.GET("/sessions/:id/token-stats", handler.GetSessionTokenStats)
 	api.POST("/sessions/:id/summarize", handler.SummarizeSession)

@@ -173,6 +173,16 @@ lingxi-agent/
 ├── signaling-server/         # 广域网信令服务器（独立部署到 github.com/OdysseyFather/lingxi-singaling-server）
 │   └── main.go               # WebSocket 信令（注册/发现/消息中继，无 HMAC，支持 conversation_invite/accept/reject）
 │
+├── community-server/         # 灵犀社区平台（独立服务，端口 8090）
+│   ├── main.go               # Gin HTTP 服务 + 路由
+│   ├── config/               # 配置（端口/DB/Storage/Tunnel 全可环境变量）
+│   ├── db/                   # SQLite 数据层（users/agents/ratings/follows/comments/invocations/logs）
+│   ├── handler/              # HTTP handler（auth/agent/rating/comment/invocation 全部）
+│   ├── model/                # 数据模型
+│   ├── storage/              # 本地磁盘 Bundle 存储
+│   ├── go.mod                # 独立 module（gin + sqlite3 + uuid）
+│   └── README.md             # 社区平台文档
+│
 ├── electron/                 # Electron 主进程
 │   ├── main.js               # 窗口管理、子进程启动
 │   ├── preload.js            # IPC Bridge（含 Spotlight/剪贴板 API）
@@ -614,7 +624,7 @@ xattr -cr "/Applications/灵犀.app"
 - **自动获取可用模型列表**（POST /api/api-profiles/fetch-models，输入 API key 后自动查询供应商 /models 端点，返回可用模型列表供用户选择）
 - **供应商预设配置**（内置 DeepSeek/Qwen/GLM/Moonshot/Doubao 等供应商的 base_url 和推荐模型列表，减少用户手动配置错误）
 - MCP 工具管理（stdio/SSE/HTTP）+ 配置导出
-- IM 集成（企业微信/钉钉/飞书）
+- IM 集成（企业微信/钉钉/飞书，支持 @所有人 消息过滤配置）
 - **Windows 构建支持（NSIS 安装包 + Portable）**
 - **OpenAI 兼容模型技能识别增强（自动注入已安装技能清单到 system prompt）**
 - **防死循环保护（禁止调用 Cursor 专有工具，避免 tool_use 循环）**
@@ -717,3 +727,37 @@ xattr -cr "/Applications/灵犀.app"
   - `proxy/nonstream.go` — 非流式响应转换
   - `proxy/server.go` — HTTP 服务器（/v1/messages + /health + /v1/models）
   - `router/ccr.go` — 重写为使用 Go proxy.Server（删除 Python 子进程管理逻辑）
+
+### 灵犀社区平台（v2026-06 Phase 1）
+- **独立服务 `community-server/`**：与 signaling-server 解耦的全新 Gin HTTP 服务，端口 8090（可配置）
+- **匿名身份系统**：服务器生成 UUID + auth_token，客户端 localStorage 缓存；后续可扩展 OAuth
+- **Agent Bundle 格式 `.lxbundle`**：zip 压缩包，含 `manifest.json` + `agent.json` + `avatar.png` + `skills/` + `knowledge/` + `README.md`
+- **本地磁盘 Bundle 存储**：`~/Library/Application Support/lingxi-community/storage/bundles/<agentID>/<version>/bundle.lxbundle`，后期可迁 OSS
+- **完整 HTTP API**（`/community/*`）：
+  - `POST /auth/anon` 匿名注册，返回 token
+  - `GET/PUT /auth/me` 个人资料
+  - `GET/POST/PUT/DELETE /agents` Agent 发布/列表/详情/更新/删除
+  - `GET /agents/:id/bundle` 下载 .lxbundle（含下载计数 +1）
+  - `POST /agents/:id/rate` 评分（1-5，唯一约束 upsert + 自动更新 rating_avg）
+  - `GET /agents/:id/ratings` 评分列表
+  - `POST /agents/:id/comments` + `GET` 评论（树形回复）
+  - `GET /users/:id` 用户主页 + 关注列表 + 粉丝列表
+  - `POST/DELETE /users/:id/follow` 关注/取关
+  - `GET /leaderboard?kind=hot|newest|top_rated` 排行榜
+  - `POST /agents/:id/invocations` 创建 6 位邀请码（大写字母+数字，避免 0/O/1/I）
+  - `POST /invocations/:code/invoke` 通过 h5_tunnel 转发调用（含每日限流 + 调用日志审计）
+  - `GET /invocations/logs/mine` 调用日志
+- **P2P 调用链路**：调用方 → community-server → 信令服务器 `/tunnel/<token>/api/chat/quick` → 发布方灵犀实例
+- **发布方 tunnel token 约定**：在个人简介中写入 `[tunnel:<token>]` 标记（同时展示在主页便于核对）
+- **客户端集成**：
+  - `backend-desktop/handler/agent_bundle.go`：`ExportAgentBundleHandler` + `ImportAgentBundleHandler` + `GET /api/agents/:id/export-bundle` + `POST /api/agents/import-bundle`
+  - `frontend-desktop/src/api/client.js`：新增 `community.*` 命名空间（封装所有社区 API + 自动带 Bearer token）
+  - `frontend-desktop/src/CommunityPage.jsx`：完整社区页面（发现/排行榜/关注/我的/邀请码/个人资料 6 个 Tab）
+  - `AppShell.jsx`：右侧导航新增「社区」入口（Users 图标）
+- **接口自动化测试**：`community-server/handler/api_test.go` 14 个测试覆盖全部 API（auth/agent/rating/comment/follow/invocation/leaderboard/rate_limit/permission）
+- **本地启动**：
+  ```bash
+  cd community-server
+  PORT=8090 DB_PATH=/tmp/lingxi-community/community.db STORAGE_ROOT=/tmp/lingxi-community/storage go run .
+  ```
+- **设计文档**：`docs/superpowers/specs/2026-06-21-agent-community-platform-phase1-design.md`（如有）
