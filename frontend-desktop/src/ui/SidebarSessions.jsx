@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useStore } from '../state/useStore';
-import { Plus, MessageSquare, Trash2, Search, ChevronDown, Sparkles, Settings as SettingsIcon, Pencil, Pin, CheckSquare, Square, X, BookOpen, Shield, ShieldOff, Download, Loader2 } from 'lucide-react';
+import { Plus, MessageSquare, Trash2, Search, ChevronDown, Sparkles, Settings as SettingsIcon, Pencil, Pin, CheckSquare, Square, X, BookOpen, Download, Loader2 } from 'lucide-react';
 import { Input, Button, Modal } from './primitives';
 import { api } from '../api/client';
 import { cn } from './cn';
@@ -260,6 +260,19 @@ export function SidebarSessions({ onSessionSelect } = {}) {
         )}
       </div>
 
+      {/* 设置入口 - 固定在底部 */}
+      <button
+        onClick={() => setView('settings')}
+        className="flex items-center gap-2.5 w-full px-3 py-2.5 rounded-xl
+          border border-[color:var(--line)] hover:border-[color:var(--accent)]/40
+          bg-[color:var(--bg-soft)] hover:bg-[color:var(--accent-soft)]
+          text-[color:var(--text-soft)] hover:text-[color:var(--accent)]
+          transition-all duration-200 group shrink-0"
+      >
+        <SettingsIcon size={16} className="group-hover:rotate-90 transition-transform duration-300" />
+        <span className="text-sm font-medium">设置</span>
+      </button>
+
       <Modal open={!!deleteTarget} onClose={() => { setDeleteTarget(null); setExtractKB(false); }} title="确认删除" width={400}>
         <p className="text-sm text-[color:var(--text-soft)] mb-3">
           确定要删除对话 <span className="font-medium text-[color:var(--text)]">「{deleteTarget?.title || '新对话'}」</span>？此操作不可恢复。
@@ -395,67 +408,14 @@ function SessionItem({ session, active, batchMode, checked, onToggle, onClick, o
 }
 
 function NewSessionButton({ createSession, setView }) {
-  const [menuPos, setMenuPos] = useState(null);
-  const menuRef = useRef(null);
-
-  useEffect(() => {
-    if (!menuPos) return;
-    const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuPos(null); };
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, [menuPos]);
-
-  const handleCreate = async (mode) => {
-    setMenuPos(null);
-    await createSession({ permission_mode: mode });
-    setView('chat');
-  };
-
-  const handleContextMenu = (e) => {
-    e.preventDefault();
-    setMenuPos({ x: e.clientX, y: e.clientY });
-  };
-
   return (
-    <>
-      <button
-        onClick={async () => { await createSession(); setView('chat'); }}
-        onContextMenu={handleContextMenu}
-        className="flex-1 flex items-center justify-center gap-2 px-3 h-10 rounded-lg text-white transition-all duration-200
-          bg-gradient-to-r from-[color:var(--accent)] to-[#5e8bff]
-          hover:shadow-[0_8px_24px_var(--accent-glow)] hover:-translate-y-px active:translate-y-0 active:scale-[0.99] shadow-soft"
-        title="左键新建（放行模式），右键选择模式"
-      >
-        <Plus size={16} /> 新对话
-      </button>
-      {menuPos && (
-        <div
-          ref={menuRef}
-          className="fixed w-52 rounded-lg border border-[color:var(--line)] bg-[color:var(--bg-elev)] shadow-xl z-[9999] py-1 text-sm"
-          style={{ left: menuPos.x, top: menuPos.y }}
-        >
-          <button
-            onClick={() => handleCreate('trust')}
-            className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-[color:var(--bg-soft)] text-left transition"
-          >
-            <ShieldOff size={14} className="text-emerald-500 shrink-0" />
-            <div>
-              <div className="font-medium text-[color:var(--text)]">完全放行</div>
-              <div className="text-[10px] text-[color:var(--text-faint)]">Agent 自主执行，无需审批</div>
-            </div>
-          </button>
-          <button
-            onClick={() => handleCreate('managed')}
-            className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-[color:var(--bg-soft)] text-left transition"
-          >
-            <Shield size={14} className="text-amber-500 shrink-0" />
-            <div>
-              <div className="font-medium text-[color:var(--text)]">权限管控</div>
-              <div className="text-[10px] text-[color:var(--text-faint)]">危险操作需人工确认</div>
-            </div>
-          </button>
-        </div>
-      )}
-    </>
+    <button
+      onClick={async () => { await createSession(); setView('chat'); }}
+      className="flex-1 flex items-center justify-center gap-2 px-3 h-10 rounded-lg text-white transition-all duration-200
+        bg-gradient-to-r from-[color:var(--accent)] to-[#5e8bff]
+        hover:shadow-[0_8px_24px_var(--accent-glow)] hover:-translate-y-px active:translate-y-0 active:scale-[0.99] shadow-soft"
+    >
+      <Plus size={16} /> 新对话
+    </button>
   );
 }

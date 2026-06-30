@@ -185,3 +185,116 @@ func GetOrCreateIMSession(platform, scopeKey, title string, ttlHours int, agentI
 func TouchIMSession(platform, scopeKey string) {
 	DB.Exec(`UPDATE im_sessions SET last_active=CURRENT_TIMESTAMP WHERE platform=? AND scope_key=?`, platform, scopeKey)
 }
+
+// ─── IM 看板查询 ─────────────────────────────────────────────────
+
+// IMSessionInfo IM 会话详情（关联 sessions 表）
+type IMSessionInfo struct {
+	ID           int64     `json:"id"`
+	Platform     string    `json:"platform"`
+	ScopeKey     string    `json:"scope_key"`
+	SessionID    int64     `json:"session_id"`
+	SessionTitle string    `json:"session_title"`
+	AgentID      int64     `json:"agent_id"`
+	AgentName    string    `json:"agent_name"`
+	MessageCount int       `json:"message_count"`
+	LastActive   time.Time `json:"last_active"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// ListIMSessions 获取 IM 会话列表，支持按平台筛选
+func ListIMSessions(platform string) ([]IMSessionInfo, error) {
+	query := `
+		SELECT ims.id, ims.platform, ims.scope_key, ims.session_id, ims.last_active,
+		       s.title, COALESCE(s.agent_id, 0), s.message_count, s.created_at,
+		       COALESCE(a.name, '')
+		FROM im_sessions ims
+		LEFT JOIN sessions s ON s.id = ims.session_id
+		LEFT JOIN agents a ON a.id = s.agent_id
+	`
+	var args []interface{}
+	if platform != "" {
+		query += " WHERE ims.platform = ?"
+		args = append(args, platform)
+	}
+	query += " ORDER BY ims.last_active DESC"
+
+	rows, err := DB.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []IMSessionInfo
+	for rows.Next() {
+		var info IMSessionInfo
+		var lastActiveStr, createdAtStr string
+		if err := rows.Scan(
+			&info.ID, &info.Platform, &info.ScopeKey, &info.SessionID, &lastActiveStr,
+			&info.SessionTitle, &info.AgentID, &info.MessageCount, &createdAtStr,
+			&info.AgentName,
+		); err != nil {
+			continue
+		}
+		if t, e := time.Parse("2006-01-02 15:04:05", lastActiveStr); e == nil {
+			info.LastActive = t
+		}
+		if t, e := time.Parse("2006-01-02 15:04:05", createdAtStr); e == nil {
+			info.CreatedAt = t
+		}
+		result = append(result, info)
+	}
+	return result, nil
+}
+
+// IMDashboardStats IM 看板统计数据
+type IMDashboardStats struct {
+	TotalSessions  int            `json:"total_sessions"`
+	TotalMessages  int            `json:"total_messages"`
+	ActiveToday    int            `json:"active_today"`
+	PlatformCounts map[string]int `json:"platform_counts"`
+}
+
+// GetIMDashboardStats 获取 IM 看板统计
+func GetIMDashboardStats() (*IMDashboardStats, error) {
+	stats := &IMDashboardStats{
+		PlatformCounts: make(map[string]int),
+	}
+
+	// 总 IM 会话数
+	DB.QueryRow(`SELECT COUNT(*) FROM im_sessions`).Scan(&stats.TotalSessions)
+
+	// 总 IM 消息数（通过 im_sessions 关联 sessions 再关联 messages）
+	DB.QueryRow(`
+		SELECT COALESCE(SUM(s.message_count), 0)
+		FROM im_sessions ims
+		LEFT JOIN sessions s ON s.id = ims.session_id
+	`).Scan(&stats.TotalMessages)
+
+	// 今日活跃会话数
+	DB.QueryRow(`
+		SELECT COUNT(*) FROM im_sessions
+		WHERE date(last_active) = date('now')
+	`).Scan(&stats.ActiveToday)
+
+	// 按平台统计
+	rows, err := DB.Query(`SELECT platform, COUNT(*) FROM im_sessions GROUP BY platform`)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var p string
+			var c int
+			if rows.Scan(&p, &c) == nil {
+				stats.PlatformCounts[p] = c
+			}
+		}
+	}
+
+	return stats, nil
+}
+
+// DeleteIMSession 删除 IM 会话映射（不删除底层 session 和消息）
+func DeleteIMSession(id int64) error {
+	_, err := DB.Exec(`DELETE FROM im_sessions WHERE id=?`, id)
+	return err
+}

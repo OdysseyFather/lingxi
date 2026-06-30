@@ -17,57 +17,58 @@ var ErrNotOwner = errors.New("not message owner")
 
 // GroupChat 群聊房间
 type GroupChat struct {
-	ID                int64      `json:"id"`
-	RoomUUID          string     `json:"room_uuid"`
-	Topic             string     `json:"topic"`
-	Goal              string     `json:"goal"`
-	MaxRounds         int        `json:"max_rounds"`
-	CurrentRound      int        `json:"current_round"`
-	Status            string     `json:"status"` // pending/active/paused/completed
-	ModeratorAgentID  int64      `json:"moderator_agent_id"`
-	ModeratorPeerID   string     `json:"moderator_peer_id"`
-	ScheduleMode      string     `json:"schedule_mode"` // 'roundrobin'|'moderator'|'mention'|'hybrid'
-	CreatedByLocal    bool       `json:"created_by_local"`
-	HostPeerID        string     `json:"host_peer_id"` // 创建者 peer ID（用于回送消息聚合）
-	LocalSessionID    int64      `json:"local_session_id"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt         time.Time  `json:"updated_at"`
-	Deadline          *time.Time `json:"deadline"`
+	ID               int64      `json:"id"`
+	RoomUUID         string     `json:"room_uuid"`
+	Topic            string     `json:"topic"`
+	Goal             string     `json:"goal"`
+	MaxRounds        int        `json:"max_rounds"`
+	CurrentRound     int        `json:"current_round"`
+	Status           string     `json:"status"` // pending/active/paused/completed
+	ModeratorAgentID int64      `json:"moderator_agent_id"`
+	ModeratorPeerID  string     `json:"moderator_peer_id"`
+	ScheduleMode     string     `json:"schedule_mode"` // 'roundrobin'|'moderator'|'mention'|'hybrid'
+	ChatMode         string     `json:"chat_mode"`     // 'casual'(闲聊) | 'meeting'(工作会议)
+	CreatedByLocal   bool       `json:"created_by_local"`
+	HostPeerID       string     `json:"host_peer_id"` // 创建者 peer ID（用于回送消息聚合）
+	LocalSessionID   int64      `json:"local_session_id"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
+	Deadline         *time.Time `json:"deadline"`
 }
 
 // GroupMember 群成员（每个 (peer, agent) 一行）
 type GroupMember struct {
-	ID            int64     `json:"id"`
-	RoomID        int64     `json:"room_id"`
-	PeerID        string    `json:"peer_id"`
-	PeerNickname  string    `json:"peer_nickname"`
-	AgentID       int64     `json:"agent_id"` // 该 peer 的 agent ID（仅 peer 本端有效）
-	AgentName     string    `json:"agent_name"`
-	AgentCaps     string    `json:"agent_caps"` // JSON 字符串
-	IsLocal       bool      `json:"is_local"`   // 是否为本端 Agent
-	Status        string    `json:"status"`     // invited/joined/left/rejected
-	JoinedAt      time.Time `json:"joined_at"`
+	ID           int64     `json:"id"`
+	RoomID       int64     `json:"room_id"`
+	PeerID       string    `json:"peer_id"`
+	PeerNickname string    `json:"peer_nickname"`
+	AgentID      int64     `json:"agent_id"` // 该 peer 的 agent ID（仅 peer 本端有效）
+	AgentName    string    `json:"agent_name"`
+	AgentCaps    string    `json:"agent_caps"` // JSON 字符串
+	IsLocal      bool      `json:"is_local"`   // 是否为本端 Agent
+	Status       string    `json:"status"`     // invited/joined/left/rejected
+	JoinedAt     time.Time `json:"joined_at"`
 }
 
 // GroupMessage 群消息
 type GroupMessage struct {
-	ID              int64      `json:"id"`
-	RoomID          int64      `json:"room_id"`
-	SenderPeerID    string     `json:"sender_peer_id"`
-	SenderAgentID   int64      `json:"sender_agent_id"`
-	SenderAgentName string     `json:"sender_agent_name"`
-	MsgType         string     `json:"msg_type"` // 'message'/'system'/'moderator_decision'/'user_post'
-	Content         string     `json:"content"`
-	MentionedAgents string     `json:"mentioned_agents"` // JSON [{peer_id, agent_name}]
-	Round           int        `json:"round"`
-	CreatedAt       time.Time  `json:"created_at"`
+	ID              int64     `json:"id"`
+	RoomID          int64     `json:"room_id"`
+	SenderPeerID    string    `json:"sender_peer_id"`
+	SenderAgentID   int64     `json:"sender_agent_id"`
+	SenderAgentName string    `json:"sender_agent_name"`
+	MsgType         string    `json:"msg_type"` // 'message'/'system'/'moderator_decision'/'user_post'
+	Content         string    `json:"content"`
+	MentionedAgents string    `json:"mentioned_agents"` // JSON [{peer_id, agent_name}]
+	Round           int       `json:"round"`
+	CreatedAt       time.Time `json:"created_at"`
 	// WeChat-like extensions
-	ReplyToID    int64      `json:"reply_to_id"`     // 引用的消息 ID，0 表示无
-	IsRecalled   bool       `json:"is_recalled"`     // 是否已撤回
-	RecalledAt   *time.Time `json:"recalled_at"`     // 撤回时间
-	Images       string     `json:"images"`          // JSON 字符串数组（相对 URL）
-	ClientMsgID  string     `json:"client_msg_id"`   // 前端生成的幂等键
-	EditedAt     *time.Time `json:"edited_at"`       // 预留：编辑时间
+	ReplyToID   int64      `json:"reply_to_id"`   // 引用的消息 ID，0 表示无
+	IsRecalled  bool       `json:"is_recalled"`   // 是否已撤回
+	RecalledAt  *time.Time `json:"recalled_at"`   // 撤回时间
+	Images      string     `json:"images"`        // JSON 字符串数组（相对 URL）
+	ClientMsgID string     `json:"client_msg_id"` // 前端生成的幂等键
+	EditedAt    *time.Time `json:"edited_at"`     // 预留：编辑时间
 }
 
 // MigrateGroupChat 创建群聊相关表（在 db.go migrate() 中调用）
@@ -129,11 +130,14 @@ func MigrateGroupChat() {
 	addColumnIfMissing("group_messages", "images", "TEXT NOT NULL DEFAULT '[]'")
 	addColumnIfMissing("group_messages", "client_msg_id", "TEXT NOT NULL DEFAULT ''")
 	addColumnIfMissing("group_messages", "edited_at", "DATETIME DEFAULT NULL")
+
+	// 群聊模式：casual=微信风闲聊（并发概率发言）| meeting=工作会议（主持人主导推进得出结论）
+	addColumnIfMissing("group_chats", "chat_mode", "TEXT NOT NULL DEFAULT 'casual'")
 }
 
 const groupChatCols = `id, room_uuid, topic, goal, max_rounds, current_round, status,
 	moderator_agent_id, moderator_peer_id, schedule_mode, created_by_local,
-	host_peer_id, local_session_id, deadline, created_at, updated_at`
+	host_peer_id, local_session_id, deadline, created_at, updated_at, chat_mode`
 
 func scanGroupChat(scanner interface{ Scan(...interface{}) error }) (*GroupChat, error) {
 	var g GroupChat
@@ -141,11 +145,14 @@ func scanGroupChat(scanner interface{ Scan(...interface{}) error }) (*GroupChat,
 	var deadline sql.NullTime
 	err := scanner.Scan(&g.ID, &g.RoomUUID, &g.Topic, &g.Goal, &g.MaxRounds, &g.CurrentRound, &g.Status,
 		&g.ModeratorAgentID, &g.ModeratorPeerID, &g.ScheduleMode, &createdByLocal,
-		&g.HostPeerID, &g.LocalSessionID, &deadline, &g.CreatedAt, &g.UpdatedAt)
+		&g.HostPeerID, &g.LocalSessionID, &deadline, &g.CreatedAt, &g.UpdatedAt, &g.ChatMode)
 	if err != nil {
 		return nil, err
 	}
 	g.CreatedByLocal = createdByLocal == 1
+	if g.ChatMode == "" {
+		g.ChatMode = "casual"
+	}
 	if deadline.Valid {
 		v := deadline.Time
 		g.Deadline = &v
@@ -158,14 +165,18 @@ func CreateGroupChat(g *GroupChat) (int64, error) {
 	if g.CreatedByLocal {
 		createdByLocal = 1
 	}
+	chatMode := g.ChatMode
+	if chatMode == "" {
+		chatMode = "casual"
+	}
 	res, err := DB.Exec(`
 		INSERT INTO group_chats
 			(room_uuid, topic, goal, max_rounds, status, moderator_agent_id, moderator_peer_id,
-			 schedule_mode, created_by_local, host_peer_id, local_session_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			 schedule_mode, created_by_local, host_peer_id, local_session_id, chat_mode)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		g.RoomUUID, g.Topic, g.Goal, g.MaxRounds, g.Status,
 		g.ModeratorAgentID, g.ModeratorPeerID, g.ScheduleMode,
-		createdByLocal, g.HostPeerID, g.LocalSessionID)
+		createdByLocal, g.HostPeerID, g.LocalSessionID, chatMode)
 	if err != nil {
 		return 0, err
 	}

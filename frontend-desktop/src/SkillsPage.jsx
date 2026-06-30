@@ -6,7 +6,7 @@ import {
   Sparkles, Upload, Wand2, Download, Trash2, ChevronDown, ChevronRight,
   Loader2, CheckCircle2, AlertCircle, FileText, FolderOpen, Code2,
   Eye, Edit3, Save, X, Store, Search, Star, Users, ExternalLink, ShieldCheck,
-  CheckSquare, Square,
+  CheckSquare, Square, GitBranch,
 } from 'lucide-react';
 import { Button, Card, Badge, Modal, EmptyState, SkeletonCard } from './ui/primitives';
 import { cn } from './ui/cn';
@@ -232,6 +232,7 @@ export default function SkillsPage() {
     { id: 'marketplace', label: '技能市场', icon: Store },
     { id: 'generate', label: 'AI 生成', icon: Wand2 },
     { id: 'upload', label: '上传压缩包', icon: Upload },
+    { id: 'git', label: 'Git 仓库导入', icon: GitBranch },
   ];
 
   return (
@@ -484,6 +485,10 @@ export default function SkillsPage() {
             </Card>
           )}
         </div>
+      )}
+
+      {activeTab === 'git' && (
+        <GitImportTab onImported={() => { fetchSkills(); setActiveTab('list'); }} />
       )}
     </div>
   );
@@ -790,6 +795,142 @@ function MarketplaceTab({ skills, onInstalled, query, setQuery, results, setResu
             </div>
           </div>
         </Modal>
+      )}
+    </div>
+  );
+}
+
+function GitImportTab({ onImported }) {
+  const [url, setUrl] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [skills, setSkills] = useState([]);
+  const [tmpDir, setTmpDir] = useState('');
+  const [error, setError] = useState('');
+  const [selected, setSelected] = useState(new Set());
+  const [installing, setInstalling] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const handleScan = async () => {
+    if (!url.trim()) return;
+    setScanning(true);
+    setError('');
+    setSkills([]);
+    setTmpDir('');
+    setMessage('');
+    setSelected(new Set());
+    try {
+      const r = await fetch('/api/skills/from-git', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url.trim() }),
+      });
+      const data = await r.json();
+      if (!r.ok) { setError(data.error || '扫描失败'); return; }
+      if (data.message) setMessage(data.message);
+      setSkills(data.skills || []);
+      setTmpDir(data.tmpDir || '');
+      if (data.skills?.length) {
+        setSelected(new Set(data.skills.map((_, i) => i)));
+      }
+    } catch (e) { setError(e.message || '请求失败'); }
+    finally { setScanning(false); }
+  };
+
+  const handleInstall = async () => {
+    if (selected.size === 0 || !tmpDir) return;
+    setInstalling(true);
+    setError('');
+    try {
+      const paths = skills.filter((_, i) => selected.has(i)).map(s => s.path);
+      const r = await fetch('/api/skills/from-git/install', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tmpDir, paths }),
+      });
+      const data = await r.json();
+      if (!r.ok) { setError(data.error || '安装失败'); return; }
+      onImported();
+    } catch (e) { setError(e.message || '安装失败'); }
+    finally { setInstalling(false); }
+  };
+
+  const toggleSelect = (i) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+  };
+
+  return (
+    <div className="max-w-2xl">
+      <Card className="mb-5">
+        <div className="font-medium mb-2">从 Git 仓库导入技能</div>
+        <div className="text-sm text-[color:var(--text-soft)] mb-4">
+          输入 Git 仓库地址，自动克隆并扫描所有包含 <code className="text-[color:var(--accent)]">SKILL.md</code> 的目录作为技能导入。
+        </div>
+        <div className="flex gap-2">
+          <input
+            value={url}
+            onChange={e => setUrl(e.target.value)}
+            placeholder="https://github.com/user/repo.git"
+            className="flex-1 rounded-lg border border-[color:var(--line)] bg-[color:var(--bg)] px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[color:var(--accent)]/40"
+            onKeyDown={e => e.key === 'Enter' && handleScan()}
+          />
+          <Button onClick={handleScan} disabled={scanning || !url.trim()}>
+            {scanning ? <Loader2 size={14} className="animate-spin" /> : <Search size={14} />}
+            {scanning ? '扫描中...' : '分析仓库'}
+          </Button>
+        </div>
+      </Card>
+
+      {error && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 text-sm flex items-center gap-2">
+          <AlertCircle size={14} /> {error}
+        </div>
+      )}
+
+      {message && skills.length === 0 && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-600 text-sm">
+          {message}
+        </div>
+      )}
+
+      {skills.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-sm font-medium text-[color:var(--text)]">
+              发现 {skills.length} 个技能
+            </div>
+            <Button size="sm" onClick={handleInstall} disabled={installing || selected.size === 0}>
+              {installing ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+              安装选中 ({selected.size})
+            </Button>
+          </div>
+          <div className="space-y-2">
+            {skills.map((skill, i) => (
+              <Card key={i} className={cn(
+                'cursor-pointer transition-all',
+                selected.has(i) && 'ring-2 ring-[color:var(--accent)] bg-[color:var(--accent-soft)]'
+              )} onClick={() => toggleSelect(i)}>
+                <div className="flex items-center gap-3">
+                  <div className="w-5 h-5 flex items-center justify-center">
+                    {selected.has(i)
+                      ? <CheckSquare size={16} className="text-[color:var(--accent)]" />
+                      : <Square size={16} className="text-[color:var(--text-faint)]" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm truncate">{skill.name}</div>
+                    <div className="text-xs text-[color:var(--text-soft)] truncate">{skill.description}</div>
+                  </div>
+                  <Badge tone="info">{skill.path}</Badge>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

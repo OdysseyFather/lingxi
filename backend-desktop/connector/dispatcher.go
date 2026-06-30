@@ -2,29 +2,35 @@ package connector
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"lingxi-agent/db"
 )
 
 // ClaudeRunner 是调用 Claude 的函数签名，由外部注入以避免循环依赖
-type ClaudeRunner func(message string, sessionID int64) (reply string, usedSessionID int64, err error)
+// imagePaths 为多模态输入的图片临时文件路径列表（可为空）
+type ClaudeRunner func(message string, sessionID int64, imagePaths []string) (reply string, usedSessionID int64, err error)
 
 // ClaudeStreamRunner 是流式调用 Claude 的函数签名。
 // onChunk 每次收到文本增量时调用，done=true 表示生成结束。
-type ClaudeStreamRunner func(message string, sessionID int64, onChunk func(chunk string, done bool)) (usedSessionID int64, err error)
+// imagePaths 为多模态输入的图片临时文件路径列表（可为空）
+type ClaudeStreamRunner func(message string, sessionID int64, imagePaths []string, onChunk func(chunk string, done bool)) (usedSessionID int64, err error)
 
 // ClaudeRunnerCtx 带 context 的 ClaudeRunner，支持中途取消
-type ClaudeRunnerCtx func(ctx context.Context, message string, sessionID int64) (reply string, usedSessionID int64, err error)
+type ClaudeRunnerCtx func(ctx context.Context, message string, sessionID int64, imagePaths []string) (reply string, usedSessionID int64, err error)
 
 // ClaudeStreamRunnerCtx 带 context 的流式 ClaudeRunner
-type ClaudeStreamRunnerCtx func(ctx context.Context, message string, sessionID int64, onChunk func(chunk string, done bool)) (usedSessionID int64, err error)
+type ClaudeStreamRunnerCtx func(ctx context.Context, message string, sessionID int64, imagePaths []string, onChunk func(chunk string, done bool)) (usedSessionID int64, err error)
 
 // ClaudeStreamRunnerCtxExt 扩展版流式 runner，支持 kind 区分事件类型
-type ClaudeStreamRunnerCtxExt func(ctx context.Context, message string, sessionID int64, onEvent func(kind StreamKind, payload string, done bool)) (usedSessionID int64, err error)
+type ClaudeStreamRunnerCtxExt func(ctx context.Context, message string, sessionID int64, imagePaths []string, onEvent func(kind StreamKind, payload string, done bool)) (usedSessionID int64, err error)
 
 var runClaude ClaudeRunner
 var runClaudeStream ClaudeStreamRunner
@@ -63,6 +69,59 @@ var (
 	activeTasks = make(map[string]context.CancelFunc) // scopeKey -> cancelFunc
 )
 
+// imMediaToExt 根据 MIME 类型返回文件扩展名
+func imMediaToExt(mediaType string) string {
+	switch mediaType {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	default:
+		return ".jpg"
+	}
+}
+
+// saveIMImagesToTmp 将 IM 消息携带的 base64 图片落盘为临时文件，返回文件路径列表。
+// 调用方负责在使用完毕后调用 cleanupIMImageFiles 清理。
+func saveIMImagesToTmp(images []IMImage) []string {
+	if len(images) == 0 {
+		return nil
+	}
+	tmpDir := filepath.Join(os.TempDir(), "lingxi-im-imgs")
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		slog.Warn("[dispatch] mkdir im-imgs tmp failed", "err", err)
+		return nil
+	}
+	var paths []string
+	for i, img := range images {
+		data, err := base64.StdEncoding.DecodeString(img.Data)
+		if err != nil {
+			slog.Warn("[dispatch] decode im image failed", "idx", i, "err", err)
+			continue
+		}
+		ext := imMediaToExt(img.MediaType)
+		name := fmt.Sprintf("im_%d_%d%s", time.Now().UnixNano(), i, ext)
+		fpath := filepath.Join(tmpDir, name)
+		if err := os.WriteFile(fpath, data, 0644); err != nil {
+			slog.Warn("[dispatch] write im image failed", "idx", i, "err", err)
+			continue
+		}
+		paths = append(paths, fpath)
+	}
+	return paths
+}
+
+// cleanupIMImageFiles 删除 IM 临时图片文件，忽略错误
+func cleanupIMImageFiles(paths []string) {
+	for _, p := range paths {
+		_ = os.Remove(p)
+	}
+}
+
 // cancelActiveTask 取消指定 scope 的正在执行的任务
 func cancelActiveTask(scopeKey string) {
 	if cancel, ok := activeTasks[scopeKey]; ok {
@@ -76,7 +135,7 @@ func cancelActiveTask(scopeKey string) {
 // 然后在后台 goroutine 中调用 Claude 并发送完整结果。
 // 如果同一 scope 有正在进行的任务，新消息会打断旧任务。
 func Dispatch(msg IMMessage) {
-	if strings.TrimSpace(msg.Text) == "" {
+	if strings.TrimSpace(msg.Text) == "" && len(msg.Images) == 0 {
 		return
 	}
 	if runClaude == nil && runClaudeCtx == nil {
@@ -121,7 +180,12 @@ func Dispatch(msg IMMessage) {
 	}
 
 	go func() {
+		// 落盘 IM 消息中的图片为临时文件，供 Claude 多模态输入使用
+		slog.Info("[dispatch] before saveIMImagesToTmp", "images_count", len(msg.Images))
+		imagePaths := saveIMImagesToTmp(msg.Images)
+		slog.Info("[dispatch] after saveIMImagesToTmp", "image_paths", imagePaths)
 		defer func() {
+			cleanupIMImageFiles(imagePaths)
 			cancel()
 			activeMu.Lock()
 			delete(activeTasks, scopeKey)
@@ -135,7 +199,7 @@ func Dispatch(msg IMMessage) {
 		// 构建 IM 来源上下文，注入到用户消息前面
 		messageText := buildIMContextPrefix(msg) + msg.Text
 
-		slog.Info("dispatch platform= mode= scope", "platform", msg.Platform, "session_mode", cfg.SessionMode, "value", scopeKey)
+		slog.Info("dispatch platform= mode= scope images=", "platform", msg.Platform, "session_mode", cfg.SessionMode, "value", scopeKey, "images", len(imagePaths))
 
 		var sessionID int64
 		if cfg.SessionMode != SessionModeStateless {
@@ -157,7 +221,7 @@ func Dispatch(msg IMMessage) {
 
 			if msg.StreamCallback != nil && runClaudeStreamCtxExt != nil {
 				// 扩展路径：thinking/tool/text 全部透传
-				_, streamErr = runClaudeStreamCtxExt(ctx, messageText, sessionID, func(kind StreamKind, payload string, done bool) {
+				_, streamErr = runClaudeStreamCtxExt(ctx, messageText, sessionID, imagePaths, func(kind StreamKind, payload string, done bool) {
 					if ctx.Err() != nil {
 						return
 					}
@@ -183,9 +247,9 @@ func Dispatch(msg IMMessage) {
 				}
 
 			if runClaudeStreamCtx != nil {
-				_, streamErr = runClaudeStreamCtx(ctx, messageText, sessionID, onChunk)
+				_, streamErr = runClaudeStreamCtx(ctx, messageText, sessionID, imagePaths, onChunk)
 			} else if runClaudeStream != nil {
-				_, streamErr = runClaudeStream(messageText, sessionID, onChunk)
+				_, streamErr = runClaudeStream(messageText, sessionID, imagePaths, onChunk)
 				}
 			}
 
@@ -208,7 +272,7 @@ func Dispatch(msg IMMessage) {
 		// 非流式路径
 		var finalReply string
 		if runClaudeCtx != nil {
-			reply, _, err := runClaudeCtx(ctx, messageText, sessionID)
+			reply, _, err := runClaudeCtx(ctx, messageText, sessionID, imagePaths)
 			if err != nil {
 				if ctx.Err() != nil {
 					slog.Info("[dispatch] task cancelled", "scope", scopeKey)
@@ -233,7 +297,7 @@ func Dispatch(msg IMMessage) {
 				}
 			}
 		} else {
-			reply, _, err := runClaude(messageText, sessionID)
+			reply, _, err := runClaude(messageText, sessionID, imagePaths)
 			if err != nil {
 				slog.Warn("RunClaudeSync error", "err", err)
 				if msg.ReplyFunc != nil {
@@ -337,7 +401,14 @@ func buildIMContextPrefix(msg IMMessage) string {
 		return ""
 	}
 
-	return "[IM消息来源] " + strings.Join(parts, " | ") + "\n\n"
+	prefix := "[IM消息来源] " + strings.Join(parts, " | ") + "\n\n"
+
+	// 注入群成员名单，让 AI 知道可以 @mention 谁
+	if msg.MembersInfo != "" {
+		prefix += msg.MembersInfo + "\n\n"
+	}
+
+	return prefix
 }
 
 // filterStateMarkers 移除 AI 输出中的内部状态标记 JSON 片段

@@ -182,8 +182,8 @@ func UpsertAgent(a *Agent) (int64, error) {
 		return a.ID, err
 	}
 	res, err := DB.Exec(`INSERT INTO agents
-		(name, avatar, description, system_prompt, profile_id, skill_ids, mcp_server_ids, knowledge_ids, allow_all, builtin, temperature, max_tokens)
-		VALUES (?,?,?,?,?,?,?,?,?,0,?,?)`,
+		(name, avatar, description, system_prompt, profile_id, skill_ids, mcp_server_ids, knowledge_ids, allow_all, builtin, temperature, max_tokens, evolution_enabled)
+		VALUES (?,?,?,?,?,?,?,?,?,0,?,?,1)`,
 		a.Name, a.Avatar, a.Description, a.SystemPrompt, a.ProfileID,
 		a.SkillIDs, a.MCPServerIDs, a.KnowledgeIDs, allowAll,
 		a.Temperature, a.MaxTokens)

@@ -169,23 +169,21 @@ func SetScheduledTaskSession(id, sessionID int64) {
 }
 
 func GetDueScheduledTasks() ([]ScheduledTask, error) {
-	rows, err := DB.Query(`SELECT ` + schedCols + ` FROM scheduled_tasks
-		WHERE enabled=1 AND next_run_at IS NOT NULL
-		ORDER BY next_run_at ASC`)
+	now := time.Now().Format("2006-01-02 15:04:05")
+	rows, err := DB.Query(`SELECT `+schedCols+` FROM scheduled_tasks
+		WHERE enabled=1 AND next_run_at IS NOT NULL AND next_run_at <= ?
+		ORDER BY next_run_at ASC`, now)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	now := time.Now()
 	out := make([]ScheduledTask, 0)
 	for rows.Next() {
 		t, err := scanScheduledTask(rows)
 		if err != nil {
 			continue
 		}
-		if t.NextRunAt != nil && !t.NextRunAt.After(now) {
-			out = append(out, *t)
-		}
+		out = append(out, *t)
 	}
 	return out, nil
 }

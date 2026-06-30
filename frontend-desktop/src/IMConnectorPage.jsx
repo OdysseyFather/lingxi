@@ -1,10 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Link2, Plus, Pencil, Trash2, Power, PowerOff, Loader2, Info, Radio, Send, TestTube, Zap,
+  Eye, ChevronDown, ChevronUp, ToggleLeft, ToggleRight, X, Clock, AlertCircle,
+  CheckCircle, XCircle, Filter, MessageSquare,
 } from 'lucide-react';
 import { Button, Card, Badge, Modal, Input, Select } from './ui/primitives';
 import { cn } from './ui/cn';
+import { api } from './api/client';
 
 const PLATFORMS = [
   { id: 'dingtalk', label: '钉钉', icon: '📌', fields: [
@@ -41,7 +44,7 @@ function ConnectorForm({ initial, onSave, onCancel, agents }) {
   const [agentId, setAgentId] = useState(initial?.agent_id || 0);
   const [fields, setFields] = useState(() => {
     if (initial?.parsedConfig) {
-      const { session_mode, session_ttl_hours, reply_to_mention_all, streaming_enabled, streaming_card_title, streaming_flush_ms, ...rest } = initial.parsedConfig;
+      const { session_mode, session_ttl_hours, reply_to_mention_all, streaming_enabled, streaming_card_title, streaming_flush_ms, monitor_enabled, ...rest } = initial.parsedConfig;
       return rest;
     }
     return {};
@@ -52,6 +55,7 @@ function ConnectorForm({ initial, onSave, onCancel, agents }) {
   const [streamingEnabled, setStreamingEnabled] = useState(initial?.parsedConfig?.streaming_enabled ?? false);
   const [streamingCardTitle, setStreamingCardTitle] = useState(initial?.parsedConfig?.streaming_card_title || '');
   const [streamingFlushMs, setStreamingFlushMs] = useState(initial?.parsedConfig?.streaming_flush_ms ?? 80);
+  const [monitorEnabled, setMonitorEnabled] = useState(initial?.parsedConfig?.monitor_enabled ?? false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
@@ -74,6 +78,7 @@ function ConnectorForm({ initial, onSave, onCancel, agents }) {
           config.streaming_card_title = streamingCardTitle || '灵犀';
           config.streaming_flush_ms = Number(streamingFlushMs) || 80;
         }
+        config.monitor_enabled = monitorEnabled;
       }
       const r = await fetch('/api/im-connectors', {
         method: 'POST',
@@ -221,6 +226,37 @@ function ConnectorForm({ initial, onSave, onCancel, agents }) {
                     <label className="text-[10px] text-[color:var(--text-faint)] mb-0.5 block">推送间隔 (ms)</label>
                     <Input type="number" className="text-xs w-full" min="50" max="500" value={streamingFlushMs} onChange={e => setStreamingFlushMs(e.target.value)} />
                   </div>
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center justify-between pt-2 border-t border-[color:var(--line)]">
+              <div className="flex items-center gap-1.5">
+                <Eye size={13} className="text-violet-500" />
+                <span className="text-[11px] font-medium text-[color:var(--text-soft)]">群消息监听模式</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMonitorEnabled(!monitorEnabled)}
+                className={cn(
+                  'relative w-9 h-5 rounded-full transition-colors duration-200',
+                  monitorEnabled ? 'bg-violet-500' : 'bg-[color:var(--line)]'
+                )}
+              >
+                <span className={cn(
+                  'absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200',
+                  monitorEnabled && 'translate-x-4'
+                )} />
+              </button>
+            </div>
+            {monitorEnabled && (
+              <div className="ml-5 space-y-1">
+                <div className="text-[10px] text-[color:var(--text-faint)] leading-relaxed">
+                  开启后机器人将接收群内所有消息（非仅 @机器人），按规则过滤后 AI 处理
+                </div>
+                <div className="flex items-start gap-1.5 px-2 py-1.5 rounded-lg bg-violet-500/10 border border-violet-500/20 text-[10px] text-violet-600 dark:text-violet-400 leading-relaxed">
+                  <AlertCircle size={11} className="shrink-0 mt-0.5" />
+                  <span>需要在飞书开发者后台添加 <code className="bg-violet-500/10 px-1 py-0.5 rounded font-mono">im:message.group_msg</code> 权限（敏感权限）</span>
                 </div>
               </div>
             )}
@@ -420,11 +456,420 @@ function ConnectorCard({ connector, onToggle, onEdit, onDelete }) {
             {connector.platform === 'feishu' && connector.parsedConfig?.streaming_enabled && (
               <span className="flex items-center gap-1 text-amber-500"><Zap size={10} /> 流式卡片</span>
             )}
+            {connector.platform === 'feishu' && connector.parsedConfig?.monitor_enabled && (
+              <span className="flex items-center gap-1 text-violet-500"><Eye size={10} /> 监听模式</span>
+            )}
           </div>
+        )}
+        {connector.platform === 'feishu' && connector.enabled && connector.parsedConfig?.monitor_enabled && (
+          <FeishuMonitorPanel connectorId={connector.id} />
         )}
       </Card>
       {showSend && <SendWebhookModal connectorId={connector.id} onClose={() => setShowSend(false)} />}
     </>
+  );
+}
+
+// ─── 飞书监听模式面板 ────────────────────────────────────────────────
+
+const ACTION_TYPES = [
+  { value: 'reply_original', label: '回复原消息' },
+  { value: 'silent', label: '静默处理（不回复）' },
+  { value: 'send_to_chat', label: '发到指定群' },
+  { value: 'send_to_user', label: '发给指定用户' },
+];
+
+const MSG_TYPES = [
+  { value: 'text', label: '文本' },
+  { value: 'post', label: '富文本' },
+  { value: 'image', label: '图片' },
+  { value: 'interactive', label: '卡片' },
+  { value: 'file', label: '文件' },
+];
+
+function FeishuMonitorPanel({ connectorId }) {
+  const [expanded, setExpanded] = useState(false);
+  const [tab, setTab] = useState('rules');
+  const [rules, setRules] = useState([]);
+  const [logs, setLogs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [showRuleModal, setShowRuleModal] = useState(false);
+  const [editingRule, setEditingRule] = useState(null);
+
+  const loadRules = useCallback(async () => {
+    try {
+      const data = await api.listMonitorRules(connectorId);
+      setRules(Array.isArray(data) ? data : []);
+    } catch {}
+  }, [connectorId]);
+
+  const loadLogs = useCallback(async () => {
+    try {
+      const data = await api.listMonitorLogs(connectorId, 50);
+      setLogs(Array.isArray(data) ? data : []);
+    } catch {}
+  }, [connectorId]);
+
+  useEffect(() => {
+    if (expanded) {
+      setLoading(true);
+      Promise.all([loadRules(), loadLogs()]).finally(() => setLoading(false));
+    }
+  }, [expanded, loadRules, loadLogs]);
+
+  const handleToggleRule = async (id) => {
+    await api.toggleMonitorRule(id);
+    loadRules();
+  };
+
+  const handleDeleteRule = async (id) => {
+    if (!confirm('确认删除此监听规则？')) return;
+    await api.deleteMonitorRule(id);
+    loadRules();
+  };
+
+  return (
+    <div className="mt-3 pt-3 border-t border-[color:var(--line)]">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 text-xs font-medium text-violet-500 hover:text-violet-600 transition w-full"
+      >
+        <Eye size={13} />
+        <span>监听模式配置</span>
+        {expanded ? <ChevronUp size={13} className="ml-auto" /> : <ChevronDown size={13} className="ml-auto" />}
+      </button>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="pt-3 space-y-3">
+              <div className="flex items-center gap-1">
+                <button onClick={() => setTab('rules')} className={cn(
+                  'px-2.5 py-1 rounded-lg text-[11px] transition',
+                  tab === 'rules' ? 'bg-violet-500/15 text-violet-600 font-medium' : 'text-[color:var(--text-soft)] hover:bg-[color:var(--bg-soft)]'
+                )}>
+                  <Filter size={11} className="inline mr-1" />规则管理
+                </button>
+                <button onClick={() => { setTab('logs'); loadLogs(); }} className={cn(
+                  'px-2.5 py-1 rounded-lg text-[11px] transition',
+                  tab === 'logs' ? 'bg-violet-500/15 text-violet-600 font-medium' : 'text-[color:var(--text-soft)] hover:bg-[color:var(--bg-soft)]'
+                )}>
+                  <Clock size={11} className="inline mr-1" />监听日志
+                </button>
+              </div>
+
+              {loading ? (
+                <div className="py-4 text-center text-[color:var(--text-faint)] text-xs">
+                  <Loader2 size={16} className="animate-spin mx-auto mb-1" />加载中...
+                </div>
+              ) : tab === 'rules' ? (
+                <div className="space-y-2">
+                  <div className="flex justify-end">
+                    <Button size="sm" onClick={() => { setEditingRule(null); setShowRuleModal(true); }}>
+                      <Plus size={12} /> 添加规则
+                    </Button>
+                  </div>
+                  {rules.length === 0 ? (
+                    <div className="py-4 text-center text-xs text-[color:var(--text-faint)]">
+                      <Filter size={20} className="mx-auto mb-1.5 opacity-40" />
+                      还没有监听规则，点击上方添加
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {rules.map(rule => (
+                        <div key={rule.id} className={cn(
+                          'flex items-center gap-2 p-2 rounded-lg border text-xs transition',
+                          rule.enabled ? 'border-violet-500/30 bg-violet-500/5' : 'border-[color:var(--line)] bg-[color:var(--bg-soft)] opacity-60'
+                        )}>
+                          <button onClick={() => handleToggleRule(rule.id)} title={rule.enabled ? '禁用' : '启用'}>
+                            {rule.enabled ? <ToggleRight size={16} className="text-violet-500" /> : <ToggleLeft size={16} className="text-[color:var(--text-faint)]" />}
+                          </button>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium text-[color:var(--text)]">{rule.name}</div>
+                            <div className="flex gap-1.5 mt-0.5 flex-wrap">
+                              <Badge tone="default">{ACTION_TYPES.find(a => a.value === rule.action_type)?.label || rule.action_type}</Badge>
+                              {rule.priority > 0 && <Badge tone="accent">P{rule.priority}</Badge>}
+                              {rule.keywords && rule.keywords !== '[]' && (
+                                <Badge tone="default"><MessageSquare size={9} className="mr-0.5" />关键词</Badge>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button size="sm" variant="ghost" onClick={() => { setEditingRule(rule); setShowRuleModal(true); }}>
+                              <Pencil size={12} />
+                            </Button>
+                            <Button size="sm" variant="ghost" onClick={() => handleDeleteRule(rule.id)}>
+                              <Trash2 size={12} />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {logs.length === 0 ? (
+                    <div className="py-4 text-center text-xs text-[color:var(--text-faint)]">
+                      <Clock size={20} className="mx-auto mb-1.5 opacity-40" />
+                      暂无监听日志
+                    </div>
+                  ) : logs.map(log => (
+                    <div key={log.id} className="flex items-start gap-2 p-2 rounded-lg bg-[color:var(--bg-soft)] text-[11px]">
+                      {log.result === 'success' ? <CheckCircle size={12} className="text-green-500 mt-0.5 shrink-0" /> :
+                       log.result === 'error' ? <XCircle size={12} className="text-red-500 mt-0.5 shrink-0" /> :
+                       <AlertCircle size={12} className="text-[color:var(--text-faint)] mt-0.5 shrink-0" />}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium text-[color:var(--text)]">{log.rule_name}</span>
+                          <Badge tone={log.result === 'success' ? 'success' : log.result === 'error' ? 'destructive' : 'default'}>
+                            {ACTION_TYPES.find(a => a.value === log.action_type)?.label || log.action_type}
+                          </Badge>
+                        </div>
+                        <div className="text-[color:var(--text-faint)] mt-0.5 truncate">
+                          {log.sender_name || log.sender_id}: {log.message_text}
+                        </div>
+                        {log.error_msg && <div className="text-red-500 mt-0.5">{log.error_msg}</div>}
+                        <div className="text-[color:var(--text-faint)] mt-0.5 text-[10px]">{log.created_at}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {showRuleModal && (
+        <MonitorRuleModal
+          connectorId={connectorId}
+          initial={editingRule}
+          onSave={() => { setShowRuleModal(false); setEditingRule(null); loadRules(); }}
+          onCancel={() => { setShowRuleModal(false); setEditingRule(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function MonitorRuleModal({ connectorId, initial, onSave, onCancel }) {
+  const isEdit = !!initial;
+  const [name, setName] = useState(initial?.name || '');
+  const [priority, setPriority] = useState(initial?.priority ?? 0);
+  const [enabled, setEnabled] = useState(initial?.enabled ?? true);
+  const [chatIDs, setChatIDs] = useState(() => {
+    try { return JSON.parse(initial?.chat_ids || '[]').join(', '); } catch { return ''; }
+  });
+  const [senderIDs, setSenderIDs] = useState(() => {
+    try { return JSON.parse(initial?.sender_ids || '[]').join(', '); } catch { return ''; }
+  });
+  const [excludeBotMsg, setExcludeBotMsg] = useState(initial?.exclude_bot_msg ?? true);
+  const [msgTypes, setMsgTypes] = useState(() => {
+    try { return JSON.parse(initial?.msg_types || '[]'); } catch { return []; }
+  });
+  const [keywords, setKeywords] = useState(() => {
+    try { return JSON.parse(initial?.keywords || '[]').join(', '); } catch { return ''; }
+  });
+  const [keywordMode, setKeywordMode] = useState(initial?.keyword_mode || 'any');
+  const [actionType, setActionType] = useState(initial?.action_type || 'reply_original');
+  const [actionTarget, setActionTarget] = useState(initial?.action_target || '');
+  const [customPrompt, setCustomPrompt] = useState(initial?.custom_prompt || '');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  // 飞书群列表
+  const [chats, setChats] = useState([]);
+  const [loadingChats, setLoadingChats] = useState(false);
+  useEffect(() => {
+    setLoadingChats(true);
+    api.listFeishuChats(connectorId).then(data => {
+      setChats(Array.isArray(data) ? data : []);
+    }).catch(() => {}).finally(() => setLoadingChats(false));
+  }, [connectorId]);
+
+  const toArr = (s) => s.split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
+
+  const handleSave = async () => {
+    setError('');
+    if (!name.trim()) { setError('请填写规则名'); return; }
+    setSaving(true);
+    try {
+      const data = {
+        connector_id: connectorId,
+        name: name.trim(),
+        enabled,
+        chat_ids: JSON.stringify(toArr(chatIDs)),
+        sender_ids: JSON.stringify(toArr(senderIDs)),
+        exclude_bot_msg: excludeBotMsg,
+        msg_types: JSON.stringify(msgTypes),
+        keywords: JSON.stringify(toArr(keywords)),
+        keyword_mode: keywordMode,
+        action_type: actionType,
+        action_target: actionTarget.trim(),
+        custom_prompt: customPrompt.trim(),
+        priority: Number(priority) || 0,
+      };
+      if (isEdit) {
+        await api.updateMonitorRule(initial.id, data);
+      } else {
+        await api.createMonitorRule(data);
+      }
+      onSave();
+    } catch (e) { setError('保存失败：' + e.message); }
+    finally { setSaving(false); }
+  };
+
+  const needsTarget = actionType === 'send_to_chat' || actionType === 'send_to_user';
+
+  return (
+    <Modal open onClose={onCancel} title={isEdit ? '编辑监听规则' : '新建监听规则'} width={480} footer={
+      <div className="flex gap-2">
+        <Button variant="outline" onClick={onCancel}>取消</Button>
+        <Button onClick={handleSave} disabled={saving}>
+          {saving ? <><Loader2 size={14} className="animate-spin" />保存中...</> : '保存'}
+        </Button>
+      </div>
+    }>
+      <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+        <div className="grid grid-cols-3 gap-2">
+          <div className="col-span-2">
+            <label className="text-[11px] font-medium text-[color:var(--text-soft)] mb-0.5 block">规则名称</label>
+            <Input value={name} onChange={e => setName(e.target.value)} placeholder="例如：监听产品反馈" />
+          </div>
+          <div>
+            <label className="text-[11px] font-medium text-[color:var(--text-soft)] mb-0.5 block">优先级</label>
+            <Input type="number" min="0" max="100" value={priority} onChange={e => setPriority(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="space-y-2 pt-2 border-t border-[color:var(--line)]">
+          <div className="text-[11px] font-medium text-violet-500 flex items-center gap-1">
+            <Filter size={11} /> 来源过滤
+          </div>
+          <div>
+            <label className="text-[10px] text-[color:var(--text-faint)] mb-0.5 block">指定群（留空=监听所有群）</label>
+            {loadingChats ? (
+              <div className="text-[10px] text-[color:var(--text-faint)]"><Loader2 size={10} className="inline animate-spin mr-1" />加载群列表...</div>
+            ) : chats.length > 0 ? (
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {chats.map(ch => {
+                  const selected = toArr(chatIDs).includes(ch.chat_id);
+                  return (
+                    <button
+                      key={ch.chat_id}
+                      onClick={() => {
+                        const arr = toArr(chatIDs);
+                        if (selected) setChatIDs(arr.filter(x => x !== ch.chat_id).join(', '));
+                        else setChatIDs([...arr, ch.chat_id].join(', '));
+                      }}
+                      className={cn(
+                        'px-2 py-0.5 rounded-full text-[10px] border transition',
+                        selected ? 'bg-violet-500/15 border-violet-500/40 text-violet-600' : 'border-[color:var(--line)] text-[color:var(--text-faint)] hover:bg-[color:var(--bg-soft)]'
+                      )}
+                    >
+                      {ch.name || ch.chat_id}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+            <Input className="text-xs" value={chatIDs} onChange={e => setChatIDs(e.target.value)} placeholder="oc_xxx, oc_yyy（逗号分隔）" />
+          </div>
+          <div>
+            <label className="text-[10px] text-[color:var(--text-faint)] mb-0.5 block">指定发送者 Open ID（留空=所有人）</label>
+            <Input className="text-xs" value={senderIDs} onChange={e => setSenderIDs(e.target.value)} placeholder="ou_xxx, ou_yyy（逗号分隔）" />
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-[color:var(--text-soft)]">排除机器人自身消息</span>
+            <button type="button" onClick={() => setExcludeBotMsg(!excludeBotMsg)} className={cn(
+              'relative w-8 h-4.5 rounded-full transition-colors duration-200',
+              excludeBotMsg ? 'bg-violet-500' : 'bg-[color:var(--line)]'
+            )}>
+              <span className={cn(
+                'absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white shadow transition-transform duration-200',
+                excludeBotMsg && 'translate-x-3.5'
+              )} />
+            </button>
+          </div>
+        </div>
+
+        <div className="space-y-2 pt-2 border-t border-[color:var(--line)]">
+          <div className="text-[11px] font-medium text-violet-500 flex items-center gap-1">
+            <MessageSquare size={11} /> 内容过滤
+          </div>
+          <div>
+            <label className="text-[10px] text-[color:var(--text-faint)] mb-0.5 block">消息类型（留空=所有类型）</label>
+            <div className="flex flex-wrap gap-1">
+              {MSG_TYPES.map(mt => {
+                const sel = msgTypes.includes(mt.value);
+                return (
+                  <button
+                    key={mt.value}
+                    onClick={() => setMsgTypes(prev => sel ? prev.filter(x => x !== mt.value) : [...prev, mt.value])}
+                    className={cn(
+                      'px-2 py-0.5 rounded-full text-[10px] border transition',
+                      sel ? 'bg-violet-500/15 border-violet-500/40 text-violet-600' : 'border-[color:var(--line)] text-[color:var(--text-faint)] hover:bg-[color:var(--bg-soft)]'
+                    )}
+                  >
+                    {mt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <label className="text-[10px] text-[color:var(--text-faint)] mb-0.5 block">关键词过滤（留空=不按关键词过滤）</label>
+            <Input className="text-xs" value={keywords} onChange={e => setKeywords(e.target.value)} placeholder="关键词1, 关键词2（逗号分隔）" />
+            <div className="flex gap-2 mt-1">
+              <button onClick={() => setKeywordMode('any')} className={cn(
+                'px-2 py-0.5 rounded text-[10px] transition',
+                keywordMode === 'any' ? 'bg-violet-500/15 text-violet-600' : 'text-[color:var(--text-faint)]'
+              )}>任一匹配</button>
+              <button onClick={() => setKeywordMode('all')} className={cn(
+                'px-2 py-0.5 rounded text-[10px] transition',
+                keywordMode === 'all' ? 'bg-violet-500/15 text-violet-600' : 'text-[color:var(--text-faint)]'
+              )}>全部匹配</button>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-2 pt-2 border-t border-[color:var(--line)]">
+          <div className="text-[11px] font-medium text-violet-500">处理动作</div>
+          <div>
+            <Select value={actionType} onChange={e => setActionType(e.target.value)}>
+              {ACTION_TYPES.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+            </Select>
+          </div>
+          {needsTarget && (
+            <div>
+              <label className="text-[10px] text-[color:var(--text-faint)] mb-0.5 block">
+                {actionType === 'send_to_chat' ? '目标群 Chat ID' : '目标用户 Open ID'}
+              </label>
+              <Input className="text-xs" value={actionTarget} onChange={e => setActionTarget(e.target.value)}
+                placeholder={actionType === 'send_to_chat' ? 'oc_xxx' : 'ou_xxx'} />
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-1.5 pt-2 border-t border-[color:var(--line)]">
+          <div className="text-[11px] font-medium text-violet-500">自定义提示词（可选）</div>
+          <textarea
+            className="w-full h-16 rounded-lg border border-[color:var(--line)] bg-[color:var(--bg-soft)] p-2 text-xs text-[color:var(--text)] placeholder:text-[color:var(--text-faint)] focus:outline-none focus:ring-1 focus:ring-violet-500 resize-none"
+            placeholder="不填则使用绑定智能体的默认提示词。填写后会以 [监控指令] {提示词}\n[原始消息] {消息内容} 的格式发给 AI"
+            value={customPrompt}
+            onChange={e => setCustomPrompt(e.target.value)}
+          />
+        </div>
+
+        {error && <div className="px-2 py-1.5 rounded-lg bg-red-500/10 border border-red-500/30 text-red-500 text-xs">{error}</div>}
+      </div>
+    </Modal>
   );
 }
 

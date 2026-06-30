@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useCallback } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { BookOpen, Brain, Cpu, Plug, Search, Download, Zap, Dna, Undo2, X, Shield, ChevronDown, Check } from 'lucide-react';
+import { BookOpen, Brain, Cpu, Plug, Search, Download, Zap, Dna, Undo2, X, ChevronDown, Check } from 'lucide-react';
 import { parseAssistantContent } from './blockUtils';
 import { useStore } from '../state/useStore';
 import { MessageList } from './MessageList';
@@ -36,24 +36,40 @@ export function ChatView() {
       <ChatContextBar useKB={useKB} onSearchOpen={() => setSearchOpen(true)} />
       <MessageList />
       <EvolutionInlineNotify />
-      {suggestedReplies.length > 0 && !isStreaming && (
-        <div className="px-4">
-          <div className="max-w-4xl mx-auto flex items-center gap-2 flex-wrap pb-2">
-            <Zap size={12} className="text-[color:var(--accent)] shrink-0" />
-            {suggestedReplies.map((reply, i) => (
-              <button
-                key={i}
-                onClick={() => sendMessage({ message: reply, useKB })}
-                className="px-3 py-1.5 rounded-full text-xs font-medium border border-[color:var(--line)] bg-[color:var(--bg-soft)]
-                  text-[color:var(--text-soft)] hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]
-                  hover:bg-[color:var(--accent-soft)] transition-all"
-              >
-                {reply}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      <AnimatePresence>
+        {suggestedReplies.length > 0 && !isStreaming && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.25 }}
+            className="px-4"
+          >
+            <div className="max-w-4xl mx-auto flex items-start gap-2 flex-wrap pb-2">
+              <span className="shrink-0 mt-1.5 flex items-center gap-1 text-[10px] text-[color:var(--text-faint)]">
+                <Zap size={11} className="text-[color:var(--accent)]" />
+                推荐
+              </span>
+              {suggestedReplies.map((reply, i) => (
+                <motion.button
+                  key={reply}
+                  initial={{ opacity: 0, scale: 0.92 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: i * 0.06 }}
+                  onClick={() => sendMessage({ message: reply, useKB })}
+                  className="px-3 py-1.5 rounded-full text-xs font-medium border border-[color:var(--line)]
+                    bg-[color:var(--bg-soft)] text-[color:var(--text-soft)]
+                    hover:border-[color:var(--accent)] hover:text-[color:var(--accent)]
+                    hover:bg-[color:var(--accent-soft)] hover:shadow-sm
+                    active:scale-[0.97] transition-all cursor-pointer"
+                >
+                  {reply}
+                </motion.button>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div className="relative">
         <AnimatePresence>
           <ScreenAgentPanel />
@@ -204,9 +220,6 @@ function ChatContextBar({ useKB, onSearchOpen }) {
           <ContextPill icon={<Cpu size={10} />} label={activeProfile?.model || '未配置'} />
           <ContextPill icon={<Brain size={10} />} label={capability.skills} />
           {useKB && <ContextPill icon={<BookOpen size={10} />} label="KB" active />}
-          {session?.permission_mode === 'managed' && (
-            <ContextPill icon={<Shield size={10} />} label="管控" active />
-          )}
         </div>
         <div className="flex items-center gap-1 shrink-0 ml-1">
           <button

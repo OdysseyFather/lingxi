@@ -10,60 +10,6 @@ export const createNexusSlice = (set, get) => ({
   })),
   clearNexusNotifs: () => set({ nexusNotifications: [] }),
 
-  nexusPeers: [],
-  nexusContacts: [],
-  a2aConversations: [],
-  pendingConnectRequests: [],
-
-  activeA2ASessionId: null,
-  activeA2AConvId: null,
-  a2aLiveBlocks: [],
-  a2aIsStreaming: false,
-  a2aRemoteLiveBlocks: [],
-  a2aRemoteIsStreaming: false,
-  a2aMessages: [],
-
-  setActiveA2ASession: async (sessionId) => {
-    set({
-      activeA2ASessionId: sessionId,
-      a2aLiveBlocks: [], a2aIsStreaming: false,
-      a2aRemoteLiveBlocks: [], a2aRemoteIsStreaming: false,
-      a2aMessages: [],
-    });
-    if (sessionId) {
-      wsClient.subscribe(sessionId);
-      const msgs = await api.listMessages(sessionId).catch(() => []);
-      set({ a2aMessages: msgs });
-    }
-  },
-
-  refreshA2AMessages: async () => {
-    const sid = get().activeA2ASessionId;
-    if (sid) {
-      const msgs = await api.listMessages(sid).catch(() => []);
-      set({ a2aMessages: msgs });
-    }
-  },
-
-  refreshNexusPeers: async () => {
-    try {
-      const data = await api.listPeers();
-      set({ nexusPeers: data || [] });
-    } catch {}
-  },
-  refreshNexusContacts: async () => {
-    try {
-      const data = await api.listContacts();
-      set({ nexusContacts: data || [] });
-    } catch {}
-  },
-  refreshA2AConversations: async () => {
-    try {
-      const data = await api.listA2AConversations();
-      set({ a2aConversations: data || [] });
-    } catch {}
-  },
-
   // ── 群聊 ─────────────────────────────────────────
   groupChats: [],
   activeGroupRoomId: null,
@@ -100,6 +46,22 @@ export const createNexusSlice = (set, get) => ({
     if (!id) return;
     try {
       const detail = await api.getGroupChat(id);
+      // 保留尚未被服务端确认的乐观消息
+      const prev = get().groupRoomDetail;
+      if (prev && prev.room?.id === id) {
+        const optimistic = (prev.messages || []).filter((m) => m._optimistic);
+        if (optimistic.length > 0) {
+          const serverMsgs = detail?.messages || [];
+          const merged = [...serverMsgs];
+          for (const opt of optimistic) {
+            const found = serverMsgs.some(
+              (s) => s.msg_type === 'user_post' && s.content === opt.content,
+            );
+            if (!found) merged.push(opt);
+          }
+          detail.messages = merged;
+        }
+      }
       set({ groupRoomDetail: detail });
     } catch {}
   },
@@ -131,14 +93,28 @@ export const createNexusSlice = (set, get) => ({
   applyGroupMessage: (msg) => {
     const detail = get().groupRoomDetail;
     if (!detail || !msg || msg.room_id !== detail.room?.id) return;
-    // 去重（按 id 或 client_msg_id）
     const existing = detail.messages || [];
+    // 去重（按 id 或 client_msg_id）
     const dup = existing.find(
       (m) =>
-        (msg.id != null && m.id != null && String(m.id) === String(msg.id)) ||
+        (!m._optimistic && msg.id != null && m.id != null && String(m.id) === String(msg.id)) ||
         (msg.client_msg_id && m.client_msg_id === msg.client_msg_id),
     );
     if (dup) return;
+    // 如果有对应的乐观消息（同 content + user_post），替换之
+    const isUserPost = msg.msg_type === 'user_post';
+    let merged = existing;
+    if (isUserPost) {
+      const optIdx = existing.findIndex(
+        (m) => m._optimistic && m.content === msg.content,
+      );
+      if (optIdx >= 0) {
+        merged = [...existing];
+        merged[optIdx] = msg;
+        set({ groupRoomDetail: { ...detail, messages: merged } });
+        return;
+      }
+    }
     set({
       groupRoomDetail: {
         ...detail,
@@ -217,6 +193,28 @@ export const createNexusSlice = (set, get) => ({
       const last = blocks[blocks.length - 1];
       if (last && last.type === 'text') last.text += info.data || '';
       else blocks.push({ type: 'text', text: info.data || '' });
+      streams[key] = { ...cur, blocks, senderPeerId: info.sender_peer_id, senderAgentName: info.sender_agent_name };
+      set({ groupLiveStreams: streams });
+      return;
+    } else if (info.event === 'thinking_start') {
+      const blocks = [...(cur.blocks || [])];
+      blocks.push({ type: 'thinking', text: '' });
+      streams[key] = { ...cur, blocks, senderPeerId: info.sender_peer_id, senderAgentName: info.sender_agent_name };
+      set({ groupLiveStreams: streams });
+      return;
+    } else if (info.event === 'thinking_delta') {
+      const blocks = [...(cur.blocks || [])];
+      const last = blocks[blocks.length - 1];
+      if (last && last.type === 'thinking') last.text += info.data || '';
+      else blocks.push({ type: 'thinking', text: info.data || '' });
+      streams[key] = { ...cur, blocks, senderPeerId: info.sender_peer_id, senderAgentName: info.sender_agent_name };
+      set({ groupLiveStreams: streams });
+      return;
+    } else if (info.event === 'thinking_done') {
+      const blocks = [...(cur.blocks || [])];
+      for (let i = blocks.length - 1; i >= 0; i--) {
+        if (blocks[i].type === 'thinking') { blocks[i] = { ...blocks[i], done: true }; break; }
+      }
       streams[key] = { ...cur, blocks, senderPeerId: info.sender_peer_id, senderAgentName: info.sender_agent_name };
       set({ groupLiveStreams: streams });
       return;

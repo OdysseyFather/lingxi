@@ -106,15 +106,16 @@ func UpdateSession(c *gin.Context) {
 	}
 
 	var body struct {
-		Title  *string `json:"title"`
-		Pinned *bool   `json:"pinned"`
-		Folder *string `json:"folder"`
+		Title          *string `json:"title"`
+		Pinned         *bool   `json:"pinned"`
+		Folder         *string `json:"folder"`
+		PermissionMode *string `json:"permission_mode"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.Status(http.StatusBadRequest)
 		return
 	}
-	if body.Title == nil && body.Pinned == nil && body.Folder == nil {
+	if body.Title == nil && body.Pinned == nil && body.Folder == nil && body.PermissionMode == nil {
 		c.Status(http.StatusBadRequest)
 		return
 	}
@@ -131,6 +132,13 @@ func UpdateSession(c *gin.Context) {
 	}
 	if body.Folder != nil {
 		db.DB.Exec(`UPDATE sessions SET folder=? WHERE id=?`, *body.Folder, sessionID)
+	}
+	if body.PermissionMode != nil {
+		mode := *body.PermissionMode
+		if mode != "trust" && mode != "ask" {
+			mode = "trust"
+		}
+		db.DB.Exec(`UPDATE sessions SET permission_mode=? WHERE id=?`, mode, sessionID)
 	}
 	c.Status(http.StatusOK)
 }

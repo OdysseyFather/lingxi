@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>灵犀 - 登录</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+    color: #e2e8f0;
+  }
+
+  .login-card {
+    width: 100%;
+    max-width: 400px;
+    margin: 20px;
+    background: rgba(30, 41, 59, 0.8);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(100, 116, 139, 0.3);
+    border-radius: 20px;
+    padding: 48px 36px;
+    box-shadow: 0 25px 50px rgba(0, 0, 0, 0.4);
+  }
+
+  .logo {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+
+  .logo-icon {
+    width: 64px;
+    height: 64px;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    border-radius: 16px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 32px;
+    margin-bottom: 16px;
+    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.3);
+  }
+
+  .logo h1 {
+    font-size: 24px;
+    font-weight: 600;
+    background: linear-gradient(135deg, #c7d2fe, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .logo p {
+    color: #94a3b8;
+    font-size: 14px;
+    margin-top: 4px;
+  }
+
+  .form-group {
+    margin-bottom: 20px;
+  }
+
+  .form-group label {
+    display: block;
+    font-size: 14px;
+    font-weight: 500;
+    color: #94a3b8;
+    margin-bottom: 8px;
+  }
+
+  .form-group input {
+    width: 100%;
+    padding: 12px 16px;
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(100, 116, 139, 0.3);
+    border-radius: 12px;
+    color: #e2e8f0;
+    font-size: 16px;
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+
+  .form-group input:focus {
+    border-color: #6366f1;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  }
+
+  .form-group input::placeholder {
+    color: #475569;
+  }
+
+  .submit-btn {
+    width: 100%;
+    padding: 12px;
+    background: linear-gradient(135deg, #6366f1, #7c3aed);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: transform 0.1s, box-shadow 0.2s;
+    margin-top: 8px;
+  }
+
+  .submit-btn:hover {
+    box-shadow: 0 8px 24px rgba(99, 102, 241, 0.4);
+  }
+
+  .submit-btn:active {
+    transform: scale(0.98);
+  }
+
+  .submit-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .error-msg {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 14px;
+    margin-bottom: 16px;
+    display: none;
+  }
+
+  .error-msg.visible {
+    display: block;
+  }
+
+  .footer {
+    text-align: center;
+    margin-top: 24px;
+    color: #475569;
+    font-size: 12px;
+  }
+
+  @media (max-width: 480px) {
+    .login-card {
+      padding: 36px 24px;
+      border-radius: 16px;
+    }
+  }
+</style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="logo">
+      <div class="logo-icon">&#10024;</div>
+      <h1>灵犀 AI Agent</h1>
+      <p>Web 版 &mdash; 请输入访问密码</p>
+    </div>
+
+    <div id="error" class="error-msg"></div>
+
+    <form id="loginForm" onsubmit="handleLogin(event)">
+      <div class="form-group">
+        <label for="password">访问密码</label>
+        <input
+          type="password"
+          id="password"
+          name="password"
+          placeholder="请输入 WEB_PASSWORD"
+          autocomplete="current-password"
+          required
+          autofocus
+        />
+      </div>
+      <button type="submit" class="submit-btn" id="submitBtn">
+        登录
+      </button>
+    </form>
+
+    <div class="footer">
+      灵犀 AI Agent &middot; 本地优先的 AI 工作台
+    </div>
+  </div>
+
+<script>
+async function handleLogin(e) {
+  e.preventDefault();
+  const btn = document.getElementById('submitBtn');
+  const errEl = document.getElementById('error');
+  const pw = document.getElementById('password').value.trim();
+
+  if (!pw) return;
+
+  btn.disabled = true;
+  btn.textContent = '登录中...';
+  errEl.className = 'error-msg';
+
+  try {
+    const resp = await fetch('/web/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pw }),
+      credentials: 'same-origin',
+    });
+
+    const data = await resp.json();
+
+    if (resp.ok && data.token) {
+      // 同时存入 localStorage 以便 SPA 内部 API 调用使用
+      localStorage.setItem('web_token', data.token);
+      window.location.href = '/';
+    } else {
+      errEl.textContent = data.error || '登录失败';
+      errEl.className = 'error-msg visible';
+    }
+  } catch (err) {
+    errEl.textContent = '网络错误，请重试';
+    errEl.className = 'error-msg visible';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '登录';
+  }
+}
+</script>
+</body>
+</html>

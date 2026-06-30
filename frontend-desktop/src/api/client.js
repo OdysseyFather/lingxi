@@ -49,6 +49,7 @@ export const api = {
     ),
   renameSession: (id, title) => req('PATCH', `/api/sessions/${id}`, { title }),
   pinSession: (id, pinned) => req('PATCH', `/api/sessions/${id}`, { pinned }),
+  setSessionPermissionMode: (id, mode) => req('PATCH', `/api/sessions/${id}`, { permission_mode: mode }),
   deleteSession: (id) => req('DELETE', `/api/sessions/${id}`),
   batchDeleteSessions: (ids) => req('POST', '/api/sessions/batch-delete', { ids }),
   batchExportSessions: async (ids) => {
@@ -182,16 +183,6 @@ export const api = {
   getNexusSettings: () => req('GET', '/api/nexus/settings'),
   updateNexusSettings: (data) => req('PUT', '/api/nexus/settings', data),
   listPeers: () => req('GET', '/api/peers'),
-  listA2AConversations: () => req('GET', '/api/a2a-conversations'),
-  getA2AConversation: (id) => req('GET', `/api/a2a-conversations/${id}`),
-  createA2AConversation: (data) => req('POST', '/api/a2a-conversations', data),
-  pauseA2AConversation: (id) => req('POST', `/api/a2a-conversations/${id}/pause`),
-  takeoverA2AConversation: (id, content) => req('POST', `/api/a2a-conversations/${id}/takeover`, { content }),
-  terminateA2AConversation: (id) => req('POST', `/api/a2a-conversations/${id}/terminate`),
-  approveA2AConversation: (id, approved) => req('POST', `/api/a2a-conversations/${id}/approve`, { approved }),
-  acceptRemoteConversation: (id, localAgentId) => req('POST', `/api/a2a-conversations/${id}/accept-remote`, { local_agent_id: localAgentId }),
-  rejectRemoteConversation: (id) => req('POST', `/api/a2a-conversations/${id}/reject-remote`),
-  deleteA2AConversation: (id) => req('DELETE', `/api/a2a-conversations/${id}`),
   getAgentNexusConfig: (id) => req('GET', `/api/agents/${id}/nexus-config`),
   updateAgentNexusConfig: (id, data) => req('PUT', `/api/agents/${id}/nexus-config`, data),
 
@@ -293,13 +284,6 @@ export const api = {
   getAgentScreenConfig: (id) => req('GET', `/api/agents/${id}/screen-config`),
   setAgentScreenConfig: (id, data) => req('PUT', `/api/agents/${id}/screen-config`, data),
 
-  // ── 权限审批 ──────────────────────────────────────────────────
-  listPermissionRules: (agentId = 0) => req('GET', `/api/permission-rules?agent_id=${agentId}`),
-  createPermissionRule: (data) => req('POST', '/api/permission-rules', data),
-  deletePermissionRule: (id) => req('DELETE', `/api/permission-rules/${id}`),
-  listPendingApprovals: () => req('GET', '/api/approvals/pending'),
-  listRecentApprovals: (limit = 50) => req('GET', `/api/approvals?limit=${limit}`),
-  reviewApproval: (id, action, reason = '') => req('POST', `/api/approvals/${id}/review`, { action, reason }),
 
   // ── H5 远程访问 ───────────────────────────────────────────────
   getH5Settings: () => req('GET', '/api/h5-access/settings'),
@@ -338,6 +322,26 @@ export const api = {
     if (!res.ok) throw new Error(data.error || '导入失败');
     return data;
   },
+
+  // ── IM 看板 ─────────────────────────────────────────────────
+  listIMSessions: (platform) => req('GET', `/api/im-dashboard/sessions${platform ? `?platform=${platform}` : ''}`),
+  getIMDashboardStats: () => req('GET', '/api/im-dashboard/stats'),
+  getIMSessionMessages: (id, opts = {}) => {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set('limit', opts.limit);
+    if (opts.before) params.set('before', opts.before);
+    return req('GET', `/api/im-dashboard/sessions/${id}/messages?${params}`);
+  },
+  deleteIMSession: (id) => req('DELETE', `/api/im-dashboard/sessions/${id}`),
+
+  // 飞书监听模式
+  listMonitorRules: (connectorId) => req('GET', `/api/feishu-monitor/rules?connector_id=${connectorId}`),
+  createMonitorRule: (data) => req('POST', '/api/feishu-monitor/rules', data),
+  updateMonitorRule: (id, data) => req('PUT', `/api/feishu-monitor/rules/${id}`, data),
+  deleteMonitorRule: (id) => req('DELETE', `/api/feishu-monitor/rules/${id}`),
+  toggleMonitorRule: (id) => req('PUT', `/api/feishu-monitor/rules/${id}/toggle`),
+  listMonitorLogs: (connectorId, limit) => req('GET', `/api/feishu-monitor/logs?connector_id=${connectorId}&limit=${limit || 50}`),
+  listFeishuChats: (connectorId) => req('GET', `/api/feishu-monitor/chats?connector_id=${connectorId}`),
 };
 
 // ─── 灵犀社区平台 API ────────────────────────────────────────────────
@@ -514,7 +518,30 @@ export const electron = {
   },
   pushActiveSecret: async (profileId) => {
     if (window.electronAPI?.pushActiveSecret) return window.electronAPI.pushActiveSecret(profileId);
-    return { ok: false };
+    // Web 版：直接通过 HTTP 把明文 token 下发到后端
+    try {
+      const profiles = await req('GET', '/api/api-profiles?include_cipher=1');
+      const p = profiles.find((x) => x.id === profileId);
+      if (!p) return { ok: false };
+      const token = p.auth_token_cipher ? await electron.decryptSecret(p.auth_token_cipher) : '';
+      if (!token) return { ok: false };
+      // profile 已 JOIN provider，直接取 provider_protocol / provider_code
+      await req('POST', '/api/runtime/active-secret', {
+        id: p.id,
+        name: p.name,
+        model: p.model,
+        base_url: p.base_url,
+        token,
+        protocol: p.provider_protocol || 'anthropic',
+        transformer: p.transformer || '',
+        provider_code: p.provider_code || '',
+        provider_meta: '',
+      });
+      return { ok: true };
+    } catch (e) {
+      console.warn('[web] pushActiveSecret failed:', e);
+      return { ok: false };
+    }
   },
   openExternal: (url) => {
     if (window.electronAPI?.openExternal) return window.electronAPI.openExternal(url);

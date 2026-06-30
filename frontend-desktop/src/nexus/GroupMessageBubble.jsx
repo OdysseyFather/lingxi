@@ -196,7 +196,7 @@ export default function GroupMessageBubble({
             />
           )}
         </div>
-        <div className={cn('max-w-[78%] min-w-0 flex flex-col', isMine ? 'items-end' : 'items-start')}>
+        <div className={cn('max-w-[85%] min-w-0 flex flex-col', isMine ? 'items-end' : 'items-start')}>
           {!merged && !isMine && (
             <div className="text-[11px] text-[color:var(--text-faint)] mb-0.5 px-1 flex items-center gap-1">
               <span>{displayName}</span>
@@ -216,8 +216,8 @@ export default function GroupMessageBubble({
               'relative rounded-lg px-3 py-1.5 text-[14px] leading-relaxed break-words',
               'shadow-sm transition select-text',
               isMine
-                ? 'bg-[#95ec69] dark:bg-[color:var(--accent)] text-black dark:text-white'
-                : 'bg-white dark:bg-[color:var(--bg-elev)] text-[color:var(--text)] border border-[color:var(--line)]'
+                ? 'bg-[color:var(--accent)] text-white'
+                : 'bg-[color:var(--bg-elev)] text-[color:var(--text)] border border-[color:var(--line)]'
             )}
           >
             {/* 引用块 */}
@@ -252,9 +252,8 @@ export default function GroupMessageBubble({
               <div className="md-block prose-a2a">
                 {isAgentMsg ? (
                   <BlocksRenderer
-                    blocks={parseAssistantContent(msg.content).filter((b) => b.type !== 'thinking' && b.type !== 'tool')}
+                    blocks={parseAssistantContent(msg.content)}
                     live={false}
-                    hideThinking
                   />
                 ) : looksLikeMarkdown(msg.content) ? (
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={MD_COMPONENTS}>

@@ -1,26 +1,33 @@
 import { useState, useEffect, lazy, Suspense } from 'react';
 import { useStore } from '../state/useStore';
-import { Cpu, BarChart3, Palette, BrainCircuit, Wifi, Info, UserCircle, LogOut, Shield, Calendar, ShieldCheck, Smartphone, Sparkles } from 'lucide-react';
+import { Cpu, BarChart3, Palette, BrainCircuit, Wifi, Info, UserCircle, LogOut, Shield, Calendar, Smartphone, Settings2, MessageCircle, Workflow, Clock, Dna, Link2 } from 'lucide-react';
 import { ProfilesPage } from './ProfilesPage';
 import { UsagePage } from './UsagePage';
 import { AppearancePage } from './AppearancePage';
 import { MemoryPage } from './MemoryPage';
+import { GeneralPage } from './GeneralPage';
 import NexusSettingsPage from './NexusSettingsPage';
-const PermissionsPage = lazy(() => import('./PermissionsPage'));
 const RemoteAccessPage = lazy(() => import('./RemoteAccessPage'));
-const ProactiveAgentPage = lazy(() => import('./ProactiveAgentPage'));
+const IMConnectorPage = lazy(() => import('../IMConnectorPage'));
+const IMDashboardPage = lazy(() => import('../IMDashboardPage'));
+const ScheduledTasksPage = lazy(() => import('../ScheduledTasksPage'));
+const WorkflowPage = lazy(() => import('../WorkflowPage'));
+const EvolutionPage = lazy(() => import('../EvolutionPage'));
 import { cn } from '../ui/cn';
 import { Button, Card } from '../ui/primitives';
 
 const TABS = [
+  { id: 'general',    label: '通用',         icon: Settings2 },
   { id: 'account',    label: '账号',         icon: UserCircle },
   { id: 'profiles',   label: '模型与接入点', icon: Cpu },
   { id: 'memory',     label: '长期记忆',     icon: BrainCircuit },
-  { id: 'permissions',label: '权限与审批',   icon: ShieldCheck },
+  { id: 'im',         label: 'IM 接入',      icon: MessageCircle },
+  { id: 'scheduled',  label: '定时任务',     icon: Clock },
+  { id: 'workflow',   label: '工作流',       icon: Workflow },
+  { id: 'evolution',  label: '自我进化',     icon: Dna },
   { id: 'remote',     label: '远程访问',     icon: Smartphone },
   { id: 'nexus',      label: '网络与协作',   icon: Wifi },
   { id: 'usage',      label: '用量',         icon: BarChart3 },
-  { id: 'proactive',  label: '主动式 Agent', icon: Sparkles },
   { id: 'appearance', label: '外观',         icon: Palette },
   { id: 'about',      label: '关于',         icon: Info },
 ];
@@ -159,16 +166,52 @@ export function SettingsPage() {
         </nav>
       </aside>
       <div className="flex-1 overflow-y-auto scrollable">
+        {tab === 'general' && <GeneralPage />}
         {tab === 'account' && <AccountPage />}
         {tab === 'profiles' && <ProfilesPage />}
         {tab === 'memory' && <MemoryPage />}
-        {tab === 'permissions' && <Suspense fallback={<div className="p-6 text-sm text-[color:var(--text-faint)]">加载中…</div>}><PermissionsPage /></Suspense>}
+        {tab === 'im' && <Suspense fallback={<div className="p-6 text-sm text-[color:var(--text-faint)]">加载中…</div>}><IMPageInSettings /></Suspense>}
+        {tab === 'scheduled' && <Suspense fallback={<div className="p-6 text-sm text-[color:var(--text-faint)]">加载中…</div>}><ScheduledTasksPage /></Suspense>}
+        {tab === 'workflow' && <Suspense fallback={<div className="p-6 text-sm text-[color:var(--text-faint)]">加载中…</div>}><WorkflowPage /></Suspense>}
+        {tab === 'evolution' && <Suspense fallback={<div className="p-6 text-sm text-[color:var(--text-faint)]">加载中…</div>}><EvolutionPage /></Suspense>}
         {tab === 'remote' && <Suspense fallback={<div className="p-6 text-sm text-[color:var(--text-faint)]">加载中…</div>}><RemoteAccessPage /></Suspense>}
         {tab === 'nexus' && <div className="p-6"><NexusSettingsPage /></div>}
         {tab === 'usage' && <UsagePage />}
-        {tab === 'proactive' && <Suspense fallback={<div className="p-6 text-sm text-[color:var(--text-faint)]">加载中…</div>}><ProactiveAgentPage /></Suspense>}
         {tab === 'appearance' && <AppearancePage />}
         {tab === 'about' && <AboutPage />}
+      </div>
+    </div>
+  );
+}
+
+function IMPageInSettings() {
+  const [imTab, setImTab] = useState('connector');
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className="flex items-center gap-1 border-b border-[color:var(--line)] px-6 pt-3 pb-1">
+        {[
+          { id: 'connector', label: '连接器', icon: Link2 },
+          { id: 'dashboard', label: 'IM 看板', icon: BarChart3 },
+        ].map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setImTab(t.id)}
+            className={cn(
+              'relative flex items-center gap-1.5 px-3 py-1.5 rounded-t-lg text-sm font-medium transition-colors',
+              imTab === t.id
+                ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
+                : 'text-[color:var(--text-soft)] hover:text-[color:var(--text)] hover:bg-[color:var(--bg-soft)]'
+            )}
+          >
+            <t.icon size={14} />
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex-1 overflow-auto scrollable p-4">
+        <Suspense fallback={<div className="text-sm text-[color:var(--text-faint)]">加载中…</div>}>
+          {imTab === 'connector' ? <IMConnectorPage /> : <IMDashboardPage />}
+        </Suspense>
       </div>
     </div>
   );

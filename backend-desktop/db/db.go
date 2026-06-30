@@ -201,6 +201,40 @@ func migrate() {
 			created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
+		// ── 飞书监听模式 ─────────────────────────────────────────────
+		`CREATE TABLE IF NOT EXISTS feishu_monitor_rules (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			connector_id    INTEGER NOT NULL,
+			name            TEXT    NOT NULL DEFAULT '',
+			enabled         INTEGER NOT NULL DEFAULT 1,
+			chat_ids        TEXT    NOT NULL DEFAULT '[]',
+			sender_ids      TEXT    NOT NULL DEFAULT '[]',
+			exclude_bot_msg INTEGER NOT NULL DEFAULT 1,
+			msg_types       TEXT    NOT NULL DEFAULT '[]',
+			keywords        TEXT    NOT NULL DEFAULT '[]',
+			keyword_mode    TEXT    NOT NULL DEFAULT 'any',
+			action_type     TEXT    NOT NULL DEFAULT 'reply_original',
+			action_target   TEXT    NOT NULL DEFAULT '',
+			custom_prompt   TEXT    NOT NULL DEFAULT '',
+			priority        INTEGER NOT NULL DEFAULT 0,
+			created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE TABLE IF NOT EXISTS feishu_monitor_logs (
+			id              INTEGER PRIMARY KEY AUTOINCREMENT,
+			connector_id    INTEGER NOT NULL,
+			rule_id         INTEGER NOT NULL DEFAULT 0,
+			rule_name       TEXT    NOT NULL DEFAULT '',
+			chat_id         TEXT    NOT NULL DEFAULT '',
+			sender_id       TEXT    NOT NULL DEFAULT '',
+			sender_name     TEXT    NOT NULL DEFAULT '',
+			message_text    TEXT    NOT NULL DEFAULT '',
+			action_type     TEXT    NOT NULL DEFAULT '',
+			action_target   TEXT    NOT NULL DEFAULT '',
+			result          TEXT    NOT NULL DEFAULT '',
+			error_msg       TEXT    NOT NULL DEFAULT '',
+			created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := DB.Exec(s); err != nil {
@@ -474,8 +508,6 @@ func migrate() {
 	// ── 群聊 Agent 人格 ──────────────────────────────────────────
 	MigrateAgentPersonality()
 
-	// ── 权限审批 ────────────────────────────────────────────────
-	MigratePermission()
 
 	// ── H5 远程访问 ─────────────────────────────────────────────
 	MigrateH5Access()
@@ -695,7 +727,7 @@ func seedBuiltinAgent() {
 	}
 
 	for _, s := range seeds {
-		_, err := DB.Exec(`INSERT INTO agents (name, avatar, description, system_prompt, allow_all, builtin) VALUES (?, ?, ?, ?, 1, 1)`,
+		_, err := DB.Exec(`INSERT INTO agents (name, avatar, description, system_prompt, allow_all, builtin, evolution_enabled) VALUES (?, ?, ?, ?, 1, 1, 1)`,
 			s.name, s.avatar, s.desc, s.prompt)
 		if err != nil {
 			slog.Warn("seed builtin agent error", "name", s.name, "err", err)

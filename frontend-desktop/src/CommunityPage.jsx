@@ -48,6 +48,7 @@ export default function CommunityPage() {
   const [tab, setTab] = useState('discover'); // discover | leaderboard | following | mine | settings
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [serverError, setServerError] = useState(null);
 
   useEffect(() => {
     if (!community.isLoggedIn()) {
@@ -57,7 +58,10 @@ export default function CommunityPage() {
     community.getMe().then(d => {
       setUser(d.user);
       setLoading(false);
-    }).catch(() => {
+    }).catch((e) => {
+      if (e.message?.includes('Failed to fetch') || e.message?.includes('NetworkError')) {
+        setServerError('无法连接到社区服务器');
+      }
       setLoading(false);
     });
   }, []);
@@ -65,13 +69,18 @@ export default function CommunityPage() {
   const handleLogin = async () => {
     try {
       setLoading(true);
+      setServerError(null);
       const d = await community.registerAnon();
       localStorage.lingxi_community_token = d.token;
       setUser(d.user);
       setLoading(false);
     } catch (e) {
       setLoading(false);
-      alert('注册失败: ' + e.message);
+      if (e.message?.includes('Failed to fetch') || e.message?.includes('NetworkError')) {
+        setServerError('无法连接到社区服务器，请确保 community-server 已启动。');
+      } else {
+        setServerError('注册失败: ' + e.message);
+      }
     }
   };
 
@@ -84,6 +93,30 @@ export default function CommunityPage() {
     return (
       <div className="flex-1 flex items-center justify-center">
         <Loader2 className="w-6 h-6 animate-spin text-[color:var(--accent)]" />
+      </div>
+    );
+  }
+
+  if (serverError) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-8">
+        <div className="max-w-md w-full text-center space-y-4">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-red-50 flex items-center justify-center">
+            <Users className="w-8 h-8 text-red-400" />
+          </div>
+          <h2 className="text-xl font-bold text-[color:var(--text)]">社区服务不可用</h2>
+          <p className="text-sm text-[color:var(--text-soft)]">{serverError}</p>
+          <div className="text-xs text-[color:var(--text-faint)] space-y-2 text-left bg-[color:var(--bg-soft)] rounded-lg p-4">
+            <p className="font-medium">如何启动社区服务：</p>
+            <code className="block text-[11px] bg-[color:var(--bg)] p-2 rounded border border-[color:var(--line)]">
+              cd community-server && go run .
+            </code>
+            <p>默认端口 8090，可通过 localStorage 设置 <code className="text-[color:var(--accent)]">lingxi_community_url</code> 配置自定义地址。</p>
+          </div>
+          <Button onClick={() => { setServerError(null); handleLogin(); }} variant="primary" className="w-full">
+            重试连接
+          </Button>
+        </div>
       </div>
     );
   }

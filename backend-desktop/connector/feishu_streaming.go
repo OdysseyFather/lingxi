@@ -98,13 +98,22 @@ type feishuStreamSender struct {
 	lastFlushed   string
 	pendingAppend string
 
+	// fullTextReply 累积所有 KindText 文本，用于完成后检测交互块
+	fullTextReply strings.Builder
+	// thinkingContent 累积所有 KindThinking 原始文本，完成后用折叠面板展示
+	thinkingContent strings.Builder
+
 	// 阶段状态：用于格式化不同类型的内容
 	currentPhase string // "thinking" | "tool" | "text" | ""
 
 	// 思考阶段已输出标记（只输出一次提示，不累积思考原文）
 	thinkingEmitted bool
-	// 工具调用阶段已输出标记（tool 进入后输出一次分隔，避免多余空行）
+	// 工具调用阶段已输出标记
 	toolSectionStarted bool
+
+	// 工具调用聚合：收集当前连续工具调用组，切换到 text 阶段时一次性输出摘要
+	pendingTools []string // 当前连续组中的工具名列表（如 ["Bash", "Bash", "Read", "Skill"]）
+	toolGroupEmitted int  // 已输出的工具组数量
 
 	pendingFlush  bool
 	flushTimer    *time.Timer
@@ -112,6 +121,12 @@ type feishuStreamSender struct {
 
 	cardTitle string
 	done      bool
+
+	// doneCallback 流式完成后用于构建交互元素的回调（在 replaceCardFinal 中调用）
+	doneCallback func() []map[string]interface{}
+
+	// chatMembers 群成员名字→open_id 映射，用于在最终卡片中替换 @mention
+	chatMembers map[string]string
 }
 
 func newFeishuStreamSender(appID, appSecret, chatID, msgID string, cfg FeishuConfig) *feishuStreamSender {
@@ -166,24 +181,35 @@ func (s *feishuStreamSender) OnStreamCallback(kind StreamKind, payload string, d
 			s.pendingAppend += "> 💭 正在分析问题...\n\n"
 			s.currentPhase = "thinking"
 		}
+		// 累积思考原文，完成后在折叠面板中展示
+		if payload != "" {
+			s.thinkingContent.WriteString(payload)
+		}
 
 	case KindTool:
-		s.currentPhase = "tool"
-		// payload 格式为 "🔧 工具名"，直接用引用块展示
-		toolLine := payload
-		if toolLine == "" {
-			toolLine = "🔧 调用工具"
+		// 提取工具名：payload 格式为 "🔧 工具名" 或纯工具名
+		toolName := strings.TrimPrefix(payload, "🔧 ")
+		toolName = strings.TrimSpace(toolName)
+		if toolName == "" {
+			toolName = "工具"
 		}
+		s.pendingTools = append(s.pendingTools, toolName)
+		s.currentPhase = "tool"
 		if !s.toolSectionStarted {
 			s.toolSectionStarted = true
 		}
-		s.pendingAppend += "> " + toolLine + "\n"
 
 	case KindText:
 		if payload != "" {
-			// 从非文本阶段首次进入文本阶段时，追加一个空行作为分隔
-			if s.currentPhase != "text" && (s.thinkingEmitted || s.toolSectionStarted) {
-				s.pendingAppend += "\n"
+			// 始终累积到 fullTextReply（用于完成后检测交互块）
+			s.fullTextReply.WriteString(payload)
+
+			// 从工具阶段切换到文本阶段：输出聚合的工具摘要
+			if s.currentPhase != "text" {
+				s.flushPendingTools()
+				if s.thinkingEmitted || s.toolSectionStarted {
+					s.pendingAppend += "\n"
+				}
 			}
 			s.currentPhase = "text"
 			s.pendingAppend += payload
@@ -191,11 +217,15 @@ func (s *feishuStreamSender) OnStreamCallback(kind StreamKind, payload string, d
 	}
 
 	if done {
+		// 输出剩余的工具调用摘要
+		s.flushPendingTools()
 		s.done = true
 		if s.flushTimer != nil {
 			s.flushTimer.Stop()
 			s.flushTimer = nil
 		}
+		// 从最终内容中移除 choice/input JSON 块（避免原始 JSON 显示在卡片中）
+		s.cleanInteractiveJSONFromContent()
 		return s.flushLocked()
 	}
 
@@ -220,6 +250,162 @@ func (s *feishuStreamSender) OnStreamCallback(kind StreamKind, payload string, d
 		}
 	}
 	return nil
+}
+
+// cleanInteractiveJSONFromContent 从最终卡片内容中移除 choice/input JSON 块。
+// 由于流式过程中 JSON 是作为 KindText 追加的，完成后需要清理以避免显示原始 JSON。
+func (s *feishuStreamSender) cleanInteractiveJSONFromContent() {
+	// 合并 lastFlushed + pendingAppend 为完整内容
+	full := s.lastFlushed + s.pendingAppend
+
+	// 尝试移除 JSON 块（代码围栏包裹的和裸 JSON）
+	cleaned := removeInteractiveJSON(full)
+	if cleaned != full {
+		// 内容有变化，重置为清理后的内容
+		s.lastFlushed = ""
+		s.pendingAppend = strings.TrimRight(cleaned, "\n \t") + "\n"
+	}
+}
+
+// removeInteractiveJSON 从文本中移除 choice/input 类型的 JSON 块
+func removeInteractiveJSON(text string) string {
+	var result strings.Builder
+	i := 0
+	for i < len(text) {
+		// 检查代码围栏包裹的 JSON
+		if i+3 < len(text) && text[i:i+3] == "```" {
+			// 找到对应的结束围栏
+			lineEnd := strings.IndexByte(text[i+3:], '\n')
+			if lineEnd < 0 {
+				result.WriteString(text[i:])
+				break
+			}
+			bodyStart := i + 3 + lineEnd + 1
+			endFence := strings.Index(text[bodyStart:], "```")
+			if endFence >= 0 {
+				body := text[bodyStart : bodyStart+endFence]
+				fenceEnd := bodyStart + endFence + 3
+				// 跳过围栏后的换行
+				if fenceEnd < len(text) && text[fenceEnd] == '\n' {
+					fenceEnd++
+				}
+				if isInteractiveJSON(strings.TrimSpace(body)) {
+					i = fenceEnd
+					continue
+				}
+			}
+			result.WriteByte(text[i])
+			i++
+			continue
+		}
+
+		// 检查裸 JSON
+		if text[i] == '{' {
+			jsonStr, end := extractSingleJSON(text, i)
+			if jsonStr != "" && isInteractiveJSON(jsonStr) {
+				i = end
+				// 跳过 JSON 后面的换行
+				for i < len(text) && (text[i] == '\n' || text[i] == '\r') {
+					i++
+				}
+				continue
+			}
+		}
+
+		result.WriteByte(text[i])
+		i++
+	}
+	return result.String()
+}
+
+// extractSingleJSON 从 text[start] 开始提取一个完整的 JSON 对象
+func extractSingleJSON(text string, start int) (string, int) {
+	depth := 0
+	inString := false
+	escape := false
+	for j := start; j < len(text); j++ {
+		ch := text[j]
+		if escape {
+			escape = false
+			continue
+		}
+		if ch == '\\' && inString {
+			escape = true
+			continue
+		}
+		if ch == '"' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		if ch == '{' {
+			depth++
+		} else if ch == '}' {
+			depth--
+			if depth == 0 {
+				return text[start : j+1], j + 1
+			}
+		}
+	}
+	return "", start
+}
+
+// isInteractiveJSON 检查 JSON 字符串是否为 choice/input 交互块
+func isInteractiveJSON(jsonStr string) bool {
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(jsonStr), &obj); err != nil {
+		return false
+	}
+	t, _ := obj["type"].(string)
+	return t == "choice" || t == "input"
+}
+
+// flushPendingTools 将聚合的工具调用输出为简洁摘要行。
+// 例如：连续 3 次 Bash + 1 次 Read → "> 🔧 Bash ×3 · Read"
+func (s *feishuStreamSender) flushPendingTools() {
+	if len(s.pendingTools) == 0 {
+		return
+	}
+
+	// 统计各工具出现次数（保持原始顺序）
+	type toolCount struct {
+		name  string
+		count int
+	}
+	var ordered []toolCount
+	seen := make(map[string]int) // name -> index in ordered
+	for _, name := range s.pendingTools {
+		if idx, ok := seen[name]; ok {
+			ordered[idx].count++
+		} else {
+			seen[name] = len(ordered)
+			ordered = append(ordered, toolCount{name: name, count: 1})
+		}
+	}
+
+	// 格式化：Bash ×3 · Read · Skill
+	var parts []string
+	for _, tc := range ordered {
+		if tc.count > 1 {
+			parts = append(parts, fmt.Sprintf("%s ×%d", tc.name, tc.count))
+		} else {
+			parts = append(parts, tc.name)
+		}
+	}
+
+	summary := strings.Join(parts, " · ")
+	s.pendingAppend += "> 🔧 " + summary + "\n"
+	s.pendingTools = nil
+	s.toolGroupEmitted++
+}
+
+// SetDoneCallback 设置流式完成后的交互元素构建回调
+func (s *feishuStreamSender) SetDoneCallback(cb func() []map[string]interface{}) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.doneCallback = cb
 }
 
 // OnChunk 兼容旧版接口
@@ -293,14 +479,121 @@ func (s *feishuStreamSender) flushLocked() error {
 	}
 
 	s.sequence++
-	if err := s.updateElement(token, content, s.sequence); err != nil {
-		return err
+
+	if s.done {
+		// 完成后：用完整卡片 JSON 替换（关闭 streaming_mode + 最终内容），
+		// 这样可以移除流式过程中输出的 choice JSON 等临时内容。
+		if err := s.replaceCardFinal(token, content); err != nil {
+			slog.Warn("[feishu-stream] replaceCardFinal failed, fallback to updateElement", "err", err)
+			// 回退到普通更新
+			if err2 := s.updateElement(token, content, s.sequence); err2 != nil {
+				return err2
+			}
+		}
+	} else {
+		if err := s.updateElement(token, content, s.sequence); err != nil {
+			return err
+		}
 	}
 
 	// flush 成功，合并 pendingAppend 到 lastFlushed
 	s.lastFlushed = content
 	s.pendingAppend = ""
 	return nil
+}
+
+// replaceCardFinal 用完整卡片 JSON 替换当前卡片（关闭流式模式 + 最终内容 + 交互元素）。
+// 使用 PUT /cardkit/v1/cards/:card_id 整体替换卡片 JSON。
+func (s *feishuStreamSender) replaceCardFinal(token, content string) error {
+	// 替换 @名字 为飞书真实 @mention 格式
+	if len(s.chatMembers) > 0 {
+		content = replaceAtMentions(content, s.chatMembers)
+	}
+
+	var elements []map[string]interface{}
+
+	// 如果有思考内容，用折叠面板展示（默认折叠）
+	thinkingText := strings.TrimSpace(s.thinkingContent.String())
+	if thinkingText != "" {
+		// 从主内容中移除流式阶段的思考提示行
+		content = strings.Replace(content, "> 💭 正在分析问题...\n\n", "", 1)
+		content = strings.TrimLeft(content, "\n")
+
+		// 截断过长的思考内容（飞书卡片有大小限制）
+		if len(thinkingText) > 3000 {
+			thinkingText = thinkingText[:3000] + "\n\n... (思考内容过长，已截断)"
+		}
+
+		elements = append(elements, map[string]interface{}{
+			"tag":        "collapsible_panel",
+			"element_id": "thinking_panel",
+			"expanded":   false,
+			"header": map[string]interface{}{
+				"title": map[string]interface{}{
+					"tag":     "plain_text",
+					"content": "💭 思考过程",
+				},
+				"vertical_align": "center",
+				"icon": map[string]interface{}{
+					"tag":   "standard_icon",
+					"token": "down-small-ccm_outlined",
+					"size":  "16px 16px",
+				},
+				"icon_position":       "follow_text",
+				"icon_expanded_angle": -180,
+			},
+			"border": map[string]interface{}{
+				"color":         "grey",
+				"corner_radius": "5px",
+			},
+			"vertical_spacing": "4px",
+			"padding":          "8px",
+			"elements": []map[string]interface{}{
+				{
+					"tag":     "markdown",
+					"content": thinkingText,
+				},
+			},
+		})
+	}
+
+	// 主内容
+	elements = append(elements, map[string]interface{}{
+		"tag":        "markdown",
+		"element_id": "streaming_md",
+		"content":    content,
+	})
+
+	// 追加交互元素（选择按钮 + 反馈按钮）
+	if s.doneCallback != nil {
+		interactiveElements := s.doneCallback()
+		elements = append(elements, interactiveElements...)
+	}
+
+	card := map[string]interface{}{
+		"schema": "2.0",
+		"config": map[string]interface{}{
+			"streaming_mode": false,
+			"update_multi":   true,
+			"width_mode":     "default",
+		},
+		"header": map[string]interface{}{
+			"title":    map[string]interface{}{"tag": "plain_text", "content": s.cardTitle},
+			"template": "blue",
+		},
+		"body": map[string]interface{}{
+			"elements": elements,
+		},
+	}
+	cardJSON, _ := json.Marshal(card)
+
+	body, _ := json.Marshal(map[string]string{
+		"type": "card_json",
+		"data": string(cardJSON),
+	})
+
+	url := fmt.Sprintf("https://open.feishu.cn/open-apis/cardkit/v1/cards/%s", s.cardID)
+	return doHTTPRequest("PUT", url, token, body)
 }
 
 // ── 飞书 API 调用 ────────────────────────────────────────────

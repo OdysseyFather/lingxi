@@ -1,5 +1,5 @@
 import { createPortal } from 'react-dom';
-import { ArrowLeft, Users, MoreHorizontal, Trash2, Pause, Play } from 'lucide-react';
+import { ArrowLeft, Users, MoreHorizontal, Trash2, Pause, Play, Briefcase } from 'lucide-react';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { cn } from '../ui/cn';
 import GroupMemberAvatar from './GroupMemberAvatar';
@@ -111,8 +111,13 @@ export default function GroupHeader({
         className="flex-1 min-w-0 text-left px-2 py-1 rounded-lg hover:bg-[color:var(--bg-soft)] transition"
       >
         <div className="flex items-center gap-2">
+          {room.chat_mode === 'meeting' && (
+            <span className="text-[10px] px-1.5 py-px rounded shrink-0 inline-flex items-center gap-0.5 bg-[color:var(--accent-soft)] text-[color:var(--accent)] font-medium">
+              <Briefcase size={10} /> 会议
+            </span>
+          )}
           <span className="text-sm font-semibold truncate">
-            {room.topic || '群聊'}
+            {room.topic || (room.chat_mode === 'meeting' ? '工作会议' : '群聊')}
           </span>
           <span className={cn(
             'text-[10px] px-1.5 py-px rounded shrink-0',
@@ -124,9 +129,14 @@ export default function GroupHeader({
           )}>
             {room.status === 'active' ? '进行中' : room.status === 'paused' ? '已停止' : room.status === 'completed' ? '已结束' : room.status}
           </span>
+          {room.chat_mode === 'meeting' && room.status === 'active' && room.max_rounds > 0 && (
+            <span className="text-[10px] px-1.5 py-px rounded shrink-0 bg-[color:var(--bg-soft)] text-[color:var(--text-faint)]">
+              第 {Math.min((room.current_round || 0) + 1, room.max_rounds)}/{room.max_rounds} 轮
+            </span>
+          )}
           <span className="text-[11px] text-[color:var(--text-faint)]">{joined.length} 人</span>
         </div>
-        {room.goal && <div className="text-[11px] text-[color:var(--text-faint)] truncate mt-0.5">{room.goal}</div>}
+        {room.goal && <div className="text-[11px] text-[color:var(--text-faint)] truncate mt-0.5">{room.chat_mode === 'meeting' ? '目标：' : ''}{room.goal}</div>}
       </button>
 
       <button

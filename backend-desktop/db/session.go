@@ -98,3 +98,13 @@ func GetPendingTask(sessionID int64) (taskDesc, missingFields string, found bool
 func ClearPendingTask(sessionID int64) {
 	DB.Exec(`DELETE FROM pending_tasks WHERE session_id=?`, sessionID)
 }
+
+// GetSessionPermissionMode 返回会话的权限模式（"trust" 或 "ask"）
+func GetSessionPermissionMode(sessionID int64) string {
+	var mode string
+	err := DB.QueryRow(`SELECT COALESCE(permission_mode,'trust') FROM sessions WHERE id=?`, sessionID).Scan(&mode)
+	if err != nil {
+		return "trust"
+	}
+	return mode
+}

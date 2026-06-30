@@ -234,7 +234,12 @@ export function Composer({ useKB: controlledUseKB, setUseKB: setControlledUseKB 
       if (e.key === 'Escape') { setSlashOpen(false); return; }
     }
 
-    if (e.key !== 'Enter' || e.shiftKey) return;
+    if (e.key !== 'Enter') return;
+    const sendMode = localStorage.getItem('lingxi_send_mode') || 'enter';
+    const shouldSend = sendMode === 'ctrl-enter'
+      ? (e.ctrlKey || e.metaKey)
+      : !e.shiftKey;
+    if (!shouldSend) return;
     if (
       e.isComposing ||
       e.nativeEvent?.isComposing ||

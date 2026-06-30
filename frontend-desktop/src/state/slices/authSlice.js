@@ -7,8 +7,26 @@ export const createAuthSlice = (set, get) => ({
   checkAuth: async () => {
     try {
       const res = await api.getCurrentUser();
-      set({ currentUser: res.user, isLoggedIn: res.logged_in, authChecked: true });
+      if (res.logged_in) {
+        set({ currentUser: res.user, isLoggedIn: true, authChecked: true });
+        return;
+      }
+      // Web 版（非 Electron）自动游客登录，跳过 SSO 登录页
+      if (!window.electronAPI) {
+        const guest = await api.guestLogin('Web 用户');
+        set({ currentUser: guest.user, isLoggedIn: true, authChecked: true });
+        return;
+      }
+      set({ currentUser: null, isLoggedIn: false, authChecked: true });
     } catch {
+      // Web 版兜底：即使 getCurrentUser 失败也尝试游客登录
+      if (!window.electronAPI) {
+        try {
+          const guest = await api.guestLogin('Web 用户');
+          set({ currentUser: guest.user, isLoggedIn: true, authChecked: true });
+          return;
+        } catch {}
+      }
       set({ currentUser: null, isLoggedIn: false, authChecked: true });
     }
   },

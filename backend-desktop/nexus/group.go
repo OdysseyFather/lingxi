@@ -317,6 +317,101 @@ func BuildGroupUserPrompt(room *db.GroupChat, speaker db.GroupMember, recent []d
 	return b.String()
 }
 
+// ─── 工作会议模式 Prompt ─────────────────────────────────────────
+
+// BuildMeetingModeratorSystemPrompt 工作会议主持人 prompt（既主持又作为专家深度参与）
+func BuildMeetingModeratorSystemPrompt(speaker db.GroupMember, p *db.AgentPersonality, room *db.GroupChat, participantNames []string) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("你是工作会议「%s」的主持人，同时也是参与讨论的专家。你的名字是「%s」。\n\n", room.Topic, speaker.AgentName))
+	if room.Goal != "" {
+		b.WriteString("【会议目标】" + room.Goal + "\n\n")
+	}
+	b.WriteString("# 你的职责（主持 + 深度参与）\n")
+	b.WriteString("1. 开场：用 1-2 句话点明议题与目标，然后点名第一位参会者发言（写「@对方名字」）。\n")
+	b.WriteString("2. 每当有人发言后：先简要点评，再结合你自己的专业观点补充（你不是旁观者，要给出实质判断），然后**明确点名下一位发言人**（写「@名字」），或抛出一个需要深入的关键问题。\n")
+	b.WriteString("3. 始终把讨论拉回会议目标，及时制止跑题、寒暄、空话。\n")
+	b.WriteString("4. 当你判断目标已达成、信息足以形成结论时：用「【结论】」开头输出结构化结论（关键共识 / 决议 / 下一步行动），并在最后**单独一行写 [CLOSE]** 结束会议。\n\n")
+	b.WriteString("# 发言要求\n")
+	b.WriteString("- 简洁、专业、有推进力，每次聚焦一件事；不要 AI 助理腔、不要空泛套话、不要超长。\n")
+	b.WriteString("- 点名时只 @ 参会者，不要 @ 人类用户。\n")
+	if len(participantNames) > 0 {
+		b.WriteString("- 当前参会者：" + strings.Join(participantNames, "、") + "\n")
+	}
+	if p != nil && strings.TrimSpace(p.StyleHint) != "" {
+		b.WriteString("- 你的风格：" + p.StyleHint + "\n")
+	}
+	b.WriteString("\n# 语言规则\n- 全部使用简体中文，包括思考过程（thinking）。\n")
+	return b.String()
+}
+
+// BuildMeetingParticipantSystemPrompt 工作会议参会者 prompt
+func BuildMeetingParticipantSystemPrompt(speaker db.GroupMember, p *db.AgentPersonality, room *db.GroupChat) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("你是工作会议「%s」的参会者「%s」。\n\n", room.Topic, speaker.AgentName))
+	if room.Goal != "" {
+		b.WriteString("【会议目标】" + room.Goal + "\n\n")
+	}
+	b.WriteString("# 发言要求\n")
+	b.WriteString("- 紧扣主持人当前提出的问题与会议目标，发表你的专业观点（结合你的人设与专长）。\n")
+	b.WriteString("- 简洁有料、给出可操作的判断或方案；不要寒暄、不要复读别人、不要跑题、不要 AI 助理腔。\n")
+	b.WriteString("- 若赞同他人，请补充新的增量信息或理由，而不是单纯附和。\n")
+	b.WriteString("- 一般 1-4 句说清重点即可；可以向主持人或其他参会者提出关键问题。\n")
+	if p != nil && strings.TrimSpace(p.StyleHint) != "" {
+		b.WriteString("- 你的风格：" + p.StyleHint + "\n")
+	}
+	b.WriteString("\n# 语言规则\n- 全部使用简体中文，包括思考过程（thinking）。\n")
+	return b.String()
+}
+
+// BuildMeetingUserPrompt 会议 user prompt：议题/目标 + 参会成员 + 会议记录 + 本轮角色指令
+func BuildMeetingUserPrompt(room *db.GroupChat, speaker db.GroupMember, recent []db.GroupMessage, roleInstruction string) string {
+	human := HumanGroupNickname()
+	var b strings.Builder
+	if room.Topic != "" {
+		b.WriteString(fmt.Sprintf("[会议议题] %s\n", room.Topic))
+	}
+	if room.Goal != "" {
+		b.WriteString(fmt.Sprintf("[会议目标] %s\n", room.Goal))
+	}
+
+	members, _ := db.ListGroupMembers(room.ID)
+	b.WriteString("\n[参会成员]\n")
+	b.WriteString(fmt.Sprintf("- %s（人类，列席）\n", human))
+	for _, m := range members {
+		if m.Status != "joined" {
+			continue
+		}
+		flag := "（参会者）"
+		if room.ModeratorAgentID == m.AgentID {
+			flag = "（主持人）"
+		}
+		if m.AgentName == speaker.AgentName {
+			if room.ModeratorAgentID == m.AgentID {
+				flag = "（你，主持人）"
+			} else {
+				flag = "（你）"
+			}
+		}
+		b.WriteString("- " + m.AgentName + flag + "\n")
+	}
+
+	b.WriteString("\n[会议记录（id=编号，从早到晚）]\n")
+	for _, m := range recent {
+		if m.IsRecalled {
+			continue
+		}
+		role := m.SenderAgentName
+		if m.MsgType == "user_post" {
+			role = human + "（人类）"
+		}
+		display := truncForPrompt(extractPlainFromContent(m.Content), 500)
+		b.WriteString(fmt.Sprintf("(id=%d) [%s]: %s\n", m.ID, role, display))
+	}
+
+	b.WriteString("\n" + roleInstruction)
+	return b.String()
+}
+
 // ParseReplyTag 解析 @reply:<id>
 func ParseReplyTag(content string) int64 {
 	m := replyTagRe.FindStringSubmatch(content)

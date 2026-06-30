@@ -23,7 +23,6 @@ import (
 	"lingxi-agent/config"
 	"lingxi-agent/connector"
 	"lingxi-agent/db"
-	"lingxi-agent/nexus"
 	"lingxi-agent/router"
 	"lingxi-agent/usage"
 	"lingxi-agent/vectordb"
@@ -35,6 +34,7 @@ var activeChats sync.Map
 
 // sessionKBSnippets 缓存每次对话中检索到的知识库片段（用于自动补全引用标注）
 var sessionKBSnippets sync.Map // key: sessionID(int64), value: []kbSnippet
+
 
 // ─── System Prompt ───────────────────────────────────────────────
 // systemPromptTemplate 使用 {{KB_PATH}} 作为占位符，运行时替换为实际路径
@@ -331,7 +331,47 @@ App -> User : 返回结果
 - "读取了 /root/.claude/skills/xxx.md" → "我查看了一下相关功能"
 - "调用了 Bash 工具" → "我处理了一下"
 - "运行 python 脚本" → "我处理了一下"
-- 任何技术路径 → 完全省略，不提及`
+- 任何技术路径 → 完全省略，不提及
+
+---
+
+# 【推荐后续问题】
+
+在你的每次回复的**最末尾**，必须附加 2-3 个推荐后续问题，帮助用户继续深入探索话题。
+
+## 格式要求
+
+在回复正文完成后，用以下精确格式输出推荐问题（每行一个，以 ` + "`~?~`" + ` 开头）：
+
+` + "```" + `
+~?~ 推荐问题1
+~?~ 推荐问题2
+~?~ 推荐问题3
+` + "```" + `
+
+## 生成规则
+
+1. **紧扣当前话题**：推荐问题必须与当前对话内容高度相关，是用户自然会想到的后续问题
+2. **具体且有价值**：不要生成泛泛的问题，要具体到当前场景
+3. **简洁明了**：每个问题控制在 15-30 个字以内
+4. **多样化视角**：从不同角度提问——深入细节、拓展应用、对比方案等
+5. **用户视角**：站在用户的角度思考"接下来我可能想知道什么"
+
+## 示例
+
+如果用户问"Python 的 GIL 是什么"，你的回复末尾应该：
+
+` + "```" + `
+~?~ 如何在 Python 中绕过 GIL 的限制？
+~?~ GIL 对多线程性能的影响有多大？
+~?~ Python 3.13 的 no-GIL 模式怎么用？
+` + "```" + `
+
+## 例外情况
+
+以下情况**不需要**输出推荐问题：
+- 非常简短的闲聊回复（如"你好"、"谢谢"等寒暄）
+- 用户明确表示"就这样"、"没了"、"结束"等终止信号`
 
 // buildSystemPrompt 构建系统提示词
 // useKB=true 时保留知识库使用规则（配合服务端预检索），false 时移除
@@ -444,6 +484,51 @@ func buildSkillInventory(skillsPath string) string {
 	}
 	sb.WriteString(fmt.Sprintf("\n共 %d 个技能。当用户请求涉及上述任何技能的能力范围时，**必须**先用 Read 读取对应的 SKILL.md，然后按指引执行。不要告诉用户\"不知道怎么做\"或\"没有这个能力\"。\n", len(skills)))
 	return sb.String()
+}
+
+// applyReplyLanguage 根据用户选择的回复语言替换 system prompt 中的语言规则
+func applyReplyLanguage(prompt string, lang string) string {
+	if lang == "en" {
+		// 替换中文语言规则为英文
+		oldRule := "**你的所有输出内容必须使用中文（简体中文）。**"
+		newRule := "**You MUST reply in English.** All your output content must be in English. Code, commands, and proper nouns can remain in their original language."
+		prompt = strings.Replace(prompt, oldRule, newRule, 1)
+	} else if lang == "auto" {
+		oldRule := "**你的所有输出内容必须使用中文（简体中文）。**"
+		newRule := "**请使用与用户相同的语言回复。** 如果用户用中文提问，你用中文回答；如果用户用英文提问，你用英文回答。"
+		prompt = strings.Replace(prompt, oldRule, newRule, 1)
+	}
+	return prompt
+}
+
+// injectMemories 从 memories 表查询长期记忆并追加到 prompt 中
+func injectMemories(prompt string, agentID int64) string {
+	rows, err := db.DB.Query(
+		`SELECT content, category FROM memories WHERE agent_id=? ORDER BY created_at DESC LIMIT 50`,
+		agentID,
+	)
+	if err != nil {
+		return prompt
+	}
+	defer rows.Close()
+
+	var items []string
+	for rows.Next() {
+		var content, category string
+		if err := rows.Scan(&content, &category); err != nil {
+			continue
+		}
+		if category == "" {
+			category = "general"
+		}
+		items = append(items, fmt.Sprintf("- [%s] %s", category, content))
+	}
+	if len(items) == 0 {
+		return prompt
+	}
+
+	memoryBlock := "\n\n# 【长期记忆】\n\n以下是你过往积累的重要记忆和用户偏好，请在回答时参考并遵循：\n\n" + strings.Join(items, "\n")
+	return prompt + memoryBlock
 }
 
 // applyAgentPersona 用智能体的角色定义替换基础提示中的"你是灵犀"身份段。
@@ -895,25 +980,78 @@ func cleanupImageFiles(paths []string) {
 	}
 }
 
-// buildStdinMessage 构建传给 Claude CLI 的 stdin 消息
-// 有图片时在消息中注入文件路径，让 Claude 用 Read 工具读取
+// buildStdinMessage 构建传给 Claude CLI 的 stdin 消息（纯文本模式，无图片时使用）
 func buildStdinMessage(text string, imagePaths []string) string {
 	if len(imagePaths) == 0 {
 		return text
 	}
-	var sb strings.Builder
-	sb.WriteString("[图片附件]\n")
-	sb.WriteString("用户发送了以下图片，请使用 Read 工具依次读取后再回答：\n")
-	for _, p := range imagePaths {
-		sb.WriteString(p)
-		sb.WriteString("\n")
-	}
-	sb.WriteString("\n")
+	// 有图片时走 stream-json 多模态路径（见 buildStreamJSONStdin），此分支作为回退
+	return text
+}
+
+// buildStreamJSONStdin 构建 stream-json 格式的 stdin 消息（有图片时使用）
+// 将图片 base64 编码后作为 image content block 直接传给 Claude CLI
+func buildStreamJSONStdin(text string, imagePaths []string) (string, error) {
+	var contentBlocks []map[string]interface{}
+
 	if text != "" {
-		sb.WriteString("[用户问题]\n")
-		sb.WriteString(text)
+		contentBlocks = append(contentBlocks, map[string]interface{}{
+			"type": "text",
+			"text": text,
+		})
 	}
-	return sb.String()
+
+	for _, p := range imagePaths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			slog.Warn("buildStreamJSONStdin: read image failed", "path", p, "err", err)
+			continue
+		}
+		b64 := base64.StdEncoding.EncodeToString(data)
+		mediaType := detectMediaType(p)
+		contentBlocks = append(contentBlocks, map[string]interface{}{
+			"type": "image",
+			"source": map[string]interface{}{
+				"type":       "base64",
+				"media_type": mediaType,
+				"data":       b64,
+			},
+		})
+	}
+
+	if len(contentBlocks) == 0 {
+		return "", fmt.Errorf("no content blocks")
+	}
+
+	msg := map[string]interface{}{
+		"type": "user",
+		"message": map[string]interface{}{
+			"role":    "user",
+			"content": contentBlocks,
+		},
+	}
+	j, err := json.Marshal(msg)
+	if err != nil {
+		return "", err
+	}
+	return string(j) + "\n", nil
+}
+
+// detectMediaType 根据文件扩展名推断 MIME 类型
+func detectMediaType(path string) string {
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	case ".png":
+		return "image/png"
+	case ".gif":
+		return "image/gif"
+	case ".webp":
+		return "image/webp"
+	default:
+		return "image/png"
+	}
 }
 
 // ─── Chat 接口 ───────────────────────────────────────────────────
@@ -924,6 +1062,8 @@ func Chat(c *gin.Context) {
 		SessionID  string         `json:"sessionId"`
 		UseKB      bool           `json:"useKB"`
 		WorkingDir string         `json:"workingDir"`
+		Thinking   *bool          `json:"thinking"`
+		ReplyLang  string         `json:"replyLang"`
 		Images     []imagePayload `json:"images"`
 		Files      []struct {
 			Name    string `json:"name"`
@@ -987,7 +1127,8 @@ func Chat(c *gin.Context) {
 		updateSessionTitle(sessionID, string(runes))
 	}
 	c.JSON(http.StatusAccepted, gin.H{"status": "accepted", "sessionId": sessionID})
-	go runClaudeWithPaths(sessionID, body.Message, body.UseKB, imagePaths, body.WorkingDir)
+	thinkingEnabled := body.Thinking == nil || *body.Thinking
+	go runClaudeWithPaths(sessionID, body.Message, body.UseKB, imagePaths, body.WorkingDir, thinkingEnabled, body.ReplyLang)
 }
 
 func BatchChat(c *gin.Context) {
@@ -1575,10 +1716,10 @@ func runClaude(sessionID int64, message string, useKB bool, images []imagePayloa
 		slog.Warn("saveImagesToTmp error", "err", err)
 	}
 	defer cleanupImageFiles(imagePaths)
-	runClaudeWithPaths(sessionID, message, useKB, imagePaths, "")
+	runClaudeWithPaths(sessionID, message, useKB, imagePaths, "", true, "")
 }
 
-func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths []string, workingDir string) {
+func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths []string, workingDir string, thinkingEnabled bool, replyLang string) {
 	hub := globalHub
 	cfg := config.Get()
 
@@ -1616,7 +1757,14 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 		"--include-partial-messages",
 		"--dangerously-skip-permissions",
 	}
+	if !thinkingEnabled {
+		args = append(args, "--thinking", "disabled")
+	}
 	prompt := buildSystemPrompt(useKB)
+	// 回复语言动态注入
+	if replyLang != "" && replyLang != "zh" {
+		prompt = applyReplyLanguage(prompt, replyLang)
+	}
 	// 应用智能体角色设定（如果会话绑定了非内置 agent）
 	agentID := db.GetSessionAgentID(sessionID)
 	if agentID > 0 {
@@ -1624,6 +1772,8 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 			prompt = applyAgentPersona(prompt, a.Name, a.SystemPrompt)
 		}
 	}
+	// 长期记忆注入
+	prompt = injectMemories(prompt, agentID)
 	// 知识库可用文档提示注入
 	if useKB {
 		if kbHint := buildKBAvailabilityHint(agentID); kbHint != "" {
@@ -1636,15 +1786,31 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 	}
 	if claudeSessionID != "" {
 		args = append(args, "--resume", claudeSessionID)
-		args = append(args, "--system-prompt", prompt)
-	} else {
-		args = append(args, "--system-prompt", prompt)
+	}
+	args = append(args, "--system-prompt", prompt)
+
+	// 有图片时切换到 stream-json 多模态输入，图片直接作为 image content block 传给 Claude
+	hasImages := len(imagePaths) > 0
+	if hasImages {
+		args = append(args, "--input-format", "stream-json")
 	}
 
 	claudeBin := cfg.Claude.Bin
 	cmd := exec.Command(claudeBin, args...)
-	cmd.Stdin = strings.NewReader(buildStdinMessage(message, imagePaths))
 	cmd.Env = buildClaudeEnv(cfg)
+
+	if hasImages {
+		stdinJSON, err := buildStreamJSONStdin(message, imagePaths)
+		if err != nil {
+			slog.Warn("buildStreamJSONStdin failed, falling back to text", "err", err)
+			cmd.Stdin = strings.NewReader(message)
+		} else {
+			cmd.Stdin = strings.NewReader(stdinJSON)
+			slog.Info("using stream-json multimodal input", "images", len(imagePaths), "session", sessionID)
+		}
+	} else {
+		cmd.Stdin = strings.NewReader(buildStdinMessage(message, imagePaths))
+	}
 
 	// Coding 模式：设置工作目录，让 AI 在用户选择的项目路径下执行
 	if workingDir != "" {
@@ -1696,6 +1862,7 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 		aggUsage           claudeUsage
 		aggCostUSD         float64
 		modelUsed          string
+		cliResultMsg       string
 	)
 
 	appendBlock := func(typ, name, chunk string) {
@@ -1794,6 +1961,11 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 			continue
 		}
 
+		// 调试：记录所有事件类型
+		if ev.Type != "" && ev.Type != "stream_event" {
+			slog.Debug("claude event", "type", ev.Type, "subtype", ev.Subtype, "session", sessionID)
+		}
+
 		switch ev.Type {
 		case "system":
 			if ev.Subtype == "init" && ev.Session != "" {
@@ -1801,12 +1973,14 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 			}
 
 		case "result":
-			// CLI 在 result 事件里带 cost_usd / usage 摘要
 			if ev.CostUSD > 0 {
 				aggCostUSD = ev.CostUSD
 			}
 			if ev.Usage != nil {
 				aggUsage = *ev.Usage
+			}
+			if ev.Result != "" {
+				cliResultMsg = ev.Result
 			}
 
 		case "stream_event":
@@ -1866,14 +2040,16 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 				}
 				blocks = append(blocks, b)
 			} else if inner.ContentBlock.Type == "thinking" {
-				appendBlock("thinking", "", "")
+				if thinkingEnabled {
+					appendBlock("thinking", "", "")
+				}
 			}
 
 			case "content_block_delta":
 				d := inner.Delta
 				switch d.Type {
 				case "thinking_delta":
-					if d.Thinking != "" {
+					if d.Thinking != "" && thinkingEnabled {
 						safe := redactSensitive(d.Thinking)
 						hub.Send(sessionID, "thinking", jsonStr(safe))
 						appendBlock("thinking", "", safe)
@@ -1898,7 +2074,7 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 					}
 				default:
 					// 兼容某些 OpenAI 兼容供应商透传 reasoning_content 字段（思考链）
-					if d.ReasoningContent != "" || d.Reasoning != "" {
+					if thinkingEnabled && (d.ReasoningContent != "" || d.Reasoning != "") {
 						r := d.ReasoningContent
 						if r == "" {
 							r = d.Reasoning
@@ -2001,10 +2177,12 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 	exitErr := cmd.Wait()
 
 	// 如果 CLI 退出但没有产生任何有效输出（blocks 为空），说明执行失败
-	// 将 stderr 或退出码信息反馈给前端
 	if exitErr != nil && len(blocks) == 0 {
 		errMsg := "AI 引擎执行异常，请检查模型接入点配置是否正确。"
-		slog.Warn("claude exited with error and no output", "err", exitErr, "session", sessionID)
+		if cliResultMsg != "" {
+			errMsg = cliResultMsg
+		}
+		slog.Warn("claude exited with error and no output", "err", exitErr, "session", sessionID, "result", cliResultMsg)
 		hub.Send(sessionID, "text", jsonStr(errMsg))
 		blocks = append(blocks, msgBlock{Type: "text", Text: errMsg})
 	}
@@ -2112,7 +2290,50 @@ func runClaudeWithPaths(sessionID int64, message string, useKB bool, imagePaths 
 		TrySendPushNotification(sessionID, pushAgentName, pushBuf.String(), false)
 	}
 
+	// 从 AI 回复中提取 ~?~ 推荐后续问题，推送给前端后从消息中剥离
+	if suggestions := extractAndStripSuggestions(blocks); len(suggestions) > 0 {
+		payload, _ := json.Marshal(suggestions)
+		hub.Send(sessionID, "suggested_replies", string(payload))
+		// 更新已保存的消息，剥离 ~?~ 标记
+		if savedMsgID > 0 {
+			cleanBlocks, _ := json.Marshal(blocks)
+			_, _ = db.DB.Exec(`UPDATE messages SET content=? WHERE id=?`, string(cleanBlocks), savedMsgID)
+		}
+	}
+
 	hub.Send(sessionID, "done", "[DONE]")
+}
+
+// extractAndStripSuggestions 从 blocks 的文本块中提取 ~?~ 开头的推荐问题，
+// 返回推荐问题列表，并就地修改 blocks 移除这些标记行。
+func extractAndStripSuggestions(blocks []msgBlock) []string {
+	var suggestions []string
+	for i := range blocks {
+		if blocks[i].Type != "text" {
+			continue
+		}
+		text := blocks[i].Text
+		lines := strings.Split(text, "\n")
+		var cleanLines []string
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "~?~") {
+				q := strings.TrimSpace(strings.TrimPrefix(trimmed, "~?~"))
+				if q != "" {
+					suggestions = append(suggestions, q)
+				}
+			} else {
+				cleanLines = append(cleanLines, line)
+			}
+		}
+		if len(suggestions) > 0 {
+			blocks[i].Text = strings.TrimRight(strings.Join(cleanLines, "\n"), "\n \t")
+		}
+	}
+	if len(suggestions) > 3 {
+		suggestions = suggestions[:3]
+	}
+	return suggestions
 }
 
 // emitTaskPlanFromText 检查文本中是否包含 task_plan JSON 块，如果有则推送
@@ -2486,12 +2707,12 @@ func detectEvolutionTrigger(sessionID int64, blocks []msgBlock) string {
 		return "auto_correction"
 	}
 
-	if msgCount >= 10 && containsCompletionSignal(lastUserMsg) {
+	if msgCount >= 6 && containsCompletionSignal(lastUserMsg) {
 		return "auto_valuable"
 	}
 
-	// 会话级阈值触发：消息数 ≥ 6 且距上次该会话的进化 > 30 分钟，避免遗漏没有完成信号的有价值对话
-	if msgCount >= 6 && shouldTriggerSessionEnd(sessionID) {
+	// 会话级阈值触发：消息数 ≥ 4 且距上次该会话的进化 > 30 分钟
+	if msgCount >= 4 && shouldTriggerSessionEnd(sessionID) {
 		return "auto_session_end"
 	}
 
@@ -2699,7 +2920,8 @@ func jsonStr(s string) string {
 // ─── IM 连接器专用：同步调用 Claude，返回聚合文本 ────────────────
 // RunClaudeSync 供 connector 包调用，不影响现有 WebSocket 流式逻辑。
 // sessionID 传 0 时自动创建临时会话，返回 AI 回复文本和实际使用的 sessionID。
-func RunClaudeSync(message string, sessionID int64) (reply string, usedSessionID int64, err error) {
+// imagePaths 为多模态输入的图片临时文件路径列表（可为空），有图片时走 stream-json 多模态输入。
+func RunClaudeSync(message string, sessionID int64, imagePaths []string) (reply string, usedSessionID int64, err error) {
 	cfg := config.Get()
 
 	if sessionID == 0 {
@@ -2720,7 +2942,9 @@ func RunClaudeSync(message string, sessionID int64) (reply string, usedSessionID
 		"--output-format", "stream-json",
 		"--verbose",
 		"--include-partial-messages",
-		"--dangerously-skip-permissions",
+	}
+	if db.GetSessionPermissionMode(sessionID) != "ask" {
+		args = append(args, "--dangerously-skip-permissions")
 	}
 	prompt := buildSystemPrompt(false)
 	// 应用智能体角色设定（如果会话绑定了非内置 agent）
@@ -2730,15 +2954,34 @@ func RunClaudeSync(message string, sessionID int64) (reply string, usedSessionID
 			prompt = applyAgentPersona(prompt, a.Name, a.SystemPrompt)
 		}
 	}
+	// 长期记忆注入
+	prompt = injectMemories(prompt, agentID)
 	if claudeSessionID != "" {
 		args = append(args, "--resume", claudeSessionID)
 	}
 	args = append(args, "--system-prompt", prompt)
 
+	// 有图片时切换到 stream-json 多模态输入
+	hasImages := len(imagePaths) > 0
+	if hasImages {
+		args = append(args, "--input-format", "stream-json")
+	}
+
 	claudeBin := cfg.Claude.Bin
 	cmd := exec.Command(claudeBin, args...)
-	cmd.Stdin = strings.NewReader(message)
 	cmd.Env = buildClaudeEnv(cfg)
+
+	if hasImages {
+		stdinJSON, e := buildStreamJSONStdin(message, imagePaths)
+		if e != nil {
+			slog.Warn("buildStreamJSONStdin failed, falling back to text", "err", e)
+			cmd.Stdin = strings.NewReader(message)
+		} else {
+			cmd.Stdin = strings.NewReader(stdinJSON)
+		}
+	} else {
+		cmd.Stdin = strings.NewReader(message)
+	}
 
 	stdout, e := cmd.StdoutPipe()
 	if e != nil {
@@ -2882,7 +3125,8 @@ func RunClaudeSync(message string, sessionID int64) (reply string, usedSessionID
 // 与 RunClaudeSync 结构相同，但在每次收到 text_delta 时实时回调 onChunk，
 // 生成结束时调用 onChunk("", true)。
 // 持久化逻辑与 RunClaudeSync 保持一致。
-func RunClaudeStreaming(message string, sessionID int64, onChunk func(chunk string, done bool)) (usedSessionID int64, err error) {
+// imagePaths 为多模态输入的图片临时文件路径列表（可为空），有图片时走 stream-json 多模态输入。
+func RunClaudeStreaming(message string, sessionID int64, imagePaths []string, onChunk func(chunk string, done bool)) (usedSessionID int64, err error) {
 	cfg := config.Get()
 
 	if sessionID == 0 {
@@ -2903,7 +3147,9 @@ func RunClaudeStreaming(message string, sessionID int64, onChunk func(chunk stri
 		"--output-format", "stream-json",
 		"--verbose",
 		"--include-partial-messages",
-		"--dangerously-skip-permissions",
+	}
+	if db.GetSessionPermissionMode(sessionID) != "ask" {
+		args = append(args, "--dangerously-skip-permissions")
 	}
 	prompt := buildSystemPrompt(false)
 	// 应用智能体角色设定（如果会话绑定了非内置 agent）
@@ -2913,15 +3159,34 @@ func RunClaudeStreaming(message string, sessionID int64, onChunk func(chunk stri
 			prompt = applyAgentPersona(prompt, a.Name, a.SystemPrompt)
 		}
 	}
+	// 长期记忆注入
+	prompt = injectMemories(prompt, agentID)
 	if claudeSessionID != "" {
 		args = append(args, "--resume", claudeSessionID)
 	}
 	args = append(args, "--system-prompt", prompt)
 
+	// 有图片时切换到 stream-json 多模态输入
+	hasImages := len(imagePaths) > 0
+	if hasImages {
+		args = append(args, "--input-format", "stream-json")
+	}
+
 	claudeBin := cfg.Claude.Bin
 	cmd := exec.Command(claudeBin, args...)
-	cmd.Stdin = strings.NewReader(message)
 	cmd.Env = buildClaudeEnv(cfg)
+
+	if hasImages {
+		stdinJSON, e := buildStreamJSONStdin(message, imagePaths)
+		if e != nil {
+			slog.Warn("buildStreamJSONStdin failed, falling back to text", "err", e)
+			cmd.Stdin = strings.NewReader(message)
+		} else {
+			cmd.Stdin = strings.NewReader(stdinJSON)
+		}
+	} else {
+		cmd.Stdin = strings.NewReader(message)
+	}
 
 	stdout, e := cmd.StdoutPipe()
 	if e != nil {
@@ -3063,7 +3328,8 @@ func RunClaudeStreaming(message string, sessionID int64, onChunk func(chunk stri
 }
 
 // RunClaudeSyncCtx 带 context 支持的 RunClaudeSync，context 取消时自动 kill 进程
-func RunClaudeSyncCtx(ctx context.Context, message string, sessionID int64) (reply string, usedSessionID int64, err error) {
+// imagePaths 为多模态输入的图片临时文件路径列表（可为空），有图片时走 stream-json 多模态输入。
+func RunClaudeSyncCtx(ctx context.Context, message string, sessionID int64, imagePaths []string) (reply string, usedSessionID int64, err error) {
 	cfg := config.Get()
 
 	if sessionID == 0 {
@@ -3082,7 +3348,9 @@ func RunClaudeSyncCtx(ctx context.Context, message string, sessionID int64) (rep
 		"--output-format", "stream-json",
 		"--verbose",
 		"--include-partial-messages",
-		"--dangerously-skip-permissions",
+	}
+	if db.GetSessionPermissionMode(sessionID) != "ask" {
+		args = append(args, "--dangerously-skip-permissions")
 	}
 	prompt := buildSystemPrompt(false)
 	// 应用智能体角色设定（如果会话绑定了非内置 agent）
@@ -3092,15 +3360,39 @@ func RunClaudeSyncCtx(ctx context.Context, message string, sessionID int64) (rep
 			prompt = applyAgentPersona(prompt, a.Name, a.SystemPrompt)
 		}
 	}
+	// 长期记忆注入
+	prompt = injectMemories(prompt, agentID)
 	if claudeSessionID != "" {
 		args = append(args, "--resume", claudeSessionID)
 	}
 	args = append(args, "--system-prompt", prompt)
 
+	// 有图片时切换到 stream-json 多模态输入
+	hasImages := len(imagePaths) > 0
+	if hasImages {
+		args = append(args, "--input-format", "stream-json")
+	}
+	slog.Info("[ctx] prepared cmd",
+		"session", sessionID, "hasImages", hasImages, "image_count", len(imagePaths),
+		"args", strings.Join(args, " "))
+
 	claudeBin := cfg.Claude.Bin
 	cmd := exec.CommandContext(ctx, claudeBin, args...)
-	cmd.Stdin = strings.NewReader(message)
 	cmd.Env = buildClaudeEnv(cfg)
+
+	if hasImages {
+		stdinJSON, e := buildStreamJSONStdin(message, imagePaths)
+		if e != nil {
+			slog.Warn("buildStreamJSONStdin failed, falling back to text", "err", e)
+			cmd.Stdin = strings.NewReader(message)
+		} else {
+			cmd.Stdin = strings.NewReader(stdinJSON)
+			slog.Info("[ctx] using stream-json multimodal input",
+				"images", len(imagePaths), "session", sessionID, "stdin_len", len(stdinJSON))
+		}
+	} else {
+		cmd.Stdin = strings.NewReader(message)
+	}
 
 	stdout, e := cmd.StdoutPipe()
 	if e != nil {
@@ -3211,7 +3503,8 @@ func RunClaudeSyncCtx(ctx context.Context, message string, sessionID int64) (rep
 }
 
 // RunClaudeStreamingCtx 带 context 支持的 RunClaudeStreaming
-func RunClaudeStreamingCtx(ctx context.Context, message string, sessionID int64, onChunk func(chunk string, done bool)) (usedSessionID int64, err error) {
+// imagePaths 为多模态输入的图片临时文件路径列表（可为空），有图片时走 stream-json 多模态输入。
+func RunClaudeStreamingCtx(ctx context.Context, message string, sessionID int64, imagePaths []string, onChunk func(chunk string, done bool)) (usedSessionID int64, err error) {
 	cfg := config.Get()
 
 	if sessionID == 0 {
@@ -3230,7 +3523,9 @@ func RunClaudeStreamingCtx(ctx context.Context, message string, sessionID int64,
 		"--output-format", "stream-json",
 		"--verbose",
 		"--include-partial-messages",
-		"--dangerously-skip-permissions",
+	}
+	if db.GetSessionPermissionMode(sessionID) != "ask" {
+		args = append(args, "--dangerously-skip-permissions")
 	}
 	prompt := buildSystemPrompt(false)
 	// 应用智能体角色设定（如果会话绑定了非内置 agent）
@@ -3240,15 +3535,39 @@ func RunClaudeStreamingCtx(ctx context.Context, message string, sessionID int64,
 			prompt = applyAgentPersona(prompt, a.Name, a.SystemPrompt)
 		}
 	}
+	// 长期记忆注入
+	prompt = injectMemories(prompt, agentID)
 	if claudeSessionID != "" {
 		args = append(args, "--resume", claudeSessionID)
 	}
 	args = append(args, "--system-prompt", prompt)
 
+	// 有图片时切换到 stream-json 多模态输入
+	hasImages := len(imagePaths) > 0
+	if hasImages {
+		args = append(args, "--input-format", "stream-json")
+	}
+	slog.Info("[ctx] prepared cmd",
+		"session", sessionID, "hasImages", hasImages, "image_count", len(imagePaths),
+		"args", strings.Join(args, " "))
+
 	claudeBin := cfg.Claude.Bin
 	cmd := exec.CommandContext(ctx, claudeBin, args...)
-	cmd.Stdin = strings.NewReader(message)
 	cmd.Env = buildClaudeEnv(cfg)
+
+	if hasImages {
+		stdinJSON, e := buildStreamJSONStdin(message, imagePaths)
+		if e != nil {
+			slog.Warn("buildStreamJSONStdin failed, falling back to text", "err", e)
+			cmd.Stdin = strings.NewReader(message)
+		} else {
+			cmd.Stdin = strings.NewReader(stdinJSON)
+			slog.Info("[ctx] using stream-json multimodal input",
+				"images", len(imagePaths), "session", sessionID, "stdin_len", len(stdinJSON))
+		}
+	} else {
+		cmd.Stdin = strings.NewReader(message)
+	}
 
 	stdout, e := cmd.StdoutPipe()
 	if e != nil {
@@ -3407,10 +3726,11 @@ func RunClaudeStreamingCtx(ctx context.Context, message string, sessionID int64,
 
 // RunClaudeStreamingCtxExt 扩展版流式 runner，将 thinking/tool/text 事件全部透传给 onEvent。
 // 内部复用 RunClaudeStreamingCtx 解析逻辑，但额外挂载 extCallback 使内部事件可透传。
-func RunClaudeStreamingCtxExt(ctx context.Context, message string, sessionID int64, onEvent func(kind connector.StreamKind, payload string, done bool)) (usedSessionID int64, err error) {
+// imagePaths 为多模态输入的图片临时文件路径列表（可为空），有图片时走 stream-json 多模态输入。
+func RunClaudeStreamingCtxExt(ctx context.Context, message string, sessionID int64, imagePaths []string, onEvent func(kind connector.StreamKind, payload string, done bool)) (usedSessionID int64, err error) {
 	// 存储 ext 回调到 context，让内部代码可选择性调用
 	ctxExt := context.WithValue(ctx, ctxKeyStreamExt{}, onEvent)
-	return RunClaudeStreamingCtx(ctxExt, message, sessionID, func(chunk string, done bool) {
+	return RunClaudeStreamingCtx(ctxExt, message, sessionID, imagePaths, func(chunk string, done bool) {
 		onEvent(connector.KindText, chunk, done)
 	})
 }
@@ -3425,391 +3745,5 @@ func truncateTitle(s string) string {
 	return s
 }
 
-// ─── A2A 流式对话 ──────────────────────────────────────────────
 
-// CreateA2ASession 为 A2A 对话创建一个专用会话（is_a2a=1，不在主会话列表中显示）
-func CreateA2ASession(title string, agentID int64) (int64, error) {
-	res, err := db.DB.Exec(`INSERT INTO sessions (title, agent_id, is_a2a) VALUES (?, ?, 1)`, title, agentID)
-	if err != nil {
-		return 0, err
-	}
-	return res.LastInsertId()
-}
 
-// RunA2AStreamingTurn 在指定会话上执行一轮 A2A 流式对话。
-// 将 message 作为 user 消息写入会话，然后启动 Claude 流式执行。
-// 流式事件通过 WS hub 推送到订阅该 sessionID 的前端。
-// forwarder 可为 nil，非 nil 时将 text/thinking token 转发到远端。
-// 返回 agent 的完整文本回复。
-func RunA2AStreamingTurn(sessionID int64, message string, agentID int64, forwarder nexus.StreamForwarder) (string, error) {
-	hub := globalHub
-	cfg := config.Get()
-
-	appendMessage(sessionID, "user", message)
-
-	claudeSessionID := getClaudeSessionID(sessionID)
-
-	args := []string{
-		"-p",
-		"--output-format", "stream-json",
-		"--verbose",
-		"--include-partial-messages",
-		"--dangerously-skip-permissions",
-	}
-
-	prompt := buildA2ASystemPrompt()
-
-	skillsPath := os.Getenv("SKILLS_PATH")
-	if skillsPath == "" {
-		h := os.Getenv("HOME")
-		if h == "" {
-			h, _ = os.UserHomeDir()
-		}
-		skillsPath = filepath.Join(h, ".claude", "skills")
-	}
-	if inventory := buildSkillInventory(skillsPath); inventory != "" {
-		anchor := "## 涉及技能（Skills）的任务"
-		if idx := strings.Index(prompt, anchor); idx >= 0 {
-			prompt = prompt[:idx] + anchor + "\n\n" + inventory + "\n\n" +
-				prompt[idx+len(anchor):]
-		}
-	}
-
-	if agentID > 0 {
-		if a, err := db.GetAgent(agentID); err == nil && !a.Builtin && strings.TrimSpace(a.SystemPrompt) != "" {
-			prompt = applyAgentPersona(prompt, a.Name, a.SystemPrompt)
-		}
-	}
-
-	if claudeSessionID != "" {
-		args = append(args, "--resume", claudeSessionID)
-	}
-	args = append(args, "--system-prompt", prompt)
-
-	claudeBin := cfg.Claude.Bin
-	cmd := exec.Command(claudeBin, args...)
-	cmd.Stdin = strings.NewReader(message)
-	cmd.Env = buildClaudeEnv(cfg)
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", fmt.Errorf("stdout pipe: %w", err)
-	}
-	stderrPipe, _ := cmd.StderrPipe()
-
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("cmd start: %w", err)
-	}
-	slog.Info("claude pid= session", "pid", cmd.Process.Pid, "value", sessionID)
-
-	activeChats.Store(sessionID, cmd)
-	defer activeChats.Delete(sessionID)
-
-	go func() {
-		s := bufio.NewScanner(stderrPipe)
-		for s.Scan() {
-			slog.Info("[a2a claude stderr]", "text()", s.Text())
-		}
-	}()
-
-	hub.Send(sessionID, "agent_state", `{"state":"THINKING"}`)
-	if forwarder != nil {
-		forwarder("stream_start", "")
-	}
-
-	startedAt := time.Now()
-	var (
-		textBuf            strings.Builder
-		blocks             []msgBlock
-		newClaudeSessionID string
-		aggUsage           claudeUsage
-		aggCostUSD         float64
-		modelUsed          string
-	)
-
-	appendBlock := func(typ, name, chunk string) {
-		if len(blocks) > 0 && typ != "tool" {
-			last := &blocks[len(blocks)-1]
-			if last.Type == typ {
-				last.Text += chunk
-				return
-			}
-		}
-		blocks = append(blocks, msgBlock{Type: typ, Name: name, Text: chunk})
-	}
-
-	scanner := bufio.NewScanner(stdout)
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var ev claudeEvent
-		if json.Unmarshal([]byte(line), &ev) != nil {
-			continue
-		}
-
-		switch ev.Type {
-		case "system":
-			if ev.Subtype == "init" && ev.Session != "" {
-				newClaudeSessionID = ev.Session
-			}
-		case "result":
-			if ev.CostUSD > 0 {
-				aggCostUSD = ev.CostUSD
-			}
-			if ev.Usage != nil {
-				aggUsage = *ev.Usage
-			}
-		case "stream_event":
-			var inner innerEvent
-			if json.Unmarshal(ev.Event, &inner) != nil {
-				continue
-			}
-			switch inner.Type {
-			case "message_start":
-				if len(inner.Message) > 0 {
-					var m struct {
-						Model string       `json:"model"`
-						Usage *claudeUsage `json:"usage"`
-					}
-					if json.Unmarshal(inner.Message, &m) == nil {
-						if m.Model != "" {
-							modelUsed = m.Model
-						}
-						if m.Usage != nil {
-							aggUsage.InputTokens += m.Usage.InputTokens
-							aggUsage.CacheReadInputTokens += m.Usage.CacheReadInputTokens
-							aggUsage.CacheCreationInputTokens += m.Usage.CacheCreationInputTokens
-						}
-					}
-				}
-			case "message_delta":
-				if inner.Usage != nil {
-					if inner.Usage.OutputTokens > aggUsage.OutputTokens {
-						aggUsage.OutputTokens = inner.Usage.OutputTokens
-					}
-				}
-		case "content_block_start":
-			if inner.ContentBlock.Type == "tool_use" {
-				toolName := inner.ContentBlock.Name
-				if !isAskUserTool(toolName) && !isCodingOnlyTool(toolName) {
-					payload, _ := json.Marshal(map[string]any{
-						"id":    inner.ContentBlock.ID,
-						"name":  toolName,
-						"label": toolDisplayLabel(toolName),
-					})
-					hub.Send(sessionID, "tool_start", string(payload))
-				}
-				blocks = append(blocks, msgBlock{
-					Type:  "tool",
-					Name:  toolName,
-					Label: toolDisplayLabel(toolName),
-					Ms:    time.Now().UnixMilli(),
-				})
-			} else if inner.ContentBlock.Type == "thinking" {
-				appendBlock("thinking", "", "")
-			}
-			case "content_block_delta":
-				d := inner.Delta
-				switch d.Type {
-				case "thinking_delta":
-					if d.Thinking != "" {
-						safe := redactSensitive(d.Thinking)
-						hub.Send(sessionID, "thinking", jsonStr(safe))
-						appendBlock("thinking", "", safe)
-						if forwarder != nil {
-							forwarder("thinking", safe)
-						}
-					}
-				case "text_delta":
-					if d.Text != "" {
-						safeText := redactSensitive(d.Text)
-						hub.Send(sessionID, "text", jsonStr(safeText))
-						appendBlock("text", "", safeText)
-						textBuf.WriteString(safeText)
-						if forwarder != nil {
-							forwarder("text", safeText)
-						}
-					}
-				case "input_json_delta":
-					if d.PartialJSON != "" && len(blocks) > 0 {
-						last := &blocks[len(blocks)-1]
-						if last.Type == "tool" {
-							last.Input += d.PartialJSON
-						}
-					}
-				default:
-					if d.ReasoningContent != "" || d.Reasoning != "" {
-						r := d.ReasoningContent
-						if r == "" {
-							r = d.Reasoning
-						}
-						safe := redactSensitive(r)
-						hub.Send(sessionID, "thinking", jsonStr(safe))
-						appendBlock("thinking", "", safe)
-						if forwarder != nil {
-							forwarder("thinking", safe)
-						}
-					}
-				}
-			case "content_block_stop":
-				if len(blocks) > 0 {
-					last := &blocks[len(blocks)-1]
-					if last.Type == "tool" {
-						if isAskUserTool(last.Name) {
-							blocks = blocks[:len(blocks)-1]
-						} else {
-							last.Done = true
-							elapsed := time.Now().UnixMilli() - last.Ms
-							if elapsed < 0 {
-								elapsed = 0
-							}
-							summary := safeSummarizeToolInput(last.Name, last.Input)
-							last.Input = summary
-							last.Ms = elapsed
-							last.Status = "ok"
-							if !isCodingOnlyTool(last.Name) {
-								endPayload, _ := json.Marshal(map[string]any{
-									"done":   true,
-									"name":   last.Name,
-									"label":  last.Label,
-									"input":  summary,
-									"ms":     elapsed,
-									"status": "ok",
-								})
-								hub.Send(sessionID, "tool_end", string(endPayload))
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	cmd.Wait()
-
-	if newClaudeSessionID != "" {
-		saveClaudeSessionID(sessionID, newClaudeSessionID)
-	}
-
-	durationMs := time.Since(startedAt).Milliseconds()
-	profileID, runtimeModel, _, _ := activeRuntimeSnapshot()
-	if modelUsed == "" {
-		modelUsed = runtimeModel
-	}
-
-	costEstimated := false
-	if aggCostUSD == 0 && (aggUsage.InputTokens+aggUsage.OutputTokens) > 0 {
-		aggCostUSD = usage.EstimateCost(modelUsed, aggUsage.InputTokens, aggUsage.OutputTokens)
-		if aggCostUSD > 0 {
-			costEstimated = true
-		}
-	}
-
-	usagePayload := buildUsagePayload(modelUsed, profileID, durationMs, aggCostUSD, aggUsage)
-	if costEstimated {
-		usagePayload["estimated"] = true
-	}
-
-	var savedMsgID int64
-	if len(blocks) > 0 {
-		for i := range blocks {
-			if blocks[i].Type == "tool" {
-				blocks[i].Done = true
-				blocks[i].Text = ""
-			} else {
-				blocks[i].Text = redactSensitive(blocks[i].Text)
-			}
-		}
-		if bj, err := json.Marshal(blocks); err == nil {
-			usageJSON, _ := json.Marshal(usagePayload)
-			savedMsgID = appendMessageWithUsage(sessionID, "assistant", string(bj), string(usageJSON))
-		}
-	}
-
-	if aggUsage.InputTokens+aggUsage.OutputTokens > 0 || aggCostUSD > 0 {
-		_, _ = db.InsertUsageRecord(&db.UsageRecord{
-			SessionID:        sessionID,
-			MessageID:        savedMsgID,
-			ProfileID:        profileID,
-			Model:            modelUsed,
-			InputTokens:      aggUsage.InputTokens,
-			OutputTokens:     aggUsage.OutputTokens,
-			CacheReadTokens:  aggUsage.CacheReadInputTokens,
-			CacheWriteTokens: aggUsage.CacheCreationInputTokens,
-			CostUSD:          aggCostUSD,
-			Estimated:        costEstimated,
-			DurationMs:       durationMs,
-		})
-		evt, _ := json.Marshal(map[string]interface{}{
-			"messageId": savedMsgID,
-			"sessionId": sessionID,
-			"usage":     usagePayload,
-		})
-		hub.Send(sessionID, "message_usage", string(evt))
-	}
-
-	if forwarder != nil {
-		forwarder("stream_done", "")
-	}
-	hub.Send(sessionID, "done", "[DONE]")
-
-	return textBuf.String(), nil
-}
-
-// buildA2ASystemPrompt A2A 专用系统提示词（委托代理模式 + 技能支持）
-func buildA2ASystemPrompt() string {
-	return `你是用户的**委托代理 Agent**，正在代表用户与对方的 Agent 进行对话。
-
-# 核心角色定位
-
-你不是对话的回答者，而是**用户的代言人和谈判代表**。用户把问题或任务委托给你，你的职责是：
-1. **忠实转述**用户的提问或任务给对方 Agent（第一轮）
-2. **审视评估**对方 Agent 的回复质量，必要时追问、要求补充细节或澄清
-3. **汇总提炼**有价值的信息，确保用户最终获得高质量的答案
-
-# 【绝对语言规则】
-
-**所有输出内容必须使用中文（简体中文），包括思考过程（thinking）。** 这是不可违反的硬性规则。
-- 无论对方使用什么语言，你都必须用中文回复。
-- 思考过程（thinking）也必须使用中文。
-- 代码和专有名词可保留原文，但解释和描述必须使用中文。
-
-# 行为准则
-
-- 第一轮：将用户的原始提问以提问者的口吻直接转述给对方，不要自己回答
-- 后续轮次：根据对方回复判断——回答是否充分？是否需要追问？是否有遗漏？
-- 你可以使用已安装的技能和工具来辅助分析、查证对方的回答
-- 不要重复对方说过的内容，聚焦在推动对话向目标前进
-- 当用户的问题已经得到充分解答时，主动结束对话并给出总结
-
-# 禁止事项
-
-- ❌ 不要自己回答用户的提问——你的职责是让对方 Agent 来回答
-- ❌ 不要在第一轮就开始发表自己的见解
-- ❌ 不要无意义地附和对方（如"说得好"、"我同意"），要么追问要么结束
-- ❌ 发送 [CLOSE] 后绝对不再回复任何消息，包括"再见""拜拜""保重"等寒暄
-- ❌ 收到对方的 [CLOSE] 后也不要回复，对话已经结束
-
-# 对话控制标记
-- 普通对话直接输出文本
-- 当你认为目标已达成，在回复开头添加 [CLOSE] 标记，然后给出关键结论的简短总结
-- [CLOSE] 是终止信号，发送后对话立即结束，系统会自动处理。不要在 [CLOSE] 之后再说任何话
-- 当你需要人类介入决策时，在回复开头添加 [HANDOFF] 标记并说明原因
-- 当你要发起一个提案时，在回复开头添加 [PROPOSAL] 标记
-- 当你做出决策时，在回复开头添加 [DECISION] 标记
-- 示例：[CLOSE] 经过与对方讨论，核心结论是……
-
-# 何时发送 [CLOSE]
-- 对方已经给出了充分、完整的回答，没有需要追问的内容
-- 双方已经达成共识或结论
-- 不要等对方也发 [CLOSE] 再结束——你判断目标达成就立即发 [CLOSE] 并总结
-
-## 涉及技能（Skills）的任务
-
-如果你已安装技能，可以在对话中调用技能来辅助分析和验证对方的回答。
-`
-}

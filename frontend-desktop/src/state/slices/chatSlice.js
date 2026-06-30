@@ -97,121 +97,6 @@ export const createChatSlice = (set, get) => ({
     const { event, data, sessionId } = msg;
     const state = get();
 
-    if (event === 'a2a_message') {
-      if (state.a2aRemoteIsStreaming) {
-        set({ a2aRemoteIsStreaming: false, a2aRemoteLiveBlocks: [] });
-      }
-    }
-
-    if (event === 'a2a_remote_stream') {
-      try {
-        const d = typeof data === 'string' ? JSON.parse(data) : data;
-        const convId = d?.conversation_id;
-        const streamEvent = d?.event;
-        const streamData = d?.data || '';
-
-        if (!convId) return;
-
-        switch (streamEvent) {
-          case 'stream_start':
-            set({ a2aRemoteIsStreaming: true, a2aRemoteLiveBlocks: [], activeA2AConvId: convId });
-            break;
-          case 'stream_done':
-            set({ a2aRemoteIsStreaming: false, a2aRemoteLiveBlocks: [] });
-            break;
-          case 'text': {
-            const blocks = [...state.a2aRemoteLiveBlocks];
-            const last = blocks[blocks.length - 1];
-            if (last && last.type === 'text') last.text += streamData;
-            else blocks.push({ type: 'text', text: streamData });
-            set({ a2aRemoteLiveBlocks: blocks, a2aRemoteIsStreaming: true });
-            break;
-          }
-          case 'thinking': {
-            const blocks = [...state.a2aRemoteLiveBlocks];
-            const last = blocks[blocks.length - 1];
-            if (last && last.type === 'thinking') last.text += streamData;
-            else blocks.push({ type: 'thinking', text: streamData });
-            set({ a2aRemoteLiveBlocks: blocks, a2aRemoteIsStreaming: true });
-            break;
-          }
-        }
-      } catch {}
-      return;
-    }
-
-    if (sessionId && sessionId === state.activeA2ASessionId && sessionId !== state.activeSessionId) {
-      const streamEvents = ['agent_state', 'thinking', 'text', 'tool_start', 'tool_end', 'message_usage', 'done'];
-      if (streamEvents.includes(event)) {
-        let payload;
-        try { payload = data ? JSON.parse(data) : null; } catch { payload = data; }
-        switch (event) {
-          case 'agent_state': {
-            const s = (payload && payload.state) || 'IDLE';
-            if (s === 'THINKING' && !state.a2aIsStreaming) {
-              set({ a2aIsStreaming: true, a2aLiveBlocks: [] });
-            }
-            break;
-          }
-          case 'thinking': {
-            const text = typeof payload === 'string' ? payload : (data || '');
-            const blocks = [...state.a2aLiveBlocks];
-            const last = blocks[blocks.length - 1];
-            if (last && last.type === 'thinking') last.text += text;
-            else blocks.push({ type: 'thinking', text });
-            set({ a2aLiveBlocks: blocks });
-            break;
-          }
-          case 'text': {
-            const text = typeof payload === 'string' ? payload : (data || '');
-            const blocks = [...state.a2aLiveBlocks];
-            const last = blocks[blocks.length - 1];
-            if (last && last.type === 'text') last.text += text;
-            else blocks.push({ type: 'text', text });
-            set({ a2aLiveBlocks: blocks });
-            break;
-          }
-          case 'tool_start': {
-            const blocks = [...state.a2aLiveBlocks];
-            blocks.push({ type: 'tool', name: payload?.name || '', label: payload?.label || '执行技能', startedAt: Date.now(), done: false });
-            set({ a2aLiveBlocks: blocks });
-            break;
-          }
-          case 'tool_end': {
-            if (payload?.hidden) break;
-            const blocks = [...state.a2aLiveBlocks];
-            for (let i = blocks.length - 1; i >= 0; i--) {
-              if (blocks[i].type === 'tool' && !blocks[i].done) {
-                blocks[i].done = true;
-                blocks[i].endedAt = Date.now();
-                if (payload && typeof payload === 'object') {
-                  if (payload.input != null) blocks[i].input = payload.input;
-                  if (payload.label) blocks[i].label = payload.label;
-                  if (payload.ms != null) blocks[i].ms = payload.ms;
-                  if (payload.status) blocks[i].status = payload.status;
-                }
-                break;
-              }
-            }
-            set({ a2aLiveBlocks: blocks });
-            break;
-          }
-          case 'message_usage':
-          case 'done': {
-            if (state.a2aIsStreaming) {
-              set({ a2aLiveBlocks: [], a2aIsStreaming: false });
-              const sid = state.activeA2ASessionId;
-              if (sid) {
-                api.listMessages(sid).then((m) => set({ a2aMessages: m })).catch(() => {});
-              }
-            }
-            break;
-          }
-        }
-        return;
-      }
-    }
-
     if (sessionId && sessionId !== state.activeSessionId) {
       if (event === 'profile_changed') {
         state.refreshProfiles();
@@ -251,18 +136,6 @@ export const createChatSlice = (set, get) => ({
           question: payload?.question || '',
           options: payload?.options || [],
           allowCustom: payload?.allow_custom !== false,
-          id: payload?.id || Date.now(),
-        });
-        set({ liveBlocks: blocks });
-        break;
-      }
-      case 'permission_request': {
-        flushNow(set, get);
-        const blocks = [...get().liveBlocks];
-        blocks.push({
-          type: 'permission',
-          toolName: payload?.tool_name || '',
-          input: payload?.input || '',
           id: payload?.id || Date.now(),
         });
         set({ liveBlocks: blocks });
@@ -367,8 +240,25 @@ export const createChatSlice = (set, get) => ({
           set({ liveBlocks: [], isStreaming: false, agentState: 'DONE' });
 
           const lastText = finalBlocks.filter(b => b.type === 'text').map(b => b.text).join('').slice(0, 500);
-          const suggestions = generateQuickReplies(lastText);
-          if (suggestions.length > 0) set({ suggestedReplies: suggestions });
+
+          // AI 生成的建议（suggested_replies WS 事件）优先；仅在无 AI 建议时用本地正则兜底
+          if (get().suggestedReplies.length === 0) {
+            const suggestions = generateQuickReplies(lastText);
+            if (suggestions.length > 0) set({ suggestedReplies: suggestions });
+          }
+
+          if (localStorage.getItem('lingxi_notifications') !== 'false') {
+            const preview = lastText.slice(0, 80) || 'Agent 已回复';
+            if (window.electronAPI?.showNotification) {
+              window.electronAPI.showNotification('灵犀 — 回复完成', preview);
+            } else if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+              new Notification('灵犀 — 回复完成', { body: preview });
+            } else if (typeof Notification !== 'undefined' && Notification.permission !== 'denied') {
+              Notification.requestPermission().then(perm => {
+                if (perm === 'granted') new Notification('灵犀 — 回复完成', { body: preview });
+              });
+            }
+          }
         }
         if (state.activeSessionId) {
           api.listMessages(state.activeSessionId).then((m) => {
@@ -458,11 +348,23 @@ export const createChatSlice = (set, get) => ({
         set({ evolutionActivity: evoLog });
         break;
       }
-      case 'dream_progress':
-      case 'dream_scan_start':
+      case 'dream_progress': {
+        const info = typeof payload === 'object' ? payload : {};
+        set({ dreamProgress: { ...info, phase: 'progress', ts: Date.now() } });
+        break;
+      }
+      case 'dream_scan_start': {
+        const info = typeof payload === 'object' ? payload : {};
+        set({ dreamProgress: { ...info, phase: 'scan_start', ts: Date.now() } });
+        break;
+      }
       case 'dream_scan_done': {
         const info = typeof payload === 'object' ? payload : {};
-        set({ dreamProgress: { ...info, phase: event.replace('dream_', ''), ts: Date.now() } });
+        if (!info.dispatched) {
+          set({ dreamProgress: null });
+        } else {
+          set({ dreamProgress: { ...info, phase: 'scan_done', ts: Date.now() } });
+        }
         break;
       }
       case 'dream_done': {
@@ -833,6 +735,13 @@ export const createChatSlice = (set, get) => ({
         files,
       };
       if (workingDir) payload.workingDir = workingDir;
+      // 通用设置：思考模式 + 回复语言
+      try {
+        const thinkingEnabled = JSON.parse(localStorage.getItem('lingxi_thinking_enabled') ?? 'true');
+        if (!thinkingEnabled) payload.thinking = false;
+        const replyLang = localStorage.getItem('lingxi_reply_lang')?.replace(/"/g, '') || '';
+        if (replyLang && replyLang !== 'zh') payload.replyLang = replyLang;
+      } catch {}
       await api.sendChat(payload);
     } catch (e) {
       set({ isStreaming: false, agentState: 'IDLE' });

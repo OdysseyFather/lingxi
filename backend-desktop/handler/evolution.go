@@ -320,9 +320,14 @@ func runKnowledgeExtraction(sessionID int64, sessionTitle, fullContext string) {
 
 // TryAutoEvolution is called after negative feedback or correction signals.
 func TryAutoEvolution(agentID, sessionID int64, conversationContext string) {
-	if agentID <= 0 || !db.GetAgentEvolutionEnabled(agentID) {
+	if agentID <= 0 {
 		return
 	}
+	if !db.GetAgentEvolutionEnabled(agentID) {
+		slog.Debug("evolution skip: agent not enabled", "agent_id", agentID)
+		return
+	}
+	slog.Info("evolution auto triggered", "agent_id", agentID, "session_id", sessionID, "ctx_len", len(conversationContext))
 	go runEvolutionAnalysis(agentID, sessionID, conversationContext, "auto")
 }
 
@@ -520,7 +525,17 @@ func callActiveLLM(prompt string) string {
 		slog.Warn("evolution: claude bin not configured")
 		BroadcastEvent("evolution_progress", map[string]interface{}{
 			"phase": "error", "step": 5, "total_steps": 5,
-			"message": "进化失败：AI 引擎未配置",
+			"message": "进化失败：AI 引擎（Claude CLI）未配置，请确保已安装 claude 并在 config 中设置路径",
+		})
+		return ""
+	}
+
+	// 检查 Claude CLI 可执行文件是否存在
+	if _, err := exec.LookPath(claudeBin); err != nil {
+		slog.Warn("evolution: claude binary not found", "bin", claudeBin, "err", err)
+		BroadcastEvent("evolution_progress", map[string]interface{}{
+			"phase": "error", "step": 5, "total_steps": 5,
+			"message": fmt.Sprintf("进化失败：找不到 AI 引擎 %s，请检查 Claude CLI 是否已安装", claudeBin),
 		})
 		return ""
 	}

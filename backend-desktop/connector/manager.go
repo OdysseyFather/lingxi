@@ -34,7 +34,7 @@ func (m *Manager) LoadFromDB() {
 	}
 	for _, c := range connectors {
 		if c.Enabled {
-			if err := m.StartWithAgent(c.Platform, c.Config, c.AgentID); err != nil {
+			if err := m.StartWithAgentAndID(c.Platform, c.Config, c.AgentID, c.ID); err != nil {
 				slog.Warn("[connector manager] start  error", "platform", c.Platform, "err", err)
 			}
 		}
@@ -43,11 +43,16 @@ func (m *Manager) LoadFromDB() {
 
 // Start 启动指定平台的连接器（已在运行则先停止再重启）
 func (m *Manager) Start(platform, configJSON string) error {
-	return m.StartWithAgent(platform, configJSON, 0)
+	return m.StartWithAgentAndID(platform, configJSON, 0, 0)
 }
 
-// StartWithAgent 启动连接器并绑定智能体
+// StartWithAgent 启动连接器并绑定智能体（向后兼容）
 func (m *Manager) StartWithAgent(platform, configJSON string, agentID int64) error {
+	return m.StartWithAgentAndID(platform, configJSON, agentID, 0)
+}
+
+// StartWithAgentAndID 启动连接器并绑定智能体和连接器 ID
+func (m *Manager) StartWithAgentAndID(platform, configJSON string, agentID, connectorID int64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -65,6 +70,10 @@ func (m *Manager) StartWithAgent(platform, configJSON string, agentID int64) err
 	// 注入 agentID 到连接器
 	if setter, ok := conn.(interface{ SetAgentID(int64) }); ok {
 		setter.SetAgentID(agentID)
+	}
+	// 注入 connectorID（监听模式需要用于查找规则）
+	if setter, ok := conn.(interface{ SetConnectorID(int64) }); ok && connectorID > 0 {
+		setter.SetConnectorID(connectorID)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())

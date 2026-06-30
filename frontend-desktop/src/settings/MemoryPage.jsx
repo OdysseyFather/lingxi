@@ -40,16 +40,9 @@ export function MemoryPage() {
     } catch { setDreamHistory([]); }
   }, [activeAgentId]);
 
-  const checkDreamStatus = useCallback(async () => {
-    try {
-      const s = await api.getDreamStatus();
-      setDreamRunning(s?.running || false);
-    } catch { /* ignore */ }
-  }, []);
+  useEffect(() => { loadMemories(); loadDreamHistory(); }, [activeAgentId]);
 
-  useEffect(() => { loadMemories(); loadDreamHistory(); checkDreamStatus(); }, [activeAgentId]);
-
-  // Dream 完成后刷新数据
+  // Dream 完成/失败后刷新数据
   useEffect(() => {
     if (dreamProgress?.phase === 'done') {
       loadMemories();
@@ -59,6 +52,19 @@ export function MemoryPage() {
       setDreamTriggered(false);
     }
   }, [dreamProgress?.phase]);
+
+  // 安全措施：dreamProgress 停留超过 3 分钟自动清除（防止卡住）
+  useEffect(() => {
+    if (!dreamProgress || dreamProgress.phase === 'done' || dreamProgress.phase === 'error') return;
+    const timer = setTimeout(() => {
+      const cur = useStore.getState().dreamProgress;
+      if (cur && cur.ts === dreamProgress.ts) {
+        useStore.setState({ dreamProgress: null });
+        setDreamTriggered(false);
+      }
+    }, 3 * 60 * 1000);
+    return () => clearTimeout(timer);
+  }, [dreamProgress?.ts]);
 
   const handleTriggerDream = async () => {
     if (!activeAgentId || dreamRunning) return;

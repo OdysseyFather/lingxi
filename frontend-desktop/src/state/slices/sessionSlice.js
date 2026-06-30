@@ -1,4 +1,4 @@
-import { api, wsClient } from '../../api/client';
+import { api, wsClient, electron } from '../../api/client';
 
 export const createSessionSlice = (set, get) => ({
   sessions: [],
@@ -66,12 +66,14 @@ export const createSessionSlice = (set, get) => ({
     ]);
     const activeProfile = profiles.find((p) => p.is_active) || null;
     set({ providers, profiles, activeProfile });
+    // Web 版：有激活 profile 时自动下发 token 到后端（Electron 版由主进程处理）
+    if (activeProfile && !window.electronAPI) {
+      electron.pushActiveSecret(activeProfile.id).catch(() => {});
+    }
   },
   activateProfile: async (id) => {
     await api.activateProfile(id);
-    if (window.electronAPI?.pushActiveSecret) {
-      await window.electronAPI.pushActiveSecret(id);
-    }
+    await electron.pushActiveSecret(id);
     await get().refreshProfiles();
   },
 

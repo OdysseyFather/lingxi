@@ -22,20 +22,16 @@ function lazyRetry(importFn, retries = 3) {
 const SettingsPage = lazyRetry(() => import('../settings/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const SkillsPage = lazyRetry(() => import('../SkillsPage'));
 const KnowledgePage = lazyRetry(() => import('../KnowledgePage'));
-const IMConnectorPage = lazyRetry(() => import('../IMConnectorPage'));
 const MCPPage = lazyRetry(() => import('../MCPPage'));
 const AgentFactoryPage = lazyRetry(() => import('../AgentFactoryPage'));
-const ScheduledTasksPage = lazyRetry(() => import('../ScheduledTasksPage'));
-const WorkflowPage = lazyRetry(() => import('../WorkflowPage'));
 const NexusPage = lazyRetry(() => import('../nexus/NexusPage'));
-const EvolutionPage = lazyRetry(() => import('../EvolutionPage'));
 const DeepSearchPage = lazyRetry(() => import('../DeepSearchPage'));
 const CommunityPage = lazyRetry(() => import('../CommunityPage'));
 
 const LoginPage = lazyRetry(() => import('../LoginPage'));
 import EvolutionProgressPanel from './EvolutionProgressPanel';
 import { cn, isH5Mobile } from './cn';
-import { MessageSquare, Settings as SettingsIcon, Brain, BookOpen, MessageCircle, Plug, Sparkles, PanelLeftClose, PanelLeftOpen, Clock, Workflow, Globe, LogOut, User, UserPlus, Check, X, Dna, Menu, Plus, Search, Users } from 'lucide-react';
+import { MessageSquare, Settings as SettingsIcon, Brain, BookOpen, MessageCircle, Plug, Sparkles, PanelLeftClose, PanelLeftOpen, Clock, Workflow, Globe, LogOut, User, UserPlus, Check, X, Dna, Menu, Plus, Search, Users, BarChart3, Link2 } from 'lucide-react';
 import { api, wsClient } from '../api/client';
 
 const SHORTCUTS = [
@@ -114,12 +110,39 @@ const RIGHT_TABS = [
   { id: 'search', label: '搜索', icon: Search },
   { id: 'community', label: '社区', icon: Users },
   { id: 'nexus', label: 'Nexus', icon: Globe },
-  { id: 'im', label: 'IM', icon: MessageCircle },
-  { id: 'workflow', label: '工作流', icon: Workflow },
-  { id: 'scheduled', label: '定时', icon: Clock },
-  { id: 'evolution', label: '进化', icon: Dna },
-  { id: 'settings', label: '设置', icon: SettingsIcon },
 ];
+
+// IM 页面：连接器配置 + IM 看板 双 tab
+function IMPageWithTabs({ isMobile }) {
+  const [imTab, setImTab] = useState('connector');
+  return (
+    <div className="flex flex-col h-full min-h-0">
+      <div className={cn('flex items-center gap-1 border-b border-[color:var(--line)] bg-[color:var(--bg)]', isMobile ? 'px-3 pt-2 pb-1' : 'px-6 pt-3 pb-1')}>
+        {[
+          { id: 'connector', label: '连接器', icon: Link2 },
+          { id: 'dashboard', label: 'IM 看板', icon: BarChart3 },
+        ].map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setImTab(t.id)}
+            className={cn(
+              'relative flex items-center gap-1.5 px-3 py-1.5 rounded-t-lg text-sm font-medium transition-colors',
+              imTab === t.id
+                ? 'text-[color:var(--accent)] bg-[color:var(--accent-soft)]'
+                : 'text-[color:var(--text-soft)] hover:text-[color:var(--text)] hover:bg-[color:var(--bg-soft)]'
+            )}
+          >
+            <t.icon size={14} />
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div className={cn('flex-1 overflow-auto scrollable', isMobile ? 'p-3' : 'p-4')}>
+        {imTab === 'connector' ? <IMConnectorPage /> : <IMDashboardPage />}
+      </div>
+    </div>
+  );
+}
 
 // 定时任务运行中徽章（右上角小红点 + 数量）
 function ScheduledRunningDot() {
@@ -564,7 +587,6 @@ export function AppShell() {
                     )}
                   >
                     <Icon size={15} />
-                    {tab.id === 'scheduled' && <ScheduledRunningDot />}
                   </button>
                 );
               })}
@@ -666,29 +688,9 @@ export function AppShell() {
                 <KnowledgePage />
               </motion.div>
             )}
-            {view === 'im' && (
-              <motion.div key="im" className={cn('flex-1 overflow-auto scrollable bg-[color:var(--bg)]', isMobile ? 'p-3' : 'p-4')} {...pageMotion}>
-                <IMConnectorPage />
-              </motion.div>
-            )}
-            {view === 'workflow' && (
-              <motion.div key="workflow" className={cn('flex-1 overflow-auto scrollable bg-[color:var(--bg)]', isMobile ? 'p-3' : 'p-6')} {...pageMotion}>
-                <WorkflowPage />
-              </motion.div>
-            )}
             {view === 'nexus' && (
               <motion.div key="nexus" className="flex-1 flex flex-col min-h-0" {...pageMotion}>
                 <NexusPage />
-              </motion.div>
-            )}
-            {view === 'scheduled' && (
-              <motion.div key="scheduled" className="flex-1 overflow-auto scrollable bg-[color:var(--bg)] p-4" {...pageMotion}>
-                <ScheduledTasksPage />
-              </motion.div>
-            )}
-            {view === 'evolution' && (
-              <motion.div key="evolution" className="flex-1 overflow-auto scrollable bg-[color:var(--bg)] p-6" {...pageMotion}>
-                <EvolutionPage />
               </motion.div>
             )}
             {view === 'community' && (

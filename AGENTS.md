@@ -14,7 +14,7 @@
 
 ### 前端 `frontend-desktop/`
 - **React 19** + **Vite 8**（构建需 Node.js ≥ 20.19 或 ≥ 22.12）
-- **Tailwind CSS 3.4** — 全局样式，6 套主题通过 CSS 变量切换
+- **Tailwind CSS 3.4** — 全局样式，17 套主题通过 CSS 变量切换
 - **Zustand 5** — 全局状态管理（`src/state/useStore.js`，模块化切片：auth/ui/session/chat/nexus）
 - **Framer Motion 12** — 页面过渡、列表动画
 - **Lucide React** — 图标（不使用 emoji）
@@ -63,6 +63,7 @@ lingxi-agent/
 │   │   ├── scheduled.go      # 定时任务 CRUD
 │   │   ├── auth.go           # 用户/OAuth 配置 CRUD
 │   │   ├── im_connector.go   # IM 连接器 CRUD
+│   │   ├── feishu_monitor.go # 飞书监听模式规则 + 日志 CRUD
 │   │   ├── evolution.go      # 自我进化日志 CRUD + InsertMemory
 │   │   ├── nexus.go          # Nexus 表 CRUD（peers/contacts/a2a）
 │   │   ├── group_chat.go     # 群聊 CRUD（group_chats/group_members/group_messages，含微信风扩展列）
@@ -83,6 +84,7 @@ lingxi-agent/
 │   │   ├── mcp.go            # MCP 服务管理
 │   │   ├── usage.go          # 用量统计
 │   │   ├── im_connector.go   # IM 连接器
+│   │   ├── feishu_monitor.go # 飞书监听模式规则 CRUD + 日志 + 群列表 API
 │   │   ├── scheduled.go      # 定时任务 CRUD
 │   │   ├── auth.go           # SSO 登录（OAuth code 换 token + 游客登录）
 │   │   ├── nexus.go          # Nexus 对外 API + 设置 + WAN API
@@ -112,7 +114,7 @@ lingxi-agent/
 │   │   ├── tasks.go          # 后台任务列表 + 删除
 │   │   ├── router_status.go  # 路由器状态查询
 │   │   └── ws_hub.go         # WebSocket Hub
-│   ├── connector/            # IM 平台对接（企微/钉钉/飞书，飞书支持流式卡片消息）
+│   ├── connector/            # IM 平台对接（企微/钉钉/飞书，飞书支持流式卡片消息 + 监听模式）
 │   ├── model/                # 数据模型
 │   ├── nexus/                # Agent 间对话引擎（无 Token 认证，无联系人机制）
 │   │   ├── discovery.go      # mDNS 发现服务 + 广域网信令客户端启动
@@ -170,7 +172,7 @@ lingxi-agent/
 │   │   ├── settings/         # 设置页
 │   │   │   ├── SettingsPage.jsx
 │   │   │   ├── ProfilesPage.jsx   # 接入点管理
-│   │   │   ├── AppearancePage.jsx  # 6 套主题
+│   │   │   ├── AppearancePage.jsx  # 17 套主题
 │   │   │   ├── MemoryPage.jsx     # 长期记忆管理
 │   │   │   ├── NexusSettingsPage.jsx # 网络与协作设置
 │   │   │   └── UsagePage.jsx       # 用量 + 预算预警
@@ -231,6 +233,14 @@ lingxi-agent/
 │
 ├── signaling-server/         # 广域网信令服务器（独立部署到 github.com/OdysseyFather/lingxi-singaling-server）
 │   └── main.go               # WebSocket 信令（注册/发现/消息中继，无 HMAC，支持 conversation_invite/accept/reject）
+│
+├── web-server/               # Web 版部署网关（独立反向代理，零改动现有代码）
+│   ├── main.go               # Go 反向代理网关（密码认证 + CORS + 子进程管理）
+│   ├── go.mod                # 独立 Go module
+│   ├── static/login.html     # Web 登录页（独立 HTML）
+│   ├── Dockerfile            # 多阶段 Docker 构建
+│   ├── docker-compose.yml    # 一键部署配置
+│   └── README.md             # Web 部署文档
 │
 ├── electron/                 # Electron 主进程
 │   ├── main.js               # 窗口管理、子进程启动
@@ -430,6 +440,13 @@ flutter build apk --debug      # Debug APK (~200MB)
 | POST | /api/mcp/:id/toggle | ToggleMCPServer | 启用/禁用 MCP |
 | GET | /api/mcp/export | ExportMCPConfig | 导出 MCP 配置 |
 | GET/POST/PUT/DELETE | /api/im-connectors/* | IM CRUD | IM 连接器管理 |
+| GET | /api/feishu-monitor/rules | ListMonitorRules | 飞书监听规则列表 |
+| POST | /api/feishu-monitor/rules | CreateMonitorRule | 创建监听规则 |
+| PUT | /api/feishu-monitor/rules/:id | UpdateMonitorRule | 更新监听规则 |
+| DELETE | /api/feishu-monitor/rules/:id | DeleteMonitorRule | 删除监听规则 |
+| PUT | /api/feishu-monitor/rules/:id/toggle | ToggleMonitorRule | 启用/禁用监听规则 |
+| GET | /api/feishu-monitor/logs | ListMonitorLogs | 飞书监听日志列表 |
+| GET | /api/feishu-monitor/chats | ListFeishuChats | 获取机器人所在的群列表 |
 | GET | /api/providers | ListProviders | 供应商列表 |
 | GET | /api/usage | GetUsage | 用量查询 |
 | GET | /api/usage/quota | GetUsageQuota | 额度查询 |
@@ -611,7 +628,7 @@ xattr -cr "/Applications/灵犀.app"
 - **文件拖拽对话（拖入 .md/.py/.go/.json 等文本文件，内容作为消息附件发送）**
 - **快捷截屏（Cmd+Shift+S 全局快捷键 + 按钮截屏，截图自动填入输入框）**
 - **消息固定（Pin 重要消息，用户和助理消息均支持）**
-- **快捷回复建议（assistant 回复后显示 2-3 个推荐后续问题胶囊按钮）**
+- **快捷回复建议（Claude CLI `--prompt-suggestions` AI 预测下一轮提问，回退本地正则兜底，assistant 回复后显示 2-3 个推荐后续问题胶囊按钮）**
 - **对话中止按钮（abort 正在进行的 AI 回复）**
 - **对话批量发送（batch chat）**
 
@@ -693,7 +710,7 @@ xattr -cr "/Applications/灵犀.app"
 - **Screen Agent 操作审计（screen_actions 表记录所有操作日志）**
 
 ### UI/UX
-- 6 套主题（light/dark/midnight/cyber/aurora/cosmos）
+- 17 套主题（light/dark/midnight/cyber/aurora/cosmos/ocean/sunset/forest/rose/sand/lavender/mocha/nord/sakura/neon/mint）
 - AnimatePresence 页面切换动画
 - **顶部导航栏（主导航 5 项：对话/智能体/技能/知识库/MCP + 辅助导航：search/deep-search/evolution/proactive/nexus/im/workflow/scheduled/settings，layoutId 动画指示器）**
 - 会话重命名（双击编辑）+ **会话置顶**
@@ -762,6 +779,7 @@ xattr -cr "/Applications/灵犀.app"
 - **供应商预设配置**（内置 DeepSeek/Qwen/GLM/Moonshot/Doubao 等供应商的 base_url 和推荐模型列表，减少用户手动配置错误）
 - MCP 工具管理（stdio/SSE/HTTP）+ 配置导出
 - IM 集成（企业微信/钉钉/飞书，支持 @所有人 消息过滤配置）
+- **飞书监听模式**（群内所有消息接收 + 规则过滤 + 四种动作类型 + 自定义提示词 + 审计日志）
 - **Windows 构建支持（NSIS 安装包 + Portable）**
 - **OpenAI 兼容模型技能识别增强（自动注入已安装技能清单到 system prompt）**
 - **防死循环保护（禁止调用 Cursor 专有工具，避免 tool_use 循环）**
@@ -834,6 +852,16 @@ xattr -cr "/Applications/灵犀.app"
 - **新增 WS 事件**：group_message_recalled / group_agent_typing / **group_members_sync**（刷新成员列表）
 - **AgentFactoryPage 角色步骤增加"群聊人格"折叠面板**：ChipInput（标签/兴趣）+ 概率 slider + min/max 延迟 + 安静时段（HH:MM）+ Emoji 频率 + 错别字/复读/被怼冷静 + cold_start 开关 + style_hint Textarea
 - **前端 nexusSlice 扩展**：groupTypingAgents / groupDrafts / groupOldestId + loadOlderGroupMessages + applyGroupRecall + applyGroupAgentTyping
+
+### 群聊体验对齐主模式（v2026-06）
+- **群聊 Agent 流式思考/工具调用**：`RunGroupAgentTurn` 重写事件处理，群聊 Agent 发言时实时转发 thinking_start/thinking_delta/thinking_done/tool_start/tool_end 事件（之前只推正文 text），前端可实时看到 Agent 的思考过程和工具调用
+- **群聊消息保留完整 blocks**：后端不再过滤 thinking/tool blocks，最终消息 JSON 包含完整的思考块和工具调用块，历史消息也能展示
+- **前端 GroupLiveStream 流式渲染增强**：移除 thinking/tool 过滤，BlocksRenderer 渲染完整流式过程（思考折叠 + 工具卡片 + 正文）
+- **前端 GroupMessageBubble 历史消息增强**：移除 thinking/tool 过滤，历史消息展示完整的思考块和工具调用记录
+- **nexusSlice thinking 事件处理**：新增 thinking_start/thinking_delta/thinking_done 三个事件在 groupLiveStreams 中的状态管理
+- **NexusPage 响应式侧边栏**：窗口宽度 < 900px 且正在查看群聊时自动隐藏左侧边栏，给消息区域更多空间
+- **消息气泡宽度放宽**：max-w 从 78% 增至 85%，长消息/代码块展示更充分
+- **1v1 A2A 功能完全移除**：删除所有 Agent-to-Agent 一对一对话相关代码（后端路由/handler/前端组件/状态管理/API），仅保留群聊
 
 ### cc-haha Provider 架构优化（v2026-05 Phase 2）
 - **新增 Anthropic 直连供应商**：GLM/智谱（`glm_anthropic`）、Kimi（`kimi_anthropic`）、MiniMax（`minimax_anthropic`）、Ollama（`ollama_anthropic`）、LM Studio（`lmstudio_anthropic`），绕过外部协议转换层零 Python 依赖
@@ -1174,3 +1202,15 @@ xattr -cr "/Applications/灵犀.app"
 - **替代 LiteLLM Bridge**：`backend-desktop/proxy/` 纯 Go 实现，启动零延迟、无 Python 依赖
 - **完整协议转换**：Anthropic `/v1/messages` ↔ OpenAI `/v1/chat/completions`（流式 + 非流式 + Tool use + 思考链 + 多模态）
 - **router/ccr.go 重写**：移除 Python 子进程管理，改用 proxy.Server 内置 HTTP 服务
+
+### 飞书监听模式（v2026-06 Phase 33）
+- **监听模式总开关**：`FeishuConfig` 新增 `monitor_enabled` 字段，飞书连接器配置弹窗新增紫色监听模式开关（含 `im:message.group_msg` 权限提醒）
+- **监听规则引擎**：`connector/feishu_monitor.go` 实现 `handleMonitorMessage` / `matchRule` / `executeAction` 三层逻辑——按 priority DESC 逐条匹配规则，首条命中执行动作
+- **四种动作类型**：`reply_original`（回复原消息）/ `silent`（静默处理仅记录）/ `send_to_chat`（转发到指定群）/ `send_to_user`（私聊发给指定用户）
+- **规则过滤器**：来源过滤（chatIDs/senderIDs/excludeBotMsg）+ 内容过滤（msgTypes/keywords/keywordMode=any|all）
+- **自定义提示词**：规则可配置 `custom_prompt`，非空时以 `[监控指令] + [原始消息]` 格式注入 AI
+- **数据模型**：`feishu_monitor_rules` 表（规则配置 + priority）+ `feishu_monitor_logs` 表（执行日志审计）
+- **7 个 API**：`GET/POST/PUT/DELETE /api/feishu-monitor/rules` + `PUT /rules/:id/toggle` + `GET /logs` + `GET /chats`
+- **前端 UI**：IMConnectorPage 飞书连接器卡片新增「监听模式配置」折叠面板（规则管理 + 监听日志两个 tab）
+- **消息发送**：`sendToChat` / `sendToUser` 方法（飞书 `client.Im.Message.Create` API）
+- **connectorID 传播**：`connector.Manager.StartWithAgentAndID` 启动时注入 `im_connectors.id`

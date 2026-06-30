@@ -56,13 +56,50 @@ export default function GroupChatView({ roomId, onBack }) {
   const draft = drafts[roomId] || { text: '', replyTo: null, images: [] };
 
   const handleSend = async (payload) => {
+    // 乐观更新：发送后立即在本地显示消息，不等 WS 或轮询
+    const optimisticMsg = {
+      id: `_opt_${Date.now()}`,
+      room_id: roomId,
+      sender_peer_id: myInstanceID,
+      sender_agent_id: 0,
+      sender_agent_name: myNickname || '我',
+      msg_type: 'user_post',
+      content: payload.content || '',
+      reply_to_id: payload.reply_to_id || 0,
+      images: JSON.stringify(payload.images || []),
+      mentioned_agents: JSON.stringify(
+        (payload.mentioned_agents || []).map((n) => ({ agent_name: n })),
+      ),
+      created_at: new Date().toISOString(),
+      _optimistic: true,
+    };
+
+    const detail = useStore.getState().groupRoomDetail;
+    if (detail && detail.room?.id === roomId) {
+      useStore.setState({
+        groupRoomDetail: {
+          ...detail,
+          messages: [...(detail.messages || []), optimisticMsg],
+        },
+      });
+    }
+
     try {
       await api.postGroupMessage(roomId, payload);
       clearGroupDraft(roomId);
-      // refreshDetail() 由 WS 自动更新；保留兜底
       setTimeout(refreshDetail, 300);
     } catch (e) {
       console.error('postGroupMessage failed', e);
+      // 发送失败时移除乐观消息
+      const cur = useStore.getState().groupRoomDetail;
+      if (cur && cur.room?.id === roomId) {
+        useStore.setState({
+          groupRoomDetail: {
+            ...cur,
+            messages: (cur.messages || []).filter((m) => m.id !== optimisticMsg.id),
+          },
+        });
+      }
     }
   };
 

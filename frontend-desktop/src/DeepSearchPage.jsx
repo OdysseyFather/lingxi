@@ -10,6 +10,7 @@ import { Button, Card, Input, Modal } from './ui/primitives';
 import { cn } from './ui/cn';
 
 const SOURCE_META = {
+  bing: { label: 'Bing', icon: '🔍', color: 'text-blue-600' },
   duckduckgo: { label: 'DuckDuckGo', icon: '🦆', color: 'text-orange-500' },
   wikipedia: { label: '维基百科', icon: '📖', color: 'text-blue-500' },
 };

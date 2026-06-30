@@ -54,6 +54,13 @@ func DefaultBaseConfig() BaseConfig {
 // InteractiveCardSender 飞书等平台在 AI 回复完成后发送交互卡片（选择/输入/反馈）
 type InteractiveCardSender func(sessionID int64, fullReply string)
 
+// IMImage 表示 IM 消息中携带的图片（base64 编码 + MIME 类型）
+// 由各平台连接器从原平台下载图片后填充，dispatcher 会落盘为临时文件并传给 Claude
+type IMImage struct {
+	MediaType string `json:"mediaType"` // image/jpeg | image/png | image/gif | image/webp
+	Data      string `json:"data"`      // base64 字符串（不含 data:xxx;base64, 前缀）
+}
+
 // IMMessage 是各平台消息的统一抽象
 type IMMessage struct {
 	Platform       string // "dingtalk" | "feishu" | "wecom"
@@ -66,6 +73,8 @@ type IMMessage struct {
 	AgentID        int64  // 绑定的智能体 ID（来自 IM 连接器配置）
 	IsMentionAll   bool   // 是否为 @所有人 触发（非 @机器人）
 	BaseCfg        BaseConfig
+	// Images 消息中携带的图片（base64），dispatcher 会落盘为临时文件并作为多模态输入传给 Claude
+	Images []IMImage
 	// ReplyFunc 由各平台连接器实现，dispatcher 调用它发送回复（一次性完整回复）
 	ReplyFunc func(text string) error
 	// StreamReplyFunc 可选（旧接口）：仅文本流式回复。保留向后兼容。
@@ -75,6 +84,8 @@ type IMMessage struct {
 	StreamCallback StreamCallback
 	// PostDoneFunc 流式/同步回复完成后触发，用于发送交互卡片（反馈/选择/输入）
 	PostDoneFunc InteractiveCardSender
+	// MembersInfo 群成员名单提示（可选），注入到 system prompt，让 AI 知道可以 @mention 谁
+	MembersInfo string
 }
 
 // Connector 是每个 IM 平台连接器必须实现的接口

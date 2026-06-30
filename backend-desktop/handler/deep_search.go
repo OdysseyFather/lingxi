@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -81,13 +84,13 @@ func DeepSearch(c *gin.Context) {
 		nextID  = 1
 	)
 
-	send("source_start", gin.H{"source": "duckduckgo", "query": body.Query})
+	send("source_start", gin.H{"source": "bing", "query": body.Query})
 	send("source_start", gin.H{"source": "wikipedia", "query": body.Query})
 
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		r := searchDuckDuckGo(body.Query, body.MaxSources)
+		r := searchBing(body.Query, body.MaxSources)
 		mu.Lock()
 		for i := range r {
 			r[i].ID = nextID
@@ -95,7 +98,7 @@ func DeepSearch(c *gin.Context) {
 		}
 		results = append(results, r...)
 		mu.Unlock()
-		send("source_done", gin.H{"source": "duckduckgo", "count": len(r)})
+		send("source_done", gin.H{"source": "bing", "count": len(r)})
 	}()
 	go func() {
 		defer wg.Done()
@@ -142,18 +145,23 @@ func DeepSearch(c *gin.Context) {
 	// 3. 推送全部来源
 	send("sources", results)
 
-	// 4. LLM 综合推理
+	// 4. LLM 综合推理（直接调用已配置的 API Profile，不经过 Claude CLI）
 	send("synthesizing", gin.H{})
 
 	prompt := buildSynthesisPrompt(body.Query, results)
-	reply, _, err := RunClaudeSyncCtx(c.Request.Context(), prompt, 0)
+	reply, err := quickLLMChat(c.Request.Context(), prompt)
 	if err != nil {
-		send("error", gin.H{"message": "综合推理失败: " + err.Error()})
-		send("done", gin.H{})
-		return
+		slog.Warn("[deep_search] LLM synthesis failed, trying fallback", "err", err)
+		// 回退：尝试 RunClaudeSyncCtx
+		reply2, _, err2 := RunClaudeSyncCtx(c.Request.Context(), prompt, 0, nil)
+		if err2 != nil {
+			send("error", gin.H{"message": "综合推理失败: " + err.Error()})
+			send("done", gin.H{})
+			return
+		}
+		reply = reply2
 	}
 
-	// 4.1 简单地拆分成片段推送，模拟流式（RunClaudeSync 是同步的）
 	chunks := chunkByChars(reply, 32)
 	for _, ck := range chunks {
 		send("delta", gin.H{"text": ck})
@@ -165,59 +173,63 @@ func DeepSearch(c *gin.Context) {
 
 // ─── 搜索源 ─────────────────────────────────────────────────────
 
-// searchDuckDuckGo 通过 DuckDuckGo HTML 接口抓取搜索结果
-// 无需 API key,但请保持低请求频率
-func searchDuckDuckGo(query string, max int) []SearchResult {
-	rawURL := "https://html.duckduckgo.com/html/?q=" + url.QueryEscape(query)
+// searchBing 通过 Bing CN 网页抓取搜索结果
+// 无需 API key，解析 <li class="b_algo"> 中的链接和摘要
+func searchBing(query string, max int) []SearchResult {
+	rawURL := "https://cn.bing.com/search?q=" + url.QueryEscape(query) + "&count=" + fmt.Sprintf("%d", max+5)
 	html := httpGetWithUA(rawURL)
 	if html == "" {
 		return nil
 	}
 
-	re := regexp.MustCompile(`<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)</a>[\s\S]*?<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)</a>`)
-	results := []SearchResult{}
-	for _, m := range re.FindAllStringSubmatch(html, -1) {
-		if len(m) < 4 {
+	// 匹配每个搜索结果块 <li class="b_algo">...</li>
+	blockRe := regexp.MustCompile(`(?s)<li class="b_algo"[^>]*>(.*?)</li>`)
+	linkRe := regexp.MustCompile(`<a[^>]+href="(https?://[^"]+)"[^>]*>`)
+	// 匹配摘要文本（通常在 <p> 标签或 b_lineclamp 类中）
+	snippetRe := regexp.MustCompile(`(?s)<p[^>]*>(.*?)</p>`)
+	titleRe := regexp.MustCompile(`(?s)<a[^>]+href="https?://[^"]+?"[^>]*>(.*?)</a>`)
+
+	var results []SearchResult
+	for _, block := range blockRe.FindAllStringSubmatch(html, -1) {
+		if len(block) < 2 {
 			continue
 		}
-		realURL := extractDuckDuckGoTarget(m[1])
-		if realURL == "" {
+		content := block[1]
+
+		linkMatch := linkRe.FindStringSubmatch(content)
+		if linkMatch == nil || len(linkMatch) < 2 {
 			continue
 		}
+		resultURL := linkMatch[1]
+		// 跳过 Bing 内部链接
+		if strings.Contains(resultURL, "bing.com") || strings.Contains(resultURL, "microsoft.com/bing") {
+			continue
+		}
+
+		title := ""
+		if m := titleRe.FindStringSubmatch(content); len(m) >= 2 {
+			title = stripHTML(m[1])
+		}
+		if title == "" {
+			title = resultURL
+		}
+
+		snippet := ""
+		if m := snippetRe.FindStringSubmatch(content); len(m) >= 2 {
+			snippet = stripHTML(m[1])
+		}
+
 		results = append(results, SearchResult{
-			Title:   stripHTML(m[2]),
-			URL:     realURL,
-			Snippet: stripHTML(m[3]),
-			Source:  "duckduckgo",
+			Title:   title,
+			URL:     resultURL,
+			Snippet: snippet,
+			Source:  "bing",
 		})
 		if len(results) >= max {
 			break
 		}
 	}
 	return results
-}
-
-// extractDuckDuckGoTarget 解析 DuckDuckGo 的中转 URL
-// DDG 的链接格式：/l/?kh=-1&uddg=<encoded-real-url>
-func extractDuckDuckGoTarget(s string) string {
-	if strings.HasPrefix(s, "http") {
-		return s
-	}
-	if strings.HasPrefix(s, "//") {
-		s = "https:" + s
-	}
-	u, err := url.Parse(s)
-	if err != nil {
-		return ""
-	}
-	if real := u.Query().Get("uddg"); real != "" {
-		decoded, err := url.QueryUnescape(real)
-		if err == nil {
-			return decoded
-		}
-		return real
-	}
-	return s
 }
 
 // searchWikipedia 调用 Wikipedia OpenSearch API
@@ -328,6 +340,114 @@ func chunkByChars(s string, n int) []string {
 		chunks = append(chunks, string(runes[i:end]))
 	}
 	return chunks
+}
+
+// quickLLMChat 直接调用已配置的 API Profile 进行简单对话
+// 不创建会话、不持久化消息，适合深度搜索综合推理等轻量场景
+func quickLLMChat(ctx context.Context, userMessage string) (string, error) {
+	_, _, model, baseURL, token, protocol, _, _, _ := activeProfileSnapshot()
+	if model == "" || baseURL == "" || token == "" {
+		return "", fmt.Errorf("未配置或未激活模型接入点")
+	}
+
+	base := strings.TrimSuffix(baseURL, "/")
+
+	if protocol == "anthropic" {
+		base = strings.TrimSuffix(base, "/v1/messages")
+		base = strings.TrimSuffix(base, "/messages")
+		base = strings.TrimSuffix(base, "/v1")
+		base += "/v1"
+
+		reqBody, _ := json.Marshal(map[string]interface{}{
+			"model":      model,
+			"max_tokens": 4096,
+			"messages": []map[string]interface{}{
+				{"role": "user", "content": userMessage},
+			},
+		})
+		httpReq, err := http.NewRequestWithContext(ctx, "POST", base+"/messages", bytes.NewReader(reqBody))
+		if err != nil {
+			return "", err
+		}
+		httpReq.Header.Set("Content-Type", "application/json")
+		httpReq.Header.Set("x-api-key", token)
+		httpReq.Header.Set("anthropic-version", "2023-06-01")
+
+		client := &http.Client{Timeout: 120 * time.Second}
+		resp, err := client.Do(httpReq)
+		if err != nil {
+			return "", fmt.Errorf("Anthropic API 请求失败: %w", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			return "", fmt.Errorf("Anthropic API 返回 %d: %s", resp.StatusCode, string(body))
+		}
+		var result struct {
+			Content []struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return "", err
+		}
+		for _, c := range result.Content {
+			if c.Type == "text" {
+				return c.Text, nil
+			}
+		}
+		return "", fmt.Errorf("Anthropic API 无文本回复")
+	}
+
+	// OpenAI 兼容格式
+	base = strings.TrimSuffix(base, "/v1/chat/completions")
+	base = strings.TrimSuffix(base, "/chat/completions")
+	base = strings.TrimSuffix(base, "/v1/completions")
+	base = strings.TrimSuffix(base, "/completions")
+	base = strings.TrimSuffix(base, "/v1")
+	endpoint := base + "/v1/chat/completions"
+
+	reqBody, _ := json.Marshal(map[string]interface{}{
+		"model": model,
+		"messages": []map[string]interface{}{
+			{"role": "user", "content": userMessage},
+		},
+		"max_tokens":  4096,
+		"temperature": 0.3,
+	})
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewReader(reqBody))
+	if err != nil {
+		return "", err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+
+	client := &http.Client{Timeout: 120 * time.Second}
+	resp, err := client.Do(httpReq)
+	if err != nil {
+		return "", fmt.Errorf("LLM API 请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("LLM API 返回 %d: %s", resp.StatusCode, string(body))
+	}
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", err
+	}
+	if len(result.Choices) > 0 {
+		return result.Choices[0].Message.Content, nil
+	}
+	return "", fmt.Errorf("LLM API 无回复")
 }
 
 // buildSynthesisPrompt 构建综合推理 prompt

@@ -9,7 +9,7 @@ export const createUISlice = (set, get) => ({
   view: 'chat',
   setView: (v) => set({ view: v }),
 
-  settingsTab: 'profiles',
+  settingsTab: 'general',
   setSettingsTab: (t) => set({ settingsTab: t }),
   sidebarCollapsed: false,
   toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),

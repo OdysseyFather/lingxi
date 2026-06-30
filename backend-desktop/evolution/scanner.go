@@ -32,9 +32,9 @@ var (
 	broadcast BroadcastFunc
 	cfg       = Config{
 		Enabled:            true,
-		ScanInterval:       6 * time.Hour,
-		MinSessionMessages: 10,
-		CooldownHours:      24,
+		ScanInterval:       3 * time.Hour,
+		MinSessionMessages: 4,
+		CooldownHours:      6,
 		QuietStart:         -1,
 		QuietEnd:           -1,
 	}
@@ -119,31 +119,46 @@ func inQuietHours() bool {
 // runScan 执行一次全量扫描：找出符合条件的会话并触发进化
 func runScan() {
 	if analyzer == nil || ctxBuild == nil {
+		slog.Warn("evolution scan: skipped (analyzer or ctxBuild not initialized)")
 		return
 	}
 
 	emitProgress("scan_start", "开始全局进化巡检", 0, 0)
 
-	// 找出 evolution_enabled=1 的 agent
-	rows, err := db.DB.Query(`SELECT id FROM agents`)
+	// 找出所有 agent 并检查 evolution_enabled
+	rows, err := db.DB.Query(`SELECT id, name FROM agents`)
 	if err != nil {
 		slog.Warn("evolution scan: list agents failed", "err", err)
 		return
 	}
-	var agentIDs []int64
+	type agentInfo struct {
+		ID   int64
+		Name string
+	}
+	var allAgents []agentInfo
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err == nil {
-			agentIDs = append(agentIDs, id)
+		var a agentInfo
+		if err := rows.Scan(&a.ID, &a.Name); err == nil {
+			allAgents = append(allAgents, a)
 		}
 	}
 	rows.Close()
 
-	enabledAgents := make([]int64, 0, len(agentIDs))
-	for _, aid := range agentIDs {
-		if db.GetAgentEvolutionEnabled(aid) {
-			enabledAgents = append(enabledAgents, aid)
+	enabledAgents := make([]int64, 0, len(allAgents))
+	for _, a := range allAgents {
+		if db.GetAgentEvolutionEnabled(a.ID) {
+			enabledAgents = append(enabledAgents, a.ID)
 		}
+	}
+
+	slog.Info("evolution scan: agent check",
+		"total_agents", len(allAgents),
+		"evolution_enabled", len(enabledAgents),
+	)
+	if len(enabledAgents) == 0 {
+		slog.Info("evolution scan: no agents have evolution enabled, skipping scan")
+		emitProgress("scan_done", "未找到启用进化的智能体", 0, 0)
+		return
 	}
 
 	totalCandidates := 0

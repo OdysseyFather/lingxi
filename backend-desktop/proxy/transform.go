@@ -50,30 +50,42 @@ func TransformRequest(req *AnthropicRequest, provider Provider) (*OpenAIRequest,
 
 	// thinking / reasoning — 供应商适配
 	if req.Thinking != nil {
-		switch provider {
-		case ProviderGemini:
-			// Gemini: 使用 reasoning_effort，不支持自定义 thinking 对象
-			if req.Thinking.BudgetTokens > 0 {
-				oaiReq.ReasoningEffort = budgetToEffort(req.Thinking.BudgetTokens, req.MaxTokens)
-			} else if req.Thinking.Type == "enabled" {
-				oaiReq.ReasoningEffort = "high"
+		if req.Thinking.Type == "disabled" {
+			// 显式禁用思考：不传 reasoning_effort，确保模型不返回思考内容
+			switch provider {
+			case ProviderDeepSeek:
+				oaiReq.ReasoningEffort = "none"
+			case ProviderGemini:
+				oaiReq.ReasoningEffort = "none"
+			default:
+				oaiReq.ReasoningEffort = "none"
 			}
-			// Gemini 强制 temperature=1 when thinking enabled
-			if req.Thinking.Type == "enabled" {
-				t := 1.0
-				oaiReq.Temperature = &t
-			}
-		case ProviderDeepSeek:
-			if req.Thinking.BudgetTokens > 0 {
-				oaiReq.ReasoningEffort = budgetToEffort(req.Thinking.BudgetTokens, req.MaxTokens)
-			} else if req.Thinking.Type == "enabled" {
-				oaiReq.ReasoningEffort = "high"
-			}
-		default:
-			if req.Thinking.BudgetTokens > 0 {
-				oaiReq.ReasoningEffort = budgetToEffort(req.Thinking.BudgetTokens, req.MaxTokens)
-			} else if req.Thinking.Type == "enabled" {
-				oaiReq.ReasoningEffort = "high"
+		} else {
+			switch provider {
+			case ProviderGemini:
+				// Gemini: 使用 reasoning_effort，不支持自定义 thinking 对象
+				if req.Thinking.BudgetTokens > 0 {
+					oaiReq.ReasoningEffort = budgetToEffort(req.Thinking.BudgetTokens, req.MaxTokens)
+				} else if req.Thinking.Type == "enabled" {
+					oaiReq.ReasoningEffort = "high"
+				}
+				// Gemini 强制 temperature=1 when thinking enabled
+				if req.Thinking.Type == "enabled" {
+					t := 1.0
+					oaiReq.Temperature = &t
+				}
+			case ProviderDeepSeek:
+				if req.Thinking.BudgetTokens > 0 {
+					oaiReq.ReasoningEffort = budgetToEffort(req.Thinking.BudgetTokens, req.MaxTokens)
+				} else if req.Thinking.Type == "enabled" {
+					oaiReq.ReasoningEffort = "high"
+				}
+			default:
+				if req.Thinking.BudgetTokens > 0 {
+					oaiReq.ReasoningEffort = budgetToEffort(req.Thinking.BudgetTokens, req.MaxTokens)
+				} else if req.Thinking.Type == "enabled" {
+					oaiReq.ReasoningEffort = "high"
+				}
 			}
 		}
 	}

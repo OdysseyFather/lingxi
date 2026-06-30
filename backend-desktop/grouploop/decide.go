@@ -48,9 +48,9 @@ func Decide(member db.GroupMember, recent []db.GroupMessage, trigger string, per
 		}
 	}
 
-	// 自己刚说完：轻量唤醒不接，避免接龙；用户破冰/ticker 除外
+	// 自己刚说完：轻量唤醒不接，避免接龙；用户破冰/ticker/强制保底 除外
 	if latest != nil && latest.SenderAgentName == member.AgentName && latest.MsgType != "user_post" {
-		if trigger != "ticker" && trigger != "icebreaker" && trigger != "wake_full" {
+		if trigger != "ticker" && trigger != "icebreaker" && trigger != "wake_full" && trigger != "wake_full_forced" {
 			if trigger == "wake_light" {
 				// 少量随机插话
 				if rand.Intn(100) > 35 {
@@ -63,17 +63,20 @@ func Decide(member db.GroupMember, recent []db.GroupMessage, trigger string, per
 	}
 
 	switch trigger {
+	case "wake_full_forced":
+		// 用户发言后被指派的「保底接话人」：必定回应，彻底杜绝用户消息无人理睬的冷场
+		return Decision{ShouldSpeak: true, Forced: true, DelayMs: 150 + rand.Intn(900)}
 	case "icebreaker":
 		if len(recent) > 8 {
 			return Decision{}
 		}
-		if rollSpeak(member, recent, personality, 55, latest) {
+		if rollSpeak(member, recent, personality, 62, latest) {
 			return Decision{ShouldSpeak: true, DelayMs: 200 + rand.Intn(1200)}
 		}
 		return Decision{}
 	case "wake_full":
 		// 用户发言：提高接话率，避免出现「人等 Agent」过长空窗
-		if rollSpeak(member, recent, personality, 56, latest) {
+		if rollSpeak(member, recent, personality, 62, latest) {
 			return Decision{ShouldSpeak: true, DelayMs: 120 + rand.Intn(1800)}
 		}
 		return Decision{}
@@ -82,13 +85,13 @@ func Decide(member db.GroupMember, recent []db.GroupMessage, trigger string, per
 			return Decision{}
 		}
 		if latest.MsgType == "user_post" {
-			if rollSpeak(member, recent, personality, 44, latest) {
+			if rollSpeak(member, recent, personality, 52, latest) {
 				return Decision{ShouldSpeak: true, DelayMs: 200 + rand.Intn(1400)}
 			}
 			return Decision{}
 		}
-		// 其他 Agent 发言后：适当提高插一句的概率
-		if rollSpeak(member, recent, personality, 32, latest) {
+		// 其他 Agent 发言后：适当提高插一句的概率，让对话你来我往不断线
+		if rollSpeak(member, recent, personality, 44, latest) {
 			return Decision{ShouldSpeak: true, DelayMs: 300 + rand.Intn(2400)}
 		}
 		return Decision{}
@@ -99,22 +102,23 @@ func Decide(member db.GroupMember, recent []db.GroupMessage, trigger string, per
 			return Decision{}
 		}
 		if latest == nil {
-			if rollSpeak(member, recent, personality, 30, latest) {
+			if rollSpeak(member, recent, personality, 40, latest) {
 				return Decision{ShouldSpeak: true, DelayMs: 400 + rand.Intn(2000)}
 			}
 			return Decision{}
 		}
 		lastAt, _ := db.GetLastGroupMessageTime(latest.RoomID)
-		if time.Since(lastAt) < 90*time.Second {
+		// 冷场兜底：静默超过 45s 即可有人重启话题（原 90s 过久，体验上像「没人了」）
+		if time.Since(lastAt) < 45*time.Second {
 			return Decision{}
 		}
 		chain := agentChainDepth(recent)
-		if chain > 4 {
+		if chain > 6 {
 			return Decision{}
 		}
 		p := personality.SpeakProbability / 2
-		if p < 12 {
-			p = 12
+		if p < 18 {
+			p = 18
 		}
 		if rollSpeak(member, recent, personality, p, latest) {
 			return Decision{ShouldSpeak: true, DelayMs: 600 + rand.Intn(3500)}
@@ -137,24 +141,24 @@ func rollSpeak(member db.GroupMember, recent []db.GroupMessage, p *db.AgentPerso
 	}
 	if dist, ok := recentSpeakerDistance(recent, member.AgentName); ok {
 		if dist == 0 {
-			score *= 0.08
+			score *= 0.12
 		} else if dist <= 2 {
-			score *= 0.35
+			score *= 0.4
 		}
 	}
 	chain := agentChainDepth(recent)
 	if chain > 2 {
 		switch {
 		case chain <= 4:
-			score *= 0.45
+			score *= 0.55
 		case chain <= 7:
-			score *= 0.2
+			score *= 0.28
 		default:
-			score *= 0.06
+			score *= 0.1
 		}
 	}
-	if score > 88 {
-		score = 88
+	if score > 90 {
+		score = 90
 	}
 	return rand.Intn(100) < int(score)
 }

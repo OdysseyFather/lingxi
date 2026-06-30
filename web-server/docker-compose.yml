@@ -1,0 +1,40 @@
+# ─── 灵犀 Web 版 Docker Compose ──────────────────────────────
+#
+# 使用方法:
+#   1. 进入 web-server 目录: cd web-server
+#   2. 修改下方环境变量
+#   3. 启动: docker compose up -d
+#   4. 访问: http://your-server:3000
+#   5. 使用 WEB_PASSWORD 中设置的密码登录
+#
+# 停止:  docker compose down
+# 日志:  docker compose logs -f
+# 更新:  docker compose build && docker compose up -d
+
+services:
+  lingxi:
+    build:
+      context: ..
+      dockerfile: web-server/Dockerfile
+    container_name: lingxi-web
+    ports:
+      - "3000:3000"
+    environment:
+      # ── 必填 ──
+      - WEB_PASSWORD=changeme              # Web 登录密码（必须修改！）
+
+      # ── AI 引擎 ──
+      - ANTHROPIC_AUTH_TOKEN=              # Anthropic API Key（Claude 直连时需要）
+      # 如果使用其他模型供应商（如 DeepSeek/Qwen/GLM），可在灵犀设置中配置
+
+      # ── 可选 ──
+      # - PORT=3000                        # 网关端口
+      # - CLAUDE_BIN=claude                # Claude CLI 路径
+
+    volumes:
+      - lingxi-data:/data                  # 持久化 SQLite + 上传文件 + 知识库
+    restart: unless-stopped
+
+volumes:
+  lingxi-data:
+    driver: local

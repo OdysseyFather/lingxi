@@ -22,6 +22,11 @@ func CreateGroupChat(c *gin.Context) {
 	var body struct {
 		Topic string `json:"topic"`
 		Goal  string `json:"goal"`
+		// 群聊模式：casual=闲聊（默认）| meeting=工作会议
+		ChatMode string `json:"chat_mode"`
+		// 会议模式：主持人 Agent + 最多发言轮数（兜底）
+		ModeratorAgentID int64 `json:"moderator_agent_id"`
+		MaxRounds        int   `json:"max_rounds"`
 		// 本端成员（多个本地 Agent）
 		LocalAgentIDs []int64 `json:"local_agent_ids"`
 		// 远端成员：每个 (peer_id, agent_name)
@@ -48,21 +53,35 @@ func CreateGroupChat(c *gin.Context) {
 		myNickname = "灵犀用户"
 	}
 
-	// 选第一个本地 Agent 作为主持人
+	chatMode := body.ChatMode
+	if chatMode != "meeting" {
+		chatMode = "casual"
+	}
+
+	// 主持人：会议模式优先用前端指定的；否则退化为第一个本地 Agent
 	var moderatorAgentID int64
-	if len(body.LocalAgentIDs) > 0 {
+	if body.ModeratorAgentID > 0 {
+		moderatorAgentID = body.ModeratorAgentID
+	} else if len(body.LocalAgentIDs) > 0 {
 		moderatorAgentID = body.LocalAgentIDs[0]
+	}
+
+	// 会议轮数兜底：未指定时默认最多 12 轮，防止会议无限进行
+	maxRounds := body.MaxRounds
+	if chatMode == "meeting" && maxRounds <= 0 {
+		maxRounds = 12
 	}
 
 	room := &db.GroupChat{
 		RoomUUID:         roomUUID,
 		Topic:            body.Topic,
 		Goal:             body.Goal,
-		MaxRounds:        0,
+		MaxRounds:        maxRounds,
 		Status:           "active",
 		ModeratorAgentID: moderatorAgentID,
 		ModeratorPeerID:  myInstanceID,
 		ScheduleMode:     "free",
+		ChatMode:         chatMode,
 		CreatedByLocal:   true,
 		HostPeerID:       myInstanceID,
 	}
@@ -117,6 +136,8 @@ func CreateGroupChat(c *gin.Context) {
 			"host_nickname": myNickname,
 			"topic":         body.Topic,
 			"goal":          body.Goal,
+			"chat_mode":     chatMode,
+			"max_rounds":    maxRounds,
 			"members":       memberList,
 		}
 		if err := nexus.SendGroupInvite(m.PeerID, invitePayload); err != nil {
@@ -151,9 +172,9 @@ func GetGroupChatDetail(c *gin.Context) {
 	members, _ := db.ListGroupMembers(id)
 	messages, _ := db.ListGroupMessages(id)
 	c.JSON(http.StatusOK, gin.H{
-		"room":     room,
-		"members":  nexus.EnrichGroupMembers(id, members),
-		"messages": messages,
+		"room":           room,
+		"members":        nexus.EnrichGroupMembers(id, members),
+		"messages":       messages,
 		"human_nickname": nexus.HumanGroupNickname(),
 	})
 }
@@ -283,10 +304,10 @@ func RecallGroupMessageHandler(c *gin.Context) {
 	nexus.BroadcastGroupRecall(id, msgID)
 	// 跨实例转发
 	nexus.BroadcastGroupMessage(id, "/group/recall", map[string]interface{}{
-		"room_uuid":      room.RoomUUID,
-		"message_id":     msgID,
-		"by_peer_id":     myInstanceID,
-		"by_agent_name":  myNickname,
+		"room_uuid":     room.RoomUUID,
+		"message_id":    msgID,
+		"by_peer_id":    myInstanceID,
+		"by_agent_name": myNickname,
 	})
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
@@ -615,6 +636,7 @@ func NexusReceiveGroupInvite(c *gin.Context) {
 		Goal         string                   `json:"goal"`
 		MaxRounds    int                      `json:"max_rounds"`
 		ScheduleMode string                   `json:"schedule_mode"`
+		ChatMode     string                   `json:"chat_mode"`
 		Members      []map[string]interface{} `json:"members"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -653,6 +675,7 @@ func NexusReceiveGroupInvite(c *gin.Context) {
 		MaxRounds:       body.MaxRounds,
 		Status:          "pending",
 		ScheduleMode:    body.ScheduleMode,
+		ChatMode:        body.ChatMode,
 		ModeratorPeerID: body.HostPeerID,
 		HostPeerID:      body.HostPeerID,
 		CreatedByLocal:  false,
@@ -816,10 +839,10 @@ func NexusReceiveGroupMessage(c *gin.Context) {
 // 其他实例发来的"消息已撤回"通知
 func NexusReceiveGroupRecall(c *gin.Context) {
 	var body struct {
-		RoomUUID     string `json:"room_uuid"`
-		MessageID    int64  `json:"message_id"`
-		ByPeerID     string `json:"by_peer_id"`
-		ByAgentName  string `json:"by_agent_name"`
+		RoomUUID    string `json:"room_uuid"`
+		MessageID   int64  `json:"message_id"`
+		ByPeerID    string `json:"by_peer_id"`
+		ByAgentName string `json:"by_agent_name"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

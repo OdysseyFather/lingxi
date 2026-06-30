@@ -62,6 +62,10 @@ func SpeakInGroup(req grouploop.SpeakRequest) {
 	recent, _ := db.GetRecentGroupMessages(req.RoomID, 50)
 	systemPrompt := buildGroupFullSystemPrompt(*speaker, personality, req.AgentID)
 	userPrompt := nexus.BuildGroupUserPrompt(room, *speaker, recent)
+	// 被点到的「保底接话人」（用户发言后强制 / 被 @ / 被回复）：禁止冷处理，必须开口，杜绝冷场
+	if req.Forced {
+		userPrompt += "\n\n[系统提示] 你被点到回应当前对话，请务必用你的人设自然地回一句（简短附和 / 吐槽 / 反问 / 追问都可以），**绝对禁止输出 [SKIP] 或空回复**。"
+	}
 	forwarder := nexus.BuildGroupStreamForwarder(req.RoomID, *speaker)
 
 	result, err := RunGroupAgentTurn(systemPrompt, userPrompt, req.AgentID, forwarder)
@@ -197,8 +201,8 @@ func RunGroupAgentTurn(systemPrompt, userMessage string, agentID int64, forwarde
 			case "content_block_start":
 				if inner.ContentBlock.Type == "tool_use" {
 					toolName := inner.ContentBlock.Name
-					if !isAskUserTool(toolName) {
-						// 群聊流式只推正文，不向 UI 广播技能/工具过程
+					if isAskUserTool(toolName) {
+						break
 					}
 					blocks = append(blocks, msgBlock{
 						Type:  "tool",
@@ -206,14 +210,29 @@ func RunGroupAgentTurn(systemPrompt, userMessage string, agentID int64, forwarde
 						Label: toolDisplayLabel(toolName),
 						Ms:    time.Now().UnixMilli(),
 					})
+					if forwarder != nil {
+						payload, _ := json.Marshal(map[string]string{
+							"name":  toolName,
+							"label": toolDisplayLabel(toolName),
+						})
+						forwarder("tool_start", string(payload))
+					}
 				} else if inner.ContentBlock.Type == "thinking" {
-					// 群聊不展示思考过程
+					appendBlock("thinking", "", "")
+					if forwarder != nil {
+						forwarder("thinking_start", "")
+					}
 				}
 			case "content_block_delta":
 				d := inner.Delta
 				switch d.Type {
 				case "thinking_delta":
-					// 丢弃
+					if d.Thinking != "" {
+						appendBlock("thinking", "", d.Thinking)
+						if forwarder != nil {
+							forwarder("thinking_delta", d.Thinking)
+						}
+					}
 				case "text_delta":
 					if d.Text != "" {
 						safeText := redactSensitive(d.Text)
@@ -230,8 +249,6 @@ func RunGroupAgentTurn(systemPrompt, userMessage string, agentID int64, forwarde
 							last.Input += d.PartialJSON
 						}
 					}
-				default:
-					// reasoning 同样不进入群聊
 				}
 			case "content_block_stop":
 				if len(blocks) > 0 {
@@ -249,7 +266,20 @@ func RunGroupAgentTurn(systemPrompt, userMessage string, agentID int64, forwarde
 							last.Input = summary
 							last.Ms = elapsed
 							last.Status = "ok"
-							// 不在群聊流式中推送 tool_end
+							if forwarder != nil {
+								payload, _ := json.Marshal(map[string]string{
+									"name":   last.Name,
+									"label":  last.Label,
+									"input":  summary,
+									"status": "ok",
+									"ms":     fmt.Sprintf("%d", elapsed),
+								})
+								forwarder("tool_end", string(payload))
+							}
+						}
+					} else if last.Type == "thinking" {
+						if forwarder != nil {
+							forwarder("thinking_done", "")
 						}
 					}
 				}
@@ -265,15 +295,11 @@ func RunGroupAgentTurn(systemPrompt, userMessage string, agentID int64, forwarde
 
 	plain := strings.TrimSpace(textBuf.String())
 
-	filtered := make([]msgBlock, 0, len(blocks))
 	for i := range blocks {
-		if blocks[i].Type == "thinking" || blocks[i].Type == "tool" {
-			continue
+		if blocks[i].Type == "text" {
+			blocks[i].Text = redactSensitive(blocks[i].Text)
 		}
-		blocks[i].Text = redactSensitive(blocks[i].Text)
-		filtered = append(filtered, blocks[i])
 	}
-	blocks = filtered
 
 	if plain == "" && len(blocks) == 0 {
 		return GroupTurnResult{Skipped: true}, nil

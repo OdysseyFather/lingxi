@@ -1,16 +1,25 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { useState, useEffect, useCallback } from 'react';
+
 import {
-  Search, Users, MessageSquare, RefreshCw, Sparkles, Wifi,
-  Check, X, Globe, Radio, Radar, Send, Trash2, UsersRound, Plus,
+  Search, Users, RefreshCw, Sparkles, Wifi,
+  Check, X, Globe, Radio, Radar, UsersRound, Plus,
 } from 'lucide-react';
 import { api, wsClient } from '../api/client';
 import { useStore } from '../state/useStore';
 import { Button, Card, Badge, Select } from '../ui/primitives';
 import { cn } from '../ui/cn';
-import A2AConversationView, { StatusBadge } from './A2AConversationView';
-import StartA2AModal from './StartA2AModal';
 import GroupChatView from './GroupChatView';
+
+const StatusBadge = ({ status }) => {
+  const map = {
+    active: { label: '进行中', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' },
+    paused: { label: '已暂停', color: 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400' },
+    completed: { label: '已结束', color: 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400' },
+    terminated: { label: '已终止', color: 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400' },
+  };
+  const s = map[status] || map.active;
+  return <span className={cn('text-[9px] px-1.5 py-0.5 rounded-full font-medium', s.color)}>{s.label}</span>;
+};
 import CreateGroupModal from './CreateGroupModal';
 
 /* ─── 左侧边栏列表项组件 ──────────────────────────────────────── */
@@ -44,57 +53,15 @@ const Avatar = ({ name, online, avatar_url, size = 'md', color = 'accent' }) => 
   );
 };
 
-const ConversationItem = ({ conv, active, onClick, onDelete }) => (
-  <div
-    onClick={onClick}
-    className={cn(
-      'w-full flex items-center gap-3 px-3 py-2.5 mx-2 rounded-lg transition-all duration-150 text-left group cursor-pointer',
-      active
-        ? 'bg-[color:var(--accent-soft)] border-l-2 border-[color:var(--accent)]'
-        : 'hover:bg-[color:var(--bg-soft)] border-l-2 border-transparent'
-    )}
-  >
-    <div className="relative shrink-0">
-      <div className={cn(
-        'w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold',
-        conv.status === 'active' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400'
-          : 'bg-[color:var(--bg-soft)] text-[color:var(--text-faint)]'
-      )}>
-        <MessageSquare size={18} />
-      </div>
-      {conv.status === 'active' && (
-        <div className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-400 border-2 border-[color:var(--bg-elev)] animate-pulse" />
-      )}
-    </div>
-    <div className="flex-1 min-w-0">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-[color:var(--text)] truncate">{conv.topic || '未命名对话'}</span>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={(e) => { e.stopPropagation(); onDelete(conv.id); }}
-            className="hidden group-hover:flex w-5 h-5 items-center justify-center rounded text-[color:var(--text-faint)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition"
-            title="删除对话"
-          >
-            <Trash2 size={11} />
-          </button>
-          <StatusBadge status={conv.status} />
-        </div>
-      </div>
-      <div className="text-[10px] text-[color:var(--text-faint)] mt-0.5 truncate">
-        与 {conv.remote_peer_nickname || '对方'}{conv.remote_agent_name ? ` / ${conv.remote_agent_name}` : ''}
-      </div>
-    </div>
-  </div>
-);
 
 /* ─── 右侧：发现面板（在线 peers，可直接发起对话）──────────────── */
 
-const DiscoveryPanel = ({ peers, wanPeers, wanStatus, loading, onRefresh, onRefreshWAN, onStartChat }) => (
+const DiscoveryPanel = ({ peers, wanPeers, wanStatus, loading, onRefresh, onRefreshWAN }) => (
   <div className="flex-1 flex flex-col min-h-0 overflow-auto scrollable p-6">
     <div className="flex items-center justify-between mb-6">
       <div>
         <h2 className="text-lg font-bold text-[color:var(--text)]">在线节点</h2>
-        <p className="text-xs text-[color:var(--text-faint)] mt-0.5">发现附近和远程的灵犀实例，直接发起对话</p>
+        <p className="text-xs text-[color:var(--text-faint)] mt-0.5">发现附近和远程的灵犀实例，创建群聊时可邀请这些节点的 Agent</p>
       </div>
       <div className="flex gap-2">
         <Button variant="ghost" size="sm" onClick={onRefresh} disabled={loading}>
@@ -116,17 +83,12 @@ const DiscoveryPanel = ({ peers, wanPeers, wanStatus, loading, onRefresh, onRefr
             try { agents = JSON.parse(peer.agents_json || '[]'); } catch {}
             return (
               <Card key={peer.id} className="p-4 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <Avatar name={peer.nickname} online={true} />
-                    <div>
-                      <div className="text-sm font-medium text-[color:var(--text)]">{peer.nickname || '未知'}</div>
-                      <div className="text-[10px] text-[color:var(--text-faint)]">{peer.host}:{peer.port}</div>
-                    </div>
+                <div className="flex items-center gap-2.5">
+                  <Avatar name={peer.nickname} online={true} />
+                  <div>
+                    <div className="text-sm font-medium text-[color:var(--text)]">{peer.nickname || '未知'}</div>
+                    <div className="text-[10px] text-[color:var(--text-faint)]">{peer.host}:{peer.port}</div>
                   </div>
-                  <Button variant="primary" size="sm" onClick={() => onStartChat(peer, 'lan')}>
-                    <Send size={12} /> 对话
-                  </Button>
                 </div>
                 {agents.length > 0 && (
                   <div className="flex flex-wrap gap-1.5">
@@ -171,19 +133,14 @@ const DiscoveryPanel = ({ peers, wanPeers, wanStatus, loading, onRefresh, onRefr
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
           {wanPeers.map((peer) => (
             <Card key={peer.instance_id} className="p-4 space-y-2.5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2.5">
-                  <Avatar name={peer.nickname} avatar_url={peer.avatar_url} online={true} color="purple" />
-                  <div>
-                    <div className="text-sm font-medium text-[color:var(--text)]">{peer.nickname || '远程用户'}</div>
-                    <div className="flex items-center gap-1 text-[10px] text-[color:var(--text-faint)]">
-                      <Globe size={8} /> {peer.platform || '未知'} {peer.device_name ? `· ${peer.device_name}` : ''}
-                    </div>
+              <div className="flex items-center gap-2.5">
+                <Avatar name={peer.nickname} avatar_url={peer.avatar_url} online={true} color="purple" />
+                <div>
+                  <div className="text-sm font-medium text-[color:var(--text)]">{peer.nickname || '远程用户'}</div>
+                  <div className="flex items-center gap-1 text-[10px] text-[color:var(--text-faint)]">
+                    <Globe size={8} /> {peer.platform || '未知'} {peer.device_name ? `· ${peer.device_name}` : ''}
                   </div>
                 </div>
-                <Button variant="primary" size="sm" onClick={() => onStartChat(peer, 'wan')}>
-                  <Send size={12} /> 对话
-                </Button>
               </div>
               {peer.agents && peer.agents.length > 0 && (
                 <div className="flex flex-wrap gap-1.5">
@@ -226,7 +183,6 @@ const EmptyMainPanel = () => (
 
 export default function NexusPage() {
   const [peers, setPeers] = useState([]);
-  const [conversations, setConversations] = useState([]);
   const [peersLoading, setPeersLoading] = useState(false);
   const [wanPeers, setWanPeers] = useState([]);
   const [wanStatus, setWanStatus] = useState(null);
@@ -234,15 +190,6 @@ export default function NexusPage() {
 
   const [selected, setSelected] = useState('discovery');
   const [searchQuery, setSearchQuery] = useState('');
-
-  const [acceptingConvId, setAcceptingConvId] = useState(null);
-  const [selectedAgentId, setSelectedAgentId] = useState('');
-
-  const [startModalOpen, setStartModalOpen] = useState(false);
-  const [selectedPeer, setSelectedPeer] = useState(null);
-
-  // 群聊
-  const [tab, setTab] = useState('a2a'); // 'a2a' | 'group'
   const [createGroupOpen, setCreateGroupOpen] = useState(false);
   const groupChats = useStore((s) => s.groupChats);
   const refreshGroupChats = useStore((s) => s.refreshGroupChats);
@@ -258,10 +205,6 @@ export default function NexusPage() {
     setPeersLoading(false);
   }, []);
 
-  const refreshConversations = useCallback(async () => {
-    try { setConversations(await api.listA2AConversations() || []); } catch {}
-  }, []);
-
   const refreshWANPeers = useCallback(async () => {
     try { setWanPeers(await api.listWANPeers() || []); } catch {}
   }, []);
@@ -272,103 +215,47 @@ export default function NexusPage() {
 
   useEffect(() => {
     refreshPeers();
-    refreshConversations();
     refreshWANStatus();
     refreshWANPeers();
     refreshGroupChats();
     api.listAgents().then(setAgentList).catch(() => {});
     const t1 = setInterval(refreshPeers, 15000);
-    const t2 = setInterval(refreshConversations, 5000);
     const t3 = setInterval(refreshWANPeers, 20000);
     const t4 = setInterval(refreshGroupChats, 8000);
-    return () => { clearInterval(t1); clearInterval(t2); clearInterval(t3); clearInterval(t4); };
-  }, [refreshPeers, refreshConversations, refreshWANPeers, refreshWANStatus, refreshGroupChats]);
+    return () => { clearInterval(t1); clearInterval(t3); clearInterval(t4); };
+  }, [refreshPeers, refreshWANPeers, refreshWANStatus, refreshGroupChats]);
 
   // ─── WebSocket 事件 ────────────────────────────────────────────
   useEffect(() => {
     const unsub = wsClient.on((msg) => {
-      if (msg.event === 'a2a_conversation_request' || msg.event === 'a2a_conversation_invite' ||
-          msg.event === 'a2a_status_change' || msg.event === 'a2a_message') {
-        refreshConversations();
-      }
       if (msg.event === 'wan_peer_online' || msg.event === 'wan_peer_offline' || msg.event === 'wan_peers_updated') {
         refreshWANPeers();
       }
       if (msg.event === 'wan_connection_status') {
         refreshWANStatus();
       }
-      if (msg.event === 'wan_delivery_failed') {
-        refreshConversations();
-      }
     });
     return unsub;
-  }, [refreshConversations, refreshWANPeers, refreshWANStatus]);
+  }, [refreshWANPeers, refreshWANStatus]);
 
   // ─── 操作 ─────────────────────────────────────────────────────
-  const handleStartChat = (peer, type) => {
-    const normalizedPeer = type === 'wan'
-      ? { instance_id: peer.instance_id, nickname: peer.nickname, avatar_url: peer.avatar_url }
-      : { instance_id: peer.id, nickname: peer.nickname };
-    setSelectedPeer(normalizedPeer);
-    setStartModalOpen(true);
-  };
 
-  const handleAcceptConv = async (convId) => {
-    if (!selectedAgentId) return;
-    try {
-      await api.acceptRemoteConversation(convId, Number(selectedAgentId));
-      // 先更新本地状态让对话立即可见（不等异步 refresh）
-      setConversations(prev => prev.map(c =>
-        c.id === convId ? { ...c, status: 'active' } : c
-      ));
-      setAcceptingConvId(null);
-      setSelectedAgentId('');
-      setSelected({ type: 'conv', id: convId });
-      refreshConversations();
-    } catch {}
-  };
-
-  const handleRejectConv = async (convId) => {
-    try { await api.rejectRemoteConversation(convId); refreshConversations(); } catch {}
-  };
-
-  const handleDeleteConv = async (convId) => {
-    try {
-      await api.deleteA2AConversation(convId);
-      refreshConversations();
-      if (selected?.type === 'conv' && selected?.id === convId) setSelected('discovery');
-    } catch {}
-  };
-
-  // ─── 派生数据 ─────────────────────────────────────────────────
-  const pendingConvs = conversations.filter(c => c.status === 'pending_incoming');
-  const activeConvs = conversations.filter(c => c.status === 'active');
-  const otherConvs = conversations.filter(c => !['active', 'pending_incoming'].includes(c.status));
-
-  const filteredConvs = useMemo(() => {
-    if (!searchQuery) return [...activeConvs, ...otherConvs];
-    const q = searchQuery.toLowerCase();
-    return [...activeConvs, ...otherConvs].filter(c => (c.topic || '').toLowerCase().includes(q) || (c.remote_peer_nickname || '').toLowerCase().includes(q));
-  }, [activeConvs, otherConvs, searchQuery]);
-
-  // ─── 对话详情视图 ─────────────────────────────────────────────
-  if (selected?.type === 'conv' && selected?.id) {
-    const conv = conversations.find(c => c.id === selected.id);
-    if (conv && conv.status !== 'pending_incoming') {
-      return (
-        <A2AConversationView
-          convId={selected.id}
-          onBack={() => setSelected(null)}
-        />
-      );
-    }
-  }
+  const [isNarrow, setIsNarrow] = useState(() => typeof window !== 'undefined' && window.innerWidth < 900);
+  useEffect(() => {
+    const onResize = () => setIsNarrow(window.innerWidth < 900);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+  const sidebarHidden = isNarrow && selected?.type === 'group';
 
   // ─── 主界面 ───────────────────────────────────────────────────
   return (
     <div className="flex-1 flex min-h-0">
       {/* 左侧边栏 */}
-      <aside className="w-[280px] shrink-0 flex flex-col border-r border-[color:var(--line)] bg-[color:var(--bg-elev)]/80 backdrop-blur">
+      <aside className={cn(
+        'shrink-0 flex flex-col border-r border-[color:var(--line)] bg-[color:var(--bg-elev)]/80 backdrop-blur transition-all duration-200',
+        sidebarHidden ? 'w-0 overflow-hidden opacity-0' : 'w-[280px]'
+      )}>
         {/* 顶部搜索 + 发现按钮 */}
         <div className="p-3 space-y-2 border-b border-[color:var(--line)]">
           <div className="flex items-center gap-2">
@@ -395,32 +282,14 @@ export default function NexusPage() {
               <Radar size={15} />
             </button>
           </div>
-          {/* tab 切换 */}
-          <div className="flex bg-[color:var(--bg-soft)] rounded-lg p-0.5 text-[11px] font-medium">
-            <button
-              onClick={() => setTab('a2a')}
-              className={cn(
-                'flex-1 h-7 rounded-md transition flex items-center justify-center gap-1',
-                tab === 'a2a' ? 'bg-[color:var(--bg-elev)] text-[color:var(--text)] shadow-sm' : 'text-[color:var(--text-faint)]'
-              )}
-            >
-              <MessageSquare size={11} /> 一对一
-            </button>
-            <button
-              onClick={() => setTab('group')}
-              className={cn(
-                'flex-1 h-7 rounded-md transition flex items-center justify-center gap-1',
-                tab === 'group' ? 'bg-[color:var(--bg-elev)] text-[color:var(--text)] shadow-sm' : 'text-[color:var(--text-faint)]'
-              )}
-            >
-              <UsersRound size={11} /> 群聊 {groupChats.length > 0 && <span className="ml-0.5 text-[color:var(--accent)]">·{groupChats.length}</span>}
-            </button>
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-[color:var(--text-faint)]">
+            <UsersRound size={12} />
+            <span>群聊 {groupChats.length > 0 && <span className="text-[color:var(--accent)]">({groupChats.length})</span>}</span>
           </div>
         </div>
 
         {/* 列表区域 */}
         <div className="flex-1 overflow-auto scrollable py-2">
-          {tab === 'group' && (
             <div>
               <div className="px-3 mb-2">
                 <Button size="sm" className="w-full" onClick={() => setCreateGroupOpen(true)}>
@@ -554,80 +423,7 @@ export default function NexusPage() {
                 </div>
               )}
             </div>
-          )}
 
-          {tab === 'a2a' && (<>
-          {/* 待处理对话邀请 */}
-          <AnimatePresence>
-            {pendingConvs.length > 0 && (
-              <div className="mb-2">
-                <div className="px-4 py-1 text-[10px] font-semibold text-red-500 uppercase tracking-wider flex items-center gap-1.5">
-                  <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                  待处理 ({pendingConvs.length})
-                </div>
-                {pendingConvs.map(c => (
-                  <div key={`cv-${c.id}`} className="px-3 py-2.5 mx-2 mb-1 rounded-lg bg-blue-50/80 dark:bg-blue-900/20 border border-blue-200/60 dark:border-blue-700/40">
-                    <div className="flex items-center gap-2.5 mb-2">
-                      <Avatar name={c.remote_peer_nickname} size="sm" color="purple" />
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-medium text-[color:var(--text)] truncate">{c.topic || '对话邀请'}</div>
-                        <div className="text-[10px] text-blue-600 dark:text-blue-400">{c.remote_peer_nickname} / {c.remote_agent_name || 'Agent'}</div>
-                      </div>
-                    </div>
-                    {acceptingConvId === c.id ? (
-                      <div className="flex items-center gap-1.5">
-                        <select value={selectedAgentId} onChange={(e) => setSelectedAgentId(e.target.value)}
-                          className="flex-1 h-6 text-[10px] rounded border border-[color:var(--line)] bg-[color:var(--bg)] text-[color:var(--text)] px-1.5">
-                          <option value="">选择 Agent...</option>
-                          {agentList.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
-                        </select>
-                        <button onClick={() => handleAcceptConv(c.id)} disabled={!selectedAgentId}
-                          className="h-6 px-2 rounded bg-emerald-500 text-white text-[10px] font-medium disabled:opacity-40">确认</button>
-                        <button onClick={() => setAcceptingConvId(null)}
-                          className="h-6 px-2 rounded bg-gray-200 dark:bg-gray-700 text-[color:var(--text-faint)] text-[10px]">取消</button>
-                      </div>
-                    ) : (
-                      <div className="flex gap-1.5">
-                        <button onClick={() => { setAcceptingConvId(c.id); setSelectedAgentId(''); }}
-                          className="h-6 px-2 rounded bg-emerald-500 text-white text-[10px] font-medium flex items-center gap-1">
-                          <Check size={10} /> 接受
-                        </button>
-                        <button onClick={() => handleRejectConv(c.id)}
-                          className="h-6 px-2 rounded bg-gray-200 dark:bg-gray-700 text-[color:var(--text-faint)] text-[10px] flex items-center gap-1">
-                          <X size={10} /> 拒绝
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </AnimatePresence>
-
-          {/* 对话列表 */}
-          {filteredConvs.length > 0 && (
-            <div className="mb-2">
-              <div className="px-4 py-1 text-[10px] font-semibold text-[color:var(--text-faint)] uppercase tracking-wider">
-                对话 ({filteredConvs.length})
-              </div>
-              {filteredConvs.map(c => (
-                <ConversationItem key={c.id} conv={c}
-                  active={selected?.type === 'conv' && selected?.id === c.id}
-                  onClick={() => setSelected({ type: 'conv', id: c.id })}
-                  onDelete={handleDeleteConv}
-                />
-              ))}
-            </div>
-          )}
-
-          {filteredConvs.length === 0 && pendingConvs.length === 0 && (
-            <div className="text-center py-12 px-4">
-              <Users size={24} className="mx-auto text-[color:var(--text-faint)] mb-2 opacity-40" />
-              <p className="text-xs text-[color:var(--text-faint)]">暂无对话</p>
-              <p className="text-[10px] text-[color:var(--text-faint)] mt-1">点击右上角「发现」找到在线节点并发起对话</p>
-            </div>
-          )}
-          </>)}
         </div>
 
         {/* 底部状态栏 */}
@@ -647,15 +443,12 @@ export default function NexusPage() {
       </aside>
 
       {/* 右侧主区 */}
-      <main className="flex-1 flex flex-col min-h-0">
+      <main className="flex-1 flex flex-col min-h-0 min-w-0">
         {selected === 'discovery' ? (
           <DiscoveryPanel
             peers={peers} wanPeers={wanPeers} wanStatus={wanStatus}
             loading={peersLoading} onRefresh={refreshPeers} onRefreshWAN={refreshWANPeers}
-            onStartChat={handleStartChat}
           />
-        ) : selected?.type === 'conv' ? (
-          <A2AConversationView convId={selected.id} onBack={() => setSelected(null)} />
         ) : selected?.type === 'group' ? (
           <GroupChatView roomId={selected.id} onBack={() => setSelected(null)} />
         ) : (
@@ -663,20 +456,12 @@ export default function NexusPage() {
         )}
       </main>
 
-      <StartA2AModal
-        open={startModalOpen}
-        onClose={() => { setStartModalOpen(false); refreshConversations(); }}
-        peer={selectedPeer}
-        onCreated={(convId) => { refreshConversations(); setSelected({ type: 'conv', id: convId }); }}
-      />
-
       <CreateGroupModal
         open={createGroupOpen}
         onClose={() => setCreateGroupOpen(false)}
         onCreated={(roomId) => {
           refreshGroupChats();
           if (roomId) setSelected({ type: 'group', id: roomId });
-          setTab('group');
         }}
       />
     </div>

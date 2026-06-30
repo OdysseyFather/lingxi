@@ -143,6 +143,8 @@ func main() {
 	api.POST("/skills/install-github", handler.InstallDotSkillHandler)
 	api.POST("/skills/upload", handler.UploadSkill)
 	api.POST("/skills/batch-upload", handler.BatchUploadSkill)
+	api.POST("/skills/from-git", handler.SkillFromGitScan)
+	api.POST("/skills/from-git/install", handler.SkillFromGitInstall)
 	api.POST("/skills/generate/stream", handler.GenerateSkillStream)
 	api.POST("/skills/generate/confirm", handler.ConfirmGeneratedSkill)
 	api.GET("/skills/marketplace", handler.MarketplaceSearch)
@@ -196,13 +198,20 @@ func main() {
 	api.POST("/im-connectors/:id/send", handler.SendWebhookMessage)
 	api.POST("/im-connectors/:id/test", handler.TestWebhook)
 
-	// 权限审批
-	api.GET("/permission-rules", handler.ListPermissionRulesHandler)
-	api.POST("/permission-rules", handler.CreatePermissionRuleHandler)
-	api.DELETE("/permission-rules/:id", handler.DeletePermissionRuleHandler)
-	api.GET("/approvals/pending", handler.ListPendingApprovalsHandler)
-	api.GET("/approvals", handler.ListRecentApprovalsHandler)
-	api.POST("/approvals/:id/review", handler.ReviewApprovalHandler)
+	// IM 看板
+	api.GET("/im-dashboard/sessions", handler.ListIMSessionsHandler)
+	api.GET("/im-dashboard/stats", handler.GetIMDashboardStatsHandler)
+	api.GET("/im-dashboard/sessions/:id/messages", handler.GetIMSessionMessagesHandler)
+	api.DELETE("/im-dashboard/sessions/:id", handler.DeleteIMSessionHandler)
+
+	// 飞书监听模式
+	api.GET("/feishu-monitor/rules", handler.ListMonitorRules)
+	api.POST("/feishu-monitor/rules", handler.CreateMonitorRule)
+	api.PUT("/feishu-monitor/rules/:id", handler.UpdateMonitorRule)
+	api.DELETE("/feishu-monitor/rules/:id", handler.DeleteMonitorRule)
+	api.PUT("/feishu-monitor/rules/:id/toggle", handler.ToggleMonitorRule)
+	api.GET("/feishu-monitor/logs", handler.ListMonitorLogs)
+	api.GET("/feishu-monitor/chats", handler.ListFeishuChats)
 
 	// H5 远程访问
 	api.GET("/h5-access/settings", handler.GetH5AccessSettingsHandler)
@@ -299,13 +308,6 @@ func main() {
 	nexusLimiter := handler.NewRateLimiter(60, 20) // 60 req/min, burst 20
 	nexusAPI := api.Group("/nexus", handler.NexusRateLimit(nexusLimiter))
 	nexusAPI.GET("/info", handler.NexusInfo)
-	nexusAPI.POST("/conversation/invite", handler.NexusReceiveConvInvite)
-	nexusAPI.POST("/conversation/accept", handler.NexusReceiveConvAccept)
-	nexusAPI.POST("/conversation/reject", handler.NexusReceiveConvReject)
-	nexusAPI.POST("/conversation/message", handler.NexusReceiveMessage)
-	nexusAPI.POST("/conversation/pause", handler.NexusReceivePause)
-	nexusAPI.POST("/conversation/terminate", handler.NexusReceiveTerminate)
-	nexusAPI.POST("/conversation/stream-token", handler.NexusReceiveStreamToken)
 	nexusAPI.GET("/settings", handler.GetNexusSettings)
 	nexusAPI.PUT("/settings", handler.UpdateNexusSettings)
 
@@ -345,16 +347,6 @@ func main() {
 	api.GET("/wan/peers", handler.ListWANPeers)
 	api.GET("/wan/status", handler.WANStatus)
 
-	api.POST("/a2a-conversations", handler.CreateA2AConversation)
-	api.GET("/a2a-conversations", handler.ListA2AConversations)
-	api.GET("/a2a-conversations/:id", handler.GetA2AConversation)
-	api.POST("/a2a-conversations/:id/pause", handler.PauseA2AConversation)
-	api.POST("/a2a-conversations/:id/takeover", handler.TakeoverA2AConversation)
-	api.POST("/a2a-conversations/:id/terminate", handler.TerminateA2AConversation)
-	api.POST("/a2a-conversations/:id/approve", handler.ApproveA2AConversation)
-	api.POST("/a2a-conversations/:id/accept-remote", handler.AcceptRemoteConversation)
-	api.POST("/a2a-conversations/:id/reject-remote", handler.RejectRemoteConversation)
-	api.DELETE("/a2a-conversations/:id", handler.DeleteA2AConversation)
 	api.GET("/agents/:id/nexus-config", handler.GetAgentNexusConfig)
 	api.PUT("/agents/:id/nexus-config", handler.UpsertAgentNexusConfig)
 
@@ -407,17 +399,22 @@ func main() {
 	// 注入向量索引广播函数
 	vectordb.BroadcastFn = handler.BroadcastWSEvent
 
-	// 启动 Nexus Agent-to-Agent 通信服务
-	nexus.Init(handler.RunA2AStreamingTurn, handler.CreateA2ASession, handler.BroadcastWSEvent)
+	// 启动 Nexus 通信服务（群聊跨实例通信）
+	nexus.Init(handler.BroadcastWSEvent)
 	nexus.SetRelayHandler(buildRelayHandler(r))
 	nexus.Global.Start()
 
 	// 群聊常驻 Agent 协程
 	grouploop.Init(handler.SpeakInGroup)
+	grouploop.SetMeetingDriver(handler.DriveMeeting)
 	grouploop.BootAll()
 
 	// 启动定时任务调度器
-	scheduler.Init(handler.RunClaudeSync, func(taskName, summary string) {
+	// scheduler.ChatRunner 是 2 参数签名（无图片），而 RunClaudeSync 现在是 3 参数（含 imagePaths）。
+	// 定时任务不会携带图片，这里包装成 2 参数版本。
+	scheduler.Init(func(message string, sessionID int64) (string, int64, error) {
+		return handler.RunClaudeSync(message, sessionID, nil)
+	}, func(taskName, summary string) {
 		body := summary
 		sessionID := ""
 		if idx := strings.LastIndex(summary, "|session_id:"); idx >= 0 {

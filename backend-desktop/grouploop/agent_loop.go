@@ -17,16 +17,16 @@ type agentLoop struct {
 }
 
 func (l *agentLoop) run(ctx context.Context, personality *db.AgentPersonality) {
-	min, max := 55000, 120000
+	min, max := 35000, 75000
 	if personality != nil {
 		if personality.MinDelayMs > 0 {
-			min = personality.MinDelayMs * 14
-			if min < 45000 {
-				min = 45000
+			min = personality.MinDelayMs * 10
+			if min < 28000 {
+				min = 28000
 			}
 		}
 		if personality.MaxDelayMs > 0 {
-			max = personality.MaxDelayMs * 22
+			max = personality.MaxDelayMs * 16
 			if max < min+20000 {
 				max = min + 20000
 			}
@@ -59,6 +59,19 @@ func (l *agentLoop) wakeFull() {
 		default:
 		}
 		l.wakeCh <- "wake_full"
+	}
+}
+
+// wakeFullForced 用户消息：指派该 Agent 必定回应（保底接话人，杜绝冷场）
+func (l *agentLoop) wakeFullForced() {
+	select {
+	case l.wakeCh <- "wake_full_forced":
+	default:
+		select {
+		case <-l.wakeCh:
+		default:
+		}
+		l.wakeCh <- "wake_full_forced"
 	}
 }
 

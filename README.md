@@ -89,7 +89,7 @@
 | 数据全在云上，隐私零保障 | **本地优先**：会话、知识库、API Key、进化日志全存本机 SQLite，断网可用 |
 | "自定义助手"不过是换个 System Prompt | **真正的 Agent**：独立技能包 + RAG 知识库 + MCP 工具 + 工作流编排 |
 | AI 纠正一百次下次还犯同样的错 | **自我进化引擎**：纠正/负反馈/有价值对话自动提炼为长期记忆和知识 |
-| Agent 之间无法协作 | **Project Nexus**：跨设备 Agent 自动发现、双向流式对话、群聊协作 |
+| Agent 之间无法协作 | **Project Nexus**：跨设备 Agent 自动发现、群聊协作（流式思考+工具调用完整展示） |
 | 长会话上下文爆栈 | **Token 水位 + 自动摘要**：实时监测 Token 占用，临近水位自动压缩摘要 |
 | 联网搜索结果太散 | **深度联网搜索**：多源并发（DuckDuckGo + Wikipedia）+ LLM 综合 + 引用追踪 |
 | 手机端体验简陋 | **Flutter 三段式首页 + 8 项高级交互**：Hero 转场 · 骨架屏 · 滚动视差 · 触感反馈 |
@@ -128,7 +128,7 @@
 </tr>
 <tr>
 <td align="center"><strong>🌐 Agent 互联</strong></td>
-<td>Project Nexus：局域网 mDNS + 广域网信令，跨设备 Agent 自动发现、一对一流式对话、人类随时介入。</td>
+<td>Project Nexus：局域网 mDNS + 广域网信令，跨设备 Agent 自动发现、群聊协作（流式思考+工具调用对齐主模式）、人类随时介入。</td>
 </tr>
 <tr>
 <td align="center"><strong>👥 微信风群聊</strong></td>
@@ -462,6 +462,7 @@ Agent 在合适的时间用合适的方式找你，而不是反过来。
 - 绿色气泡（自己）/ 白色气泡（他人）· 合并气泡 · 时间戳胶囊
 - @提及 · 引用回复 · 撤回 · 图片消息
 - **人格行为引擎**：概率驱动发言 · 兴趣命中 · 冷场救场 · 打字错误/复读 quirks
+- **流式思考+工具调用**：群聊 Agent 发言与主模式完全对齐，实时展示思考过程、技能调用和正文输出
 
 <!-- 📷 群聊 -->
 <p align="center">
@@ -527,6 +528,7 @@ Cron 调度 · 有/无状态
 
 企业微信 · 钉钉 · 飞书
 飞书流式卡片推送
+飞书群消息监听模式
 Webhook 响应
 
 <!-- 📷 IM -->
@@ -568,9 +570,9 @@ Recharts 可视化
 
 ---
 
-### 🎨 6 套主题
+### 🎨 17 套主题
 
-**Light · Dark · Midnight · Cyber · Aurora · Cosmos**
+**Light · Dark · Midnight · Cyber · Aurora · Cosmos · Ocean · Sunset · Forest · Rose · Sand · Lavender · Mocha · Nord · Sakura · Neon · Mint**
 
 CSS 变量驱动，切换瞬时生效。Flutter 手机端独立支持亮/暗/跟随系统三种模式。
 
@@ -578,7 +580,7 @@ CSS 变量驱动，切换瞬时生效。Flutter 手机端独立支持亮/暗/跟
 <p align="center">
   <img src="images/screenshots/21-themes.png" alt="主题" width="960" />
 </p>
-<p align="center"><sub>6 套精心设计的主题 · 移动端独立亮/暗模式</sub></p>
+<p align="center"><sub>17 套精心设计的主题 · 移动端独立亮/暗模式</sub></p>
 
 ---
 
@@ -651,7 +653,7 @@ CSS 变量驱动，切换瞬时生效。Flutter 手机端独立支持亮/暗/跟
 ├───────────────────────────────┬────────────────────────────────────┤
 │   React 19 + Vite 8           │    Go 1.24 + Gin + SQLite           │
 │   Tailwind CSS · Zustand 5    │    WebSocket · mDNS · 信令中继       │
-│   Framer Motion 12 · 6 主题   │    向量库 · 进化 · Dream · 群聊      │
+│   Framer Motion 12 · 17 主题  │    向量库 · 进化 · Dream · 群聊      │
 │   虚拟滚动 · React.lazy       │    行为引擎 · Screen Agent · PTY     │
 │   深度搜索 · Token 水位        │    主动式 Agent · Web 知识采集       │
 ├───────────────────────────────┤    Claude Agent SDK · Go runner     │
@@ -764,6 +766,38 @@ cd mobile-flutter
 flutter pub get
 flutter run
 ```
+
+---
+
+## 🌐 Web 版部署（云服务器）
+
+灵犀支持部署到云服务器，通过浏览器随时随地访问。Web 版采用独立反向代理网关，不改动任何现有代码。
+
+### Docker 一键部署（推荐）
+
+```bash
+cd web-server
+
+# 编辑 docker-compose.yml 中的 WEB_PASSWORD 和 ANTHROPIC_AUTH_TOKEN
+docker compose up -d
+
+# 访问 http://your-server:3000，使用密码登录
+```
+
+### 二进制部署
+
+```bash
+# 构建 Linux 部署包
+./build-web.sh
+
+# 上传 web-deploy/ 到服务器
+scp -r web-deploy/ user@server:~/lingxi/
+
+# 在服务器上启动
+cd ~/lingxi && WEB_PASSWORD=your_password ./start.sh
+```
+
+> 详细文档见 [`web-server/README.md`](web-server/README.md)
 
 ---
 

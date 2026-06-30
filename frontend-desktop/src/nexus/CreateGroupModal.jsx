@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Users, Plus, X, Globe, Wifi } from 'lucide-react';
+import { Users, Plus, X, Globe, Wifi, MessageCircle, Briefcase } from 'lucide-react';
 import { api } from '../api/client';
 import { Modal, Button, Input, Textarea, Select } from '../ui/primitives';
+import { cn } from '../ui/cn';
 
 export default function CreateGroupModal({ open, onClose, onCreated }) {
   const [agents, setAgents] = useState([]);
@@ -13,6 +14,11 @@ export default function CreateGroupModal({ open, onClose, onCreated }) {
   const [localAgentIds, setLocalAgentIds] = useState([]);
   const [remoteMembers, setRemoteMembers] = useState([]);
   const [submitting, setSubmitting] = useState(false);
+
+  // 群聊模式：casual=闲聊 | meeting=工作会议
+  const [chatMode, setChatMode] = useState('casual');
+  const [moderatorAgentId, setModeratorAgentId] = useState(0);
+  const [maxRounds, setMaxRounds] = useState(12);
 
   const [pickPeer, setPickPeer] = useState('');
   const [pickAgentName, setPickAgentName] = useState('');
@@ -49,6 +55,17 @@ export default function CreateGroupModal({ open, onClose, onCreated }) {
     }
   }, [pickPeer, allPeers]);
 
+  // 会议主持人：优先用户选择的；否则退化为第一个本端 Agent（主持人必须是本端 Agent）
+  const effectiveModerator = useMemo(
+    () => (moderatorAgentId && localAgentIds.includes(moderatorAgentId) ? moderatorAgentId : (localAgentIds[0] || 0)),
+    [moderatorAgentId, localAgentIds]
+  );
+
+  const canSubmit =
+    topic.trim() &&
+    (localAgentIds.length > 0 || remoteMembers.length > 0) &&
+    (chatMode !== 'meeting' || (localAgentIds.length > 0 && effectiveModerator > 0));
+
   const reset = () => {
     setTopic('');
     setGoal('');
@@ -56,6 +73,9 @@ export default function CreateGroupModal({ open, onClose, onCreated }) {
     setRemoteMembers([]);
     setPickPeer('');
     setPickAgentName('');
+    setChatMode('casual');
+    setModeratorAgentId(0);
+    setMaxRounds(12);
   };
 
   const handleAddLocalAgent = (id) => {
@@ -87,12 +107,15 @@ export default function CreateGroupModal({ open, onClose, onCreated }) {
   };
 
   const handleSubmit = async () => {
-    if (!topic.trim() || (localAgentIds.length === 0 && remoteMembers.length === 0)) return;
+    if (!canSubmit) return;
     setSubmitting(true);
     try {
       const res = await api.createGroupChat({
         topic,
         goal,
+        chat_mode: chatMode,
+        moderator_agent_id: chatMode === 'meeting' ? effectiveModerator : 0,
+        max_rounds: chatMode === 'meeting' ? (parseInt(maxRounds) || 12) : 0,
         local_agent_ids: localAgentIds,
         remote_members: remoteMembers,
       });
@@ -104,19 +127,78 @@ export default function CreateGroupModal({ open, onClose, onCreated }) {
   };
 
   return (
-    <Modal open={open} onClose={() => { reset(); onClose(); }} title="创建群聊" width={620}>
+    <Modal open={open} onClose={() => { reset(); onClose(); }} title={chatMode === 'meeting' ? '创建工作会议' : '创建群聊'} width={620}>
       <div className="space-y-4 max-h-[70vh] overflow-auto scrollable pr-1">
         <div>
-          <label className="text-xs font-medium text-[color:var(--text-soft)] mb-1 block">主题</label>
-          <Input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="比如：技术评审、周末去哪玩" autoFocus />
+          <label className="text-xs font-medium text-[color:var(--text-soft)] mb-1.5 block">群聊模式</label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => setChatMode('casual')}
+              className={cn(
+                'flex items-start gap-2 p-3 rounded-xl border text-left transition',
+                chatMode === 'casual'
+                  ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)]'
+                  : 'border-[color:var(--line)] hover:bg-[color:var(--bg-soft)]'
+              )}
+            >
+              <MessageCircle size={16} className="mt-0.5 text-[color:var(--accent)] shrink-0" />
+              <div>
+                <div className="text-sm font-medium text-[color:var(--text)]">闲聊群</div>
+                <div className="text-[11px] text-[color:var(--text-faint)] mt-0.5">自由发言、你一言我一语的群聊氛围</div>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setChatMode('meeting')}
+              className={cn(
+                'flex items-start gap-2 p-3 rounded-xl border text-left transition',
+                chatMode === 'meeting'
+                  ? 'border-[color:var(--accent)] bg-[color:var(--accent-soft)]'
+                  : 'border-[color:var(--line)] hover:bg-[color:var(--bg-soft)]'
+              )}
+            >
+              <Briefcase size={16} className="mt-0.5 text-[color:var(--accent)] shrink-0" />
+              <div>
+                <div className="text-sm font-medium text-[color:var(--text)]">工作会议</div>
+                <div className="text-[11px] text-[color:var(--text-faint)] mt-0.5">主持人牵头、围绕目标讨论得出结论</div>
+              </div>
+            </button>
+          </div>
         </div>
         <div>
-          <label className="text-xs font-medium text-[color:var(--text-soft)] mb-1 block">目标（可选）</label>
-          <Textarea value={goal} onChange={(e) => setGoal(e.target.value)} placeholder="希望聊出什么结果" rows={2} />
+          <label className="text-xs font-medium text-[color:var(--text-soft)] mb-1 block">{chatMode === 'meeting' ? '会议议题' : '主题'}</label>
+          <Input value={topic} onChange={(e) => setTopic(e.target.value)} placeholder={chatMode === 'meeting' ? '比如：Q3 增长方案评审' : '比如：技术评审、周末去哪玩'} autoFocus />
+        </div>
+        <div>
+          <label className="text-xs font-medium text-[color:var(--text-soft)] mb-1 block">{chatMode === 'meeting' ? '会议目标（建议填写）' : '目标（可选）'}</label>
+          <Textarea value={goal} onChange={(e) => setGoal(e.target.value)} placeholder={chatMode === 'meeting' ? '希望这场会议得出什么结论 / 产出' : '希望聊出什么结果'} rows={2} />
         </div>
 
+        {chatMode === 'meeting' && (
+          <div className="space-y-3 p-3 rounded-xl border border-[color:var(--accent)]/30 bg-[color:var(--accent-soft)]/40">
+            <div>
+              <label className="text-xs font-medium text-[color:var(--text-soft)] mb-1 block">主持人（必须是本端 Agent）</label>
+              <Select value={effectiveModerator || ''} onChange={(e) => setModeratorAgentId(parseInt(e.target.value) || 0)}>
+                <option value="">{localAgentIds.length === 0 ? '请先在下方添加本端 Agent' : '选择主持人'}</option>
+                {localAgentIds.map((id) => {
+                  const a = agents.find((x) => x.id === id);
+                  return a ? <option key={id} value={id}>{a.name}</option> : null;
+                })}
+              </Select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-[color:var(--text-soft)] mb-1 block">最多发言轮数</label>
+              <Input type="number" min={2} max={50} value={maxRounds} onChange={(e) => setMaxRounds(e.target.value)} />
+              <div className="text-[11px] text-[color:var(--text-faint)] mt-1">到达上限会让主持人强制总结结论并结束会议。</div>
+            </div>
+          </div>
+        )}
+
         <div className="text-[11px] text-[color:var(--text-faint)] p-2 rounded-lg bg-[color:var(--bg-soft)]">
-          建群后 Agent 会自动开始聊天，你也可以随时插话、@ 某人或回复消息。
+          {chatMode === 'meeting'
+            ? '建会后主持人会开场陈述议题与目标、点名参会者依次发言、围绕目标推进，并在达成目标或到达轮数上限时总结结论。'
+            : '建群后 Agent 会自动开始聊天，你也可以随时插话、@ 某人或回复消息。'}
         </div>
 
         <div>
@@ -194,10 +276,10 @@ export default function CreateGroupModal({ open, onClose, onCreated }) {
         <Button variant="ghost" onClick={() => { reset(); onClose(); }}>取消</Button>
         <Button
           onClick={handleSubmit}
-          disabled={submitting || !topic.trim() || (localAgentIds.length === 0 && remoteMembers.length === 0)}
+          disabled={submitting || !canSubmit}
         >
           <Users size={14} />
-          {submitting ? '创建中…' : '创建群聊'}
+          {submitting ? '创建中…' : (chatMode === 'meeting' ? '创建会议' : '创建群聊')}
         </Button>
       </div>
     </Modal>

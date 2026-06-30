@@ -99,7 +99,11 @@ func Stop() {
 	}
 }
 
+// heartbeatCounter 每 20 次 tick（5 分钟）输出一次心跳
+var heartbeatCounter int
+
 func checkAndRun() {
+	heartbeatCounter++
 	tasks, err := db.GetDueScheduledTasks()
 	if err != nil {
 		slog.Warn("scheduler query due tasks error", "err", err)
@@ -107,6 +111,20 @@ func checkAndRun() {
 	}
 	if len(tasks) > 0 {
 		slog.Info("scheduler tick: due tasks found", "count", len(tasks), "now", time.Now().Format(time.RFC3339))
+	} else if heartbeatCounter%20 == 0 {
+		// 每 5 分钟输出一次心跳，证明调度器在运行
+		allTasks, _ := db.ListScheduledTasks()
+		enabledCount := 0
+		var nextDue string
+		for _, t := range allTasks {
+			if t.Enabled {
+				enabledCount++
+				if t.NextRunAt != nil && (nextDue == "" || t.NextRunAt.Format(time.RFC3339) < nextDue) {
+					nextDue = t.NextRunAt.Format(time.RFC3339)
+				}
+			}
+		}
+		slog.Info("scheduler heartbeat", "enabled_tasks", enabledCount, "nearest_due", nextDue, "now", time.Now().Format(time.RFC3339))
 	}
 	for _, t := range tasks {
 		go executeTask(t)
@@ -316,21 +334,37 @@ func matchField(field string, val int) bool {
 	// 逗号分隔
 	for _, part := range strings.Split(field, ",") {
 		part = strings.TrimSpace(part)
-		// 范围
+		// 范围 + 可选步进：1-5/2 或 1-5
 		if strings.Contains(part, "-") {
-			rng := strings.SplitN(part, "-", 2)
+			rangePart := part
+			step := 1
+			if si := strings.Index(part, "/"); si > 0 {
+				rangePart = part[:si]
+				step, _ = strconv.Atoi(part[si+1:])
+				if step <= 0 {
+					step = 1
+				}
+			}
+			rng := strings.SplitN(rangePart, "-", 2)
 			lo, _ := strconv.Atoi(rng[0])
 			hi, _ := strconv.Atoi(rng[1])
-			if val >= lo && val <= hi {
+			if val >= lo && val <= hi && (val-lo)%step == 0 {
 				return true
 			}
 			continue
 		}
-		// 步进
+		// 步进：*/5 或 3/10
 		if strings.Contains(part, "/") {
 			sp := strings.SplitN(part, "/", 2)
 			step, _ := strconv.Atoi(sp[1])
-			if step > 0 && val%step == 0 {
+			if step <= 0 {
+				continue
+			}
+			base := 0
+			if sp[0] != "*" {
+				base, _ = strconv.Atoi(sp[0])
+			}
+			if val >= base && (val-base)%step == 0 {
 				return true
 			}
 			continue

@@ -16,7 +16,7 @@ function GroupLiveStream({ streamKey, blocks, members, isMine }) {
       <div className="w-9 shrink-0">
         <GroupMemberAvatar member={sender} name={label} size={36} />
       </div>
-      <div className={cn('max-w-[78%] min-w-0 flex flex-col', isMine ? 'items-end' : 'items-start')}>
+      <div className={cn('max-w-[85%] min-w-0 flex flex-col', isMine ? 'items-end' : 'items-start')}>
         <div className="text-[11px] text-[color:var(--text-faint)] mb-0.5 px-1 flex items-center gap-1.5">
           <span>{label}</span>
           <span className="flex items-end gap-[2px] h-2.5">
@@ -31,9 +31,8 @@ function GroupLiveStream({ streamKey, blocks, members, isMine }) {
           'bg-white/60 dark:bg-[color:var(--bg-elev)]/60 border-[color:var(--accent)]/30'
         )}>
           <BlocksRenderer
-            blocks={(blocks || []).filter((b) => b.type !== 'thinking' && b.type !== 'tool')}
+            blocks={blocks || []}
             live
-            hideThinking
           />
         </div>
       </div>

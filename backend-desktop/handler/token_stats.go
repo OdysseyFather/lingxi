@@ -115,7 +115,7 @@ func SummarizeSession(c *gin.Context) {
 	}
 
 	summaryPrompt := "请用 3-5 句话简洁总结以下对话的核心内容和要点，保留关键结论和决策：\n\n" + context
-	reply, usedSID, err := RunClaudeSyncCtx(c.Request.Context(), summaryPrompt, 0)
+	reply, usedSID, err := RunClaudeSyncCtx(c.Request.Context(), summaryPrompt, 0, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "summarize failed: " + err.Error()})
 		return
@@ -188,7 +188,7 @@ func tryAutoSummarize(sessionID int64) {
 		}
 
 		summaryPrompt := "用一句话（不超过50字）概括以下对话的主题和关键内容：\n\n" + context
-		reply, _, err := RunClaudeSyncCtx(gocontext.Background(), summaryPrompt, 0)
+		reply, _, err := RunClaudeSyncCtx(gocontext.Background(), summaryPrompt, 0, nil)
 		if err != nil || reply == "" {
 			return
 		}

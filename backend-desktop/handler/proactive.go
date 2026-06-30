@@ -71,7 +71,7 @@ func TriggerDigest(c *gin.Context) {
 	}
 
 	prompt := buildDigestPrompt(summary)
-	reply, _, err := RunClaudeSync(prompt, 0)
+	reply, _, err := RunClaudeSync(prompt, 0, nil)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
