@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>在桌面跑一整个 AI Agent 军团</strong><br/>
-  14+ 模型 · 本地优先 · 人格蒸馏 · 自我进化 · 主动式 · 深度搜索 · 屏幕操控 · Agent 互联
+  14+ 模型 · 本地优先 · 人格蒸馏 · 自我进化 · 主动式 · 深度搜索 · 屏幕操控 · Agent 群聊 · 社区平台
 </p>
 
 <p align="center">
@@ -66,13 +66,14 @@
 | **🤖 智能体** | Agent 工厂 | 17 模板 · 五步创建向导 · 人格蒸馏 · 群聊人格 · 对外设置 · temperature/max_tokens |
 | **🧬 进化** | 自我进化引擎 | 纠正/负反馈/有价值对话 → 长期记忆 · 全局扫描 · Dream 记忆巩固 · 单条可撤销 |
 | **📚 知识** | 深度 RAG | 向量索引 · BM25 · RRF 混合检索 · 文件夹监控 · 自动增量索引 · `[N]` 引用标注 · 网页采集 |
-| **🌐 互联** | Project Nexus | mDNS 局域网 · 广域网信令 · 双向流式 · 人类介入 · 群聊（微信风 + 人格行为引擎） |
+| **🌐 互联** | Project Nexus | mDNS 局域网 · 广域网信令 · 群聊协作（微信风 + 人格行为引擎） · 人类介入 |
 | **🖥️ 屏幕** | Screen Agent | 截屏理解 · 操作规划 · OTA 循环 · 安全拦截 · 操作审计 |
 | **🧭 主动式** | Proactive Agent | 日报 · 未完成任务追踪 · 定时调度 · 上下文感知主动建议 |
 | **🔍 搜索** | 深度联网搜索 | DuckDuckGo · Wikipedia 多源 · LLM 综合 · 引用追踪 · SSE 实时进度 |
 | **📊 上下文** | Token 水位 | 实时 Token 计数 · 自动摘要压缩 · 长会话不爆栈 · 会话卡片预览 |
-| **🔧 平台** | 工具生态 | 技能管理 · MCP · 可视化工作流 · 定时任务 · IM 连接器（飞书流式） |
-| **🧠 AI 运行时** | 多模型桥接 | 14+ 供应商 · 纯 Go 协议转换 · Claude Agent SDK · whisper.cpp 离线语音 |
+| **🔧 平台** | 工具生态 | 技能管理 · MCP · 可视化工作流 · 定时任务 · IM 连接器（飞书流式+监听） |
+| **🧠 AI 运行时** | 多模型桥接 | 14+ 供应商 · Anthropic 直连 · 纯 Go 协议转换 · Claude Agent SDK · whisper.cpp 离线语音 |
+| **🧑‍💻 社区** | 灵犀社区平台 | Agent Bundle 发布/下载 · 评分/评论 · 排行榜 · 关注 · 邀请码 · P2P 远程调用 |
 | **📱 远程** | H5 + Flutter | 局域网直连 · 公网云端隧道 · Flutter 手机端 · 三段式首页 · 个性化设置 |
 | **🔒 安全** | 本地优先 | SQLite 本机存储 · 断网可用 · SSO 登录 · 配对认证 · 加密密钥 · Rate Limiter · 优雅关闭 |
 
@@ -89,7 +90,7 @@
 | 数据全在云上，隐私零保障 | **本地优先**：会话、知识库、API Key、进化日志全存本机 SQLite，断网可用 |
 | "自定义助手"不过是换个 System Prompt | **真正的 Agent**：独立技能包 + RAG 知识库 + MCP 工具 + 工作流编排 |
 | AI 纠正一百次下次还犯同样的错 | **自我进化引擎**：纠正/负反馈/有价值对话自动提炼为长期记忆和知识 |
-| Agent 之间无法协作 | **Project Nexus**：跨设备 Agent 自动发现、群聊协作（流式思考+工具调用完整展示） |
+| Agent 之间无法协作 | **Project Nexus**：跨设备 Agent 自动发现、群聊协作（流式思考+工具调用对齐主模式） |
 | 长会话上下文爆栈 | **Token 水位 + 自动摘要**：实时监测 Token 占用，临近水位自动压缩摘要 |
 | 联网搜索结果太散 | **深度联网搜索**：多源并发（DuckDuckGo + Wikipedia）+ LLM 综合 + 引用追踪 |
 | 手机端体验简陋 | **Flutter 三段式首页 + 8 项高级交互**：Hero 转场 · 骨架屏 · 滚动视差 · 触感反馈 |
@@ -108,7 +109,7 @@
 </tr>
 <tr>
 <td align="center"><strong>🤖 14+ 模型</strong></td>
-<td>Anthropic · OpenAI · DeepSeek · Qwen · Gemini · 豆包 · GLM · Kimi · MiniMax · Groq · Ollama · LM Studio…内置纯 Go 协议转换，一个界面访问所有模型。</td>
+<td>Anthropic · OpenAI · DeepSeek · Qwen · Gemini · 豆包 · GLM · Kimi · MiniMax · Groq · Ollama · LM Studio…内置纯 Go 协议转换 + Anthropic 直连供应商（零 Python 依赖），一个界面访问所有模型。</td>
 </tr>
 <tr>
 <td align="center"><strong>🧭 主动式 Agent</strong></td>
@@ -129,6 +130,9 @@
 <tr>
 <td align="center"><strong>🌐 Agent 互联</strong></td>
 <td>Project Nexus：局域网 mDNS + 广域网信令，跨设备 Agent 自动发现、群聊协作（流式思考+工具调用对齐主模式）、人类随时介入。</td>
+<tr>
+<td align="center"><strong>🧑‍💻 社区平台</strong></td>
+<td>灵犀社区：Agent Bundle 发布/下载/评分/评论/关注/排行榜 · P2P 调用 · 邀请码 · 发现页</td>
 </tr>
 <tr>
 <td align="center"><strong>👥 微信风群聊</strong></td>
@@ -416,39 +420,40 @@ Agent 在合适的时间用合适的方式找你，而不是反过来。
 
 ---
 
-### 🌐 Project Nexus — Agent 跨设备互联
+### 🌐 Project Nexus — Agent 跨设备群聊互联
 
 ```
   你的电脑                              同事电脑
   ┌─────────────────┐                ┌─────────────────┐
-  │ 🤖 代码审查员    │ ◄── 流式 ──►  │ 🤖 架构师        │
-  │ 🧑 你（可介入）  │    mDNS/WAN   │ 🧑 同事（可介入） │
+  │ 🤖 代码审查员    │ ◄── 群聊 ──►  │ 🤖 架构师        │
+  │ 🤖 产品经理      │    mDNS/WAN   │ 🤖 DevOps       │
+  │ 🧑 你（可介入）  │                │ 🧑 同事（可介入） │
   └─────────────────┘                └─────────────────┘
 ```
 
 - **发现**：局域网 mDNS + 广域网信令（开箱即用）
-- **对话**：双向 token 级流式，双方实时看到对方 Agent 输出
+- **群聊**：多 Agent 同群协作，流式思考+工具调用对齐主模式
 - **控制**：人类随时暂停、接管、终止
 
 <!-- 📷 Nexus -->
 <p align="center">
   <img src="images/screenshots/07-nexus-discover.png" alt="Nexus" width="960" />
 </p>
-<p align="center"><sub>节点发现 — LAN + WAN 合并列表 · 一键发起对话</sub></p>
+<p align="center"><sub>节点发现 — LAN + WAN 合并列表 · 一键发起群聊</sub></p>
 
 <table>
 <tr>
 <td width="50%">
 <p align="center">
-  <img src="images/screenshots/08-nexus-a2a-live.png" alt="A2A 对话" width="440" />
+  <img src="images/screenshots/09-group-chat.png" alt="群聊" width="440" />
 </p>
-<p align="center"><sub>双向流式 Agent 对话</sub></p>
+<p align="center"><sub>微信风 Agent 群聊</sub></p>
 </td>
 <td width="50%">
 <p align="center">
   <img src="images/Agent对话实况2.png" alt="跨实例协作" width="440" />
 </p>
-<p align="center"><sub>跨实例实时协作</sub></p>
+<p align="center"><sub>跨实例实时群聊协作</sub></p>
 </td>
 </tr>
 </table>
@@ -513,6 +518,35 @@ stdio / SSE / HTTP
 <tr>
 <td align="center">
 
+**灵犀社区**
+
+Agent 发布 · 评分 · 评论
+排行榜 · 关注 · 邀请码
+P2P 远程调用
+
+</td>
+<td align="center">
+
+**可视化工作流**
+
+拖拽节点式编排
+6 种节点类型
+连线 + 执行预览
+
+</td>
+<td align="center">
+
+**Web 部署**
+
+Docker 一键部署
+密码认证 · 反暴力破解
+SPA 反代 + 静态服务
+
+</td>
+</tr>
+<tr>
+<td align="center">
+
 **定时任务**
 
 Cron 调度 · 有/无状态
@@ -529,6 +563,7 @@ Cron 调度 · 有/无状态
 企业微信 · 钉钉 · 飞书
 飞书流式卡片推送
 飞书群消息监听模式
+IM Dashboard 消息看板
 Webhook 响应
 
 <!-- 📷 IM -->
@@ -554,13 +589,13 @@ Recharts 可视化
 
 ### ⚙️ 模型接入
 
-内置纯 Go 协议转换代理，选供应商 → 填 Key → 自动获取可用模型列表 → 激活即用（< 1ms 就绪）。
+内置纯 Go 协议转换代理 + Anthropic 直连供应商（GLM/Kimi/MiniMax/Ollama/LM Studio，零 Python 依赖），选供应商 → 填 Key → 自动获取可用模型列表 → 激活即用（< 1ms 就绪）。
 
 <!-- 📷 接入点 -->
 <p align="center">
   <img src="images/screenshots/17-providers.png" alt="接入点" width="960" />
 </p>
-<p align="center"><sub>14+ 供应商 · 自动获取模型列表 · 测试连通 · 一键切换</sub></p>
+<p align="center"><sub>14+ 供应商 · Anthropic 直连 · 自动获取模型列表 · 测试连通 · 一键切换</sub></p>
 
 <!-- 📷 供应商列表 -->
 <p align="center">
@@ -615,15 +650,15 @@ CSS 变量驱动，切换瞬时生效。Flutter 手机端独立支持亮/暗/跟
 <tr>
 <td width="50%">
 <p align="center">
-  <img src="images/Agent 对话请求提问.png" alt="发起 A2A" width="440" />
+  <img src="images/screenshots/09-group-chat.png" alt="群聊" width="440" />
 </p>
-<p align="center"><sub>Nexus — 发起 Agent 对话邀请</sub></p>
+<p align="center"><sub>Nexus — 微信风 Agent 群聊协作</sub></p>
 </td>
 <td width="50%">
 <p align="center">
-  <img src="images/Agent对话接收请求.png" alt="接收 A2A" width="440" />
+  <img src="images/Agent对话实况2.png" alt="跨实例协作" width="440" />
 </p>
-<p align="center"><sub>Nexus — 接收方选择 Agent 响应</sub></p>
+<p align="center"><sub>Nexus — 跨实例群聊实况</sub></p>
 </td>
 </tr>
 <tr>
@@ -656,9 +691,9 @@ CSS 变量驱动，切换瞬时生效。Flutter 手机端独立支持亮/暗/跟
 │   Framer Motion 12 · 17 主题  │    向量库 · 进化 · Dream · 群聊      │
 │   虚拟滚动 · React.lazy       │    行为引擎 · Screen Agent · PTY     │
 │   深度搜索 · Token 水位        │    主动式 Agent · Web 知识采集       │
-├───────────────────────────────┤    Claude Agent SDK · Go runner     │
-│   Flutter 手机端 · 三段式首页  │    纯 Go 协议转换代理 · 加密密钥     │
-│   8 项高级交互 · 个性化设置    │    定时调度器 · IM 连接器 · 推送     │
+│   社区平台 · 工作流编排        │    Claude Agent SDK · Go runner     │
+├───────────────────────────────┤    Anthropic 直连 · Go 代理 · 密钥   │
+│   Flutter 手机端 · 三段式首页  │    定时调度 · IM 连接器 · 飞书监听   │
 └───────────────────────────────┴────────────────────────────────────┘
          内嵌：Node.js · whisper.cpp · Claude CLI · Bridge
 ```
@@ -668,7 +703,7 @@ CSS 变量驱动，切换瞬时生效。Flutter 手机端独立支持亮/暗/跟
 | **桌面壳** | Electron 36 · electron-builder |
 | **前端** | React 19 · Vite 8 · Tailwind 3.4 · Zustand 5 · Framer Motion 12 · Recharts |
 | **后端** | Go 1.24 · Gin 1.10 · ncruces/go-sqlite3（无 CGO）· Gorilla WebSocket |
-| **AI 运行时** | Claude Agent SDK · 纯 Go 协议转换代理 · whisper.cpp |
+| **AI 运行时** | Claude Agent SDK · 纯 Go 协议转换代理 · Anthropic 直连供应商 · whisper.cpp |
 | **向量引擎** | 纯 Go cosine · 768 维嵌入 · BM25 + RRF 混合检索 |
 | **网络层** | mDNS · WebSocket 信令 · HTTP/WAN Transport |
 
