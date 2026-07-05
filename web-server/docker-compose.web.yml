@@ -1,0 +1,51 @@
+# 灵犀 Web 多用户版 Docker Compose
+#
+# 用法:
+#   cd web-server && docker compose -f docker-compose.web.yml up -d
+#   访问 http://localhost:3000
+#   首次设置 ADMIN_BOOTSTRAP=admin:yourpassword 创建管理员
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: lingxi-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-lingxi_root}
+      MYSQL_DATABASE: lingxi
+      MYSQL_USER: lingxi
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-lingxi_pass}
+    volumes:
+      - lingxi-mysql:/var/lib/mysql
+    ports:
+      - "3306:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  lingxi-web:
+    build:
+      context: ..
+      dockerfile: web-server/Dockerfile.web
+    container_name: lingxi-web
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      BACKEND_PORT: "13001"
+      MYSQL_DSN: "lingxi:${MYSQL_PASSWORD:-lingxi_pass}@tcp(mysql:3306)/lingxi?parseTime=true&charset=utf8mb4"
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      ADMIN_BOOTSTRAP: ${ADMIN_BOOTSTRAP:-admin:changeme}
+      DATA_DIR: /data
+      OPEN_REGISTRATION: "false"
+    volumes:
+      - lingxi-data:/data
+    restart: unless-stopped
+
+volumes:
+  lingxi-mysql:
+  lingxi-data:

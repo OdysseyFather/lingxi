@@ -45,8 +45,9 @@ func loadConfig() Config {
 		FrontendDist: envOr("FRONTEND_DIST", "./dist"),
 		DataDir:      envOr("DATA_DIR", "./data"),
 	}
+	// JWT 多用户模式：WEB_PASSWORD 可选，网关仅做反代 + 静态文件
 	if cfg.WebPassword == "" {
-		log.Fatal("[web-gateway] WEB_PASSWORD 环境变量未设置，请设置后重试")
+		log.Println("[web-gateway] JWT 模式：无 WEB_PASSWORD，网关不做登录校验")
 	}
 	return cfg
 }
@@ -250,14 +251,24 @@ func startBackend(cfg Config) *exec.Cmd {
 	}
 
 	setEnv("PORT", cfg.BackendPort)
-	setEnv("DB_PATH", filepath.Join(dbDir, "smart-agent.db"))
-	setEnv("UPLOADS_PATH", filepath.Join(dbDir, "uploads"))
-	setEnv("KNOWLEDGE_PATH", filepath.Join(dbDir, "knowledge"))
-	setEnv("KB_PATH", filepath.Join(dbDir, "knowledge"))
+	if os.Getenv("WEB_PASSWORD") == "" {
+		if dsn := os.Getenv("MYSQL_DSN"); dsn != "" {
+			setEnv("MYSQL_DSN", dsn)
+		}
+		if sec := os.Getenv("JWT_SECRET"); sec != "" {
+			setEnv("JWT_SECRET", sec)
+		}
+		setEnv("DATA_DIR", cfg.DataDir)
+		setEnv("OPEN_REGISTRATION", os.Getenv("OPEN_REGISTRATION"))
+		setEnv("ADMIN_BOOTSTRAP", os.Getenv("ADMIN_BOOTSTRAP"))
+	} else {
+		setEnv("DB_PATH", filepath.Join(dbDir, "smart-agent.db"))
+		setEnv("UPLOADS_PATH", filepath.Join(dbDir, "uploads"))
+		setEnv("KNOWLEDGE_PATH", filepath.Join(dbDir, "knowledge"))
+		setEnv("KB_PATH", filepath.Join(dbDir, "knowledge"))
+		setEnv("HOME", aiHome)
+	}
 	setEnv("FRONTEND_DIST", "__none__") // 不让后端服务前端，由网关处理
-
-	// 关键：设置 HOME 为隔离目录，Claude CLI 读取 $HOME/.claude/ 配置
-	setEnv("HOME", aiHome)
 
 	// 设置 CLAUDE_BIN 让后端使用内嵌 CLI
 	if claudeBin != "" {
@@ -394,16 +405,17 @@ func main() {
 
 	// ── WebSocket 代理 ──
 	mux.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		// WS 通过 query 参数认证
-		token := r.URL.Query().Get("web_token")
-		if token == "" {
-			if c, err := r.Cookie("web_token"); err == nil {
-				token = c.Value
+		if os.Getenv("WEB_PASSWORD") != "" {
+			token := r.URL.Query().Get("web_token")
+			if token == "" {
+				if c, err := r.Cookie("web_token"); err == nil {
+					token = c.Value
+				}
 			}
-		}
-		if !tokens.Valid(token) {
-			http.Error(w, "未授权", 401)
-			return
+			if !tokens.Valid(token) {
+				http.Error(w, "未授权", 401)
+				return
+			}
 		}
 		proxy.ServeHTTP(w, r)
 	})
@@ -439,7 +451,11 @@ func main() {
 			return
 		}
 
-		// 其他页面需要认证
+		// 其他页面：JWT 模式直接加载 SPA；旧模式需 cookie 认证
+		if os.Getenv("WEB_PASSWORD") == "" {
+			serveStatic(w, r, cfg.FrontendDist)
+			return
+		}
 		if !checkAuth(r, tokens) {
 			http.Redirect(w, r, "/web/login.html", http.StatusFound)
 			return
@@ -479,6 +495,9 @@ func main() {
 // ─── 工具函数 ────────────────────────────────────────────────
 
 func checkAuth(r *http.Request, tokens *TokenStore) bool {
+	if os.Getenv("WEB_PASSWORD") == "" {
+		return true
+	}
 	// 1. Header: X-Web-Token
 	if t := r.Header.Get("X-Web-Token"); t != "" && tokens.Valid(t) {
 		return true

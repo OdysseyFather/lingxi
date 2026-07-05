@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": ["Read", "Glob", "Grep", "LS", "Bash(*)"],
+    "deny": []
+  },
+  "enabledPlugins": []
+}

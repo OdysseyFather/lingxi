@@ -1,0 +1,105 @@
+package connector
+
+import (
+	"context"
+)
+
+// StreamKind 标识流式回调的内容类型
+type StreamKind string
+
+const (
+	KindText     StreamKind = "text"
+	KindThinking StreamKind = "thinking"
+	KindTool     StreamKind = "tool"
+)
+
+// StreamCallback 流式回调函数签名。
+// kind 标识内容类型（text/thinking/tool），payload 是增量内容，done=true 表示整条消息生成完毕。
+type StreamCallback func(kind StreamKind, payload string, done bool) error
+
+// SessionMode 决定 IM 消息如何映射到 Claude session
+type SessionMode string
+
+const (
+	// SessionModePerGroup 同一个群共享一个 session（默认）
+	SessionModePerGroup SessionMode = "per_group"
+	// SessionModePerUser 同一个用户（跨群）共享一个 session
+	SessionModePerUser SessionMode = "per_user"
+	// SessionModePerGroupUser 同一个群内同一个用户独立 session
+	SessionModePerGroupUser SessionMode = "per_group_user"
+	// SessionModeStateless 每条消息独立，不保留上下文
+	SessionModeStateless SessionMode = "stateless"
+)
+
+// BaseConfig 是所有平台连接器共用的会话管理配置
+type BaseConfig struct {
+	// SessionMode 会话粒度，默认 per_group
+	SessionMode SessionMode `json:"session_mode"`
+	// SessionTTLHours 不活跃多少小时后自动开启新 session，0 表示永不重置，默认 24
+	SessionTTLHours int `json:"session_ttl_hours"`
+	// ReplyToMentionAll 是否回复 @所有人 的消息，默认 false（不回复）
+	ReplyToMentionAll bool `json:"reply_to_mention_all"`
+	// AgentID 绑定的智能体 ID（从 im_connectors.agent_id 注入，不在 JSON 配置中）
+	AgentID int64 `json:"-"`
+}
+
+// DefaultBaseConfig 返回默认会话配置
+func DefaultBaseConfig() BaseConfig {
+	return BaseConfig{
+		SessionMode:     SessionModePerGroup,
+		SessionTTLHours: 24,
+	}
+}
+
+// InteractiveCardSender 飞书等平台在 AI 回复完成后发送交互卡片（选择/输入/反馈）
+type InteractiveCardSender func(sessionID int64, fullReply string)
+
+// IMImage 表示 IM 消息中携带的图片（base64 编码 + MIME 类型）
+// 由各平台连接器从原平台下载图片后填充，dispatcher 会落盘为临时文件并传给 Claude
+type IMImage struct {
+	MediaType string `json:"mediaType"` // image/jpeg | image/png | image/gif | image/webp
+	Data      string `json:"data"`      // base64 字符串（不含 data:xxx;base64, 前缀）
+}
+
+// IMMessage 是各平台消息的统一抽象
+type IMMessage struct {
+	Platform       string // "dingtalk" | "feishu" | "wecom"
+	UserID         string // 发送者 ID
+	UserName       string // 发送者昵称（可选，部分平台可获取）
+	ConversationID string // 会话/群 ID（用于区分多用户上下文）
+	ConvTitle      string // 群名/会话标题（可选，部分平台可获取）
+	ConvType       string // 会话类型："group"=群聊, "private"=私聊, ""=未知
+	Text           string // 消息正文
+	AgentID        int64  // 绑定的智能体 ID（来自 IM 连接器配置）
+	IsMentionAll   bool   // 是否为 @所有人 触发（非 @机器人）
+	BaseCfg        BaseConfig
+	// Images 消息中携带的图片（base64），dispatcher 会落盘为临时文件并作为多模态输入传给 Claude
+	Images []IMImage
+	// ReplyFunc 由各平台连接器实现，dispatcher 调用它发送回复（一次性完整回复）
+	ReplyFunc func(text string) error
+	// StreamReplyFunc 可选（旧接口）：仅文本流式回复。保留向后兼容。
+	StreamReplyFunc func(chunk string, done bool) error
+	// StreamCallback 新版流式回调，支持 thinking/tool/text 多种事件类型。
+	// 优先使用此字段，如果不为 nil 则忽略 StreamReplyFunc。
+	StreamCallback StreamCallback
+	// PostDoneFunc 流式/同步回复完成后触发，用于发送交互卡片（反馈/选择/输入）
+	PostDoneFunc InteractiveCardSender
+	// MembersInfo 群成员名单提示（可选），注入到 system prompt，让 AI 知道可以 @mention 谁
+	MembersInfo string
+	// SkipCancel 跳过 activeTasks 打断机制（P2P watcher 已自行通过 channel 串行化，
+	// 无需 Dispatch 层面的打断，否则新消息会取消正在处理的旧消息）
+	SkipCancel bool
+	// ResumeSessionID 如果 > 0，强制使用该 session ID（跳过 GetOrCreateIMSession），
+	// 用于回复链续接上下文：用户回复机器人消息时自动关联到原会话
+	ResumeSessionID int64
+}
+
+// Connector 是每个 IM 平台连接器必须实现的接口
+type Connector interface {
+	// Platform 返回平台标识，如 "dingtalk"
+	Platform() string
+	// Start 启动连接器（建立长连接或注册 Webhook 路由），阻塞直到 ctx 取消
+	Start(ctx context.Context) error
+	// Stop 停止连接器，释放资源
+	Stop()
+}

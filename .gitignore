@@ -23,6 +23,12 @@ dist-electron/
 # Runtime data
 /data/
 /backups/
+backend-web/data/
+web-deploy/dist/
+web-deploy/smart-agent
+web-deploy/web-gateway
+web-deploy/ai-config/
+web-deploy/ai-engine/
 
 # electron/resources/ holds large generated bundles (ai-engine, node-bin)
 # but bridge/ contains only our small source files (~5KB) and must be tracked.

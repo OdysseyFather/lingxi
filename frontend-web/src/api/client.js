@@ -1,0 +1,602 @@
+// 与后端 REST + WebSocket 通信的轻量封装（Web 多用户 JWT 版）
+
+const JWT_KEY = 'lingxi_jwt';
+
+export function getJwtToken() {
+  try { return localStorage.getItem(JWT_KEY) || ''; } catch { return ''; }
+}
+
+export function setJwtToken(token) {
+  try {
+    if (token) localStorage.setItem(JWT_KEY, token);
+    else localStorage.removeItem(JWT_KEY);
+  } catch {}
+}
+
+const baseHeaders = { 'Content-Type': 'application/json' };
+
+function authHeaders() {
+  const h = { ...baseHeaders };
+  const t = getJwtToken();
+  if (t) h.Authorization = `Bearer ${t}`;
+  return h;
+}
+
+// 检测隧道路径前缀（如 /tunnel/lx_tunnel_xxx）
+function detectTunnelBase() {
+  if (typeof window === 'undefined') return '';
+  const m = window.location.pathname.match(/^(\/tunnel\/[^/]+)/);
+  return m ? m[1] : '';
+}
+export const TUNNEL_BASE = detectTunnelBase();
+
+// 带 JWT 认证的 fetch 包装，用于需要直接操作 Response（如流式、blob）的场景
+export function authFetch(url, opts = {}) {
+  const token = getJwtToken();
+  const h = { ...(opts.headers || {}) };
+  if (token) h['Authorization'] = `Bearer ${token}`;
+  return fetch(TUNNEL_BASE + url, { ...opts, headers: h, credentials: 'include' });
+}
+
+async function req(method, path, body) {
+  const opts = { method, headers: authHeaders(), credentials: 'include' };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(TUNNEL_BASE + path, opts);
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return res.json();
+  return res.text();
+}
+
+export const api = {
+  // auth (Web JWT)
+  webLogin: (username, password) => req('POST', '/api/auth/login', { username, password }),
+  webRegister: (username, password, invite_code) => req('POST', '/api/auth/register', { username, password, invite_code }),
+  getCurrentUser: () => req('GET', '/api/auth/me'),
+  logout: () => req('POST', '/api/auth/logout'),
+  listAdminUsers: () => req('GET', '/api/admin/users'),
+  createInvitation: (data) => req('POST', '/api/admin/invitations', data),
+  listInvitations: () => req('GET', '/api/admin/invitations'),
+
+  // sessions
+  listSessions: (agentId, mode, projectPath) => {
+    const params = [];
+    if (agentId != null) params.push(`agent_id=${agentId}`);
+    if (mode) params.push(`mode=${mode}`);
+    if (projectPath) params.push(`project_path=${encodeURIComponent(projectPath)}`);
+    return req('GET', `/api/sessions${params.length ? '?' + params.join('&') : ''}`);
+  },
+  createSession: (titleOrPayload) =>
+    req('POST', '/api/sessions',
+      typeof titleOrPayload === 'string'
+        ? { title: titleOrPayload }
+        : (titleOrPayload || {})
+    ),
+  renameSession: (id, title) => req('PATCH', `/api/sessions/${id}`, { title }),
+  pinSession: (id, pinned) => req('PATCH', `/api/sessions/${id}`, { pinned }),
+  setSessionPermissionMode: (id, mode) => req('PATCH', `/api/sessions/${id}`, { permission_mode: mode }),
+  deleteSession: (id) => req('DELETE', `/api/sessions/${id}`),
+  batchDeleteSessions: (ids) => req('POST', '/api/sessions/batch-delete', { ids }),
+  batchExportSessions: async (ids) => {
+    const res = await fetch(TUNNEL_BASE + '/api/sessions/batch-export', {
+      method: 'POST', headers: baseHeaders, credentials: 'include',
+      body: JSON.stringify({ ids }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.blob();
+  },
+  extractSessionKnowledge: (id) => req('POST', `/api/sessions/${id}/extract-knowledge`),
+  forkSession: (id) => req('POST', `/api/sessions/${id}/fork`),
+  listMessages: (id) => req('GET', `/api/sessions/${id}/messages`),
+  setSessionAgent: (id, agent_id) => req('POST', `/api/sessions/${id}/agent`, { agent_id }),
+  getSessionTokenStats: (id) => req('GET', `/api/sessions/${id}/token-stats`),
+  summarizeSession: (id) => req('POST', `/api/sessions/${id}/summarize`),
+
+  // messages
+  updateMessage: (id, content) => req('PUT', `/api/messages/${id}`, { content }),
+  setMessageFeedback: (id, feedback) => req('POST', `/api/messages/${id}/feedback`, { feedback }),
+
+  // chat
+  sendChat: (payload) => req('POST', '/api/chat', payload),
+  abortChat: (sessionId) => req('POST', '/api/chat/abort', { sessionId: String(sessionId) }),
+  restoreSession: (sessionId, messageId, workingDir, revertCode) =>
+    req('POST', `/api/sessions/${sessionId}/restore`, { messageId, workingDir, revertCode }),
+
+  // providers + profiles
+  listProviders: () => req('GET', '/api/providers'),
+  listProfiles: (includeCipher) => req('GET', `/api/api-profiles${includeCipher ? '?include_cipher=1' : ''}`),
+  saveProfile: (p) => req('POST', '/api/api-profiles', p),
+  deleteProfile: (id) => req('DELETE', `/api/api-profiles/${id}`),
+  activateProfile: (id) => req('POST', `/api/api-profiles/${id}/activate`),
+  testProfile: (id, body) => req('POST', `/api/api-profiles/${id}/test`, body || {}),
+  fetchModels: (body) => req('POST', '/api/api-profiles/fetch-models', body),
+
+  // skills / knowledge
+  listSkills: () => req('GET', '/api/skills'),
+  getSkillContent: (id) => req('GET', `/api/skills/${id}/content`),
+  updateSkillContent: (id, files) => req('PUT', `/api/skills/${id}/content`, { files }),
+  exportSkillUrl: (id) => `/api/skills/${id}/export`,
+  searchMarketplace: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return req('GET', `/api/skills/marketplace?${qs}`);
+  },
+  getMarketplaceSkill: (ns, slug) => req('GET', `/api/skills/marketplace/${ns}/${slug}`),
+  installMarketplaceSkill: (data) => req('POST', '/api/skills/marketplace/install', data),
+  getMarketplaceCategories: () => req('GET', '/api/skills/marketplace/categories'),
+  listKnowledge: () => req('GET', '/api/knowledge'),
+
+  // MCP
+  listMCP: () => req('GET', '/api/mcp'),
+  saveMCP: (m) => req('POST', '/api/mcp', m),
+  deleteMCP: (id) => req('DELETE', `/api/mcp/${id}`),
+  toggleMCP: (id, enabled) => req('POST', `/api/mcp/${id}/toggle`, { enabled }),
+
+  // Agents（智能体工厂）
+  listAgents: () => req('GET', '/api/agents'),
+  getAgent: (id) => req('GET', `/api/agents/${id}`),
+  saveAgent: (a) => req('POST', '/api/agents', a),
+  deleteAgent: (id) => req('DELETE', `/api/agents/${id}`),
+  uploadAgentAvatar: async (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/api/agents/upload-avatar', { method: 'POST', credentials: 'include', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '上传失败');
+    return data;
+  },
+  getDistillStatus: () => req('GET', '/api/agents/distill/status'),
+  installDotSkill: () => req('POST', '/api/skills/install-github'),
+  applyDistillResult: (body) => req('POST', '/api/agents/distill/apply', body),
+  listDistillRecords: () => req('GET', '/api/agents/distill/records'),
+  getDistillRecord: (id) => req('GET', `/api/agents/distill/records/${id}`),
+  deleteDistillRecord: (id) => req('DELETE', `/api/agents/distill/records/${id}`),
+  applyDistillRecord: (id) => req('POST', `/api/agents/distill/records/${id}/apply`),
+  distillRecordFileUrl: (id, relPath) => `/api/agents/distill/records/${id}/files/${relPath}`,
+  uploadKnowledgeFile: async (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/api/knowledge', { method: 'POST', credentials: 'include', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '知识库上传失败');
+    return data;
+  },
+  importKnowledgeFromURL: (data) => req('POST', '/api/knowledge/from-url', data),
+  batchImportKnowledgeFromURLs: (data) => req('POST', '/api/knowledge/from-urls', data),
+
+  // usage
+  getUsage: (range = '7d') => req('GET', `/api/usage?range=${range}`),
+  getQuota: (profileId) => req('GET', `/api/usage/quota?profile_id=${profileId}`),
+
+  // router (bridge) status
+  getRouterStatus: () => req('GET', '/api/router/status'),
+  stopRouter: () => req('POST', '/api/router/stop'),
+
+  // memories
+  listMemories: (agentId = 0) => req('GET', `/api/memories?agent_id=${agentId}`),
+  createMemory: (data) => req('POST', '/api/memories', data),
+  deleteMemory: (id) => req('DELETE', `/api/memories/${id}`),
+  clearMemories: (agentId = 0) => req('DELETE', `/api/memories/clear?agent_id=${agentId}`),
+
+  // message pin
+  toggleMessagePin: (id, pinned) => req('POST', `/api/messages/${id}/pin`, { pinned }),
+
+  // 语音识别
+  transcribeAudio: async (blob) => {
+    const form = new FormData();
+    form.append('file', blob, 'audio.webm');
+    const res = await fetch('/api/transcribe', { method: 'POST', body: form, credentials: 'include' });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      let msg = `HTTP ${res.status}`;
+      try { msg = JSON.parse(text).error || msg; } catch {}
+      throw new Error(msg);
+    }
+    const data = await res.json();
+    return data.text || '';
+  },
+
+  // scheduled tasks
+  listScheduledTasks: () => req('GET', '/api/scheduled-tasks'),
+  createScheduledTask: (data) => req('POST', '/api/scheduled-tasks', data),
+  updateScheduledTask: (id, data) => req('PUT', `/api/scheduled-tasks/${id}`, data),
+  deleteScheduledTask: (id) => req('DELETE', `/api/scheduled-tasks/${id}`),
+  toggleScheduledTask: (id, enabled) => req('POST', `/api/scheduled-tasks/${id}/toggle`, { enabled }),
+  triggerScheduledTask: (id) => req('POST', `/api/scheduled-tasks/${id}/run`),
+  listScheduledTaskRuns: (id) => req('GET', `/api/scheduled-tasks/${id}/runs`),
+
+  // ── Project Nexus: Agent-to-Agent ─────────────────────────────
+  getNexusSettings: () => req('GET', '/api/nexus/settings'),
+  updateNexusSettings: (data) => req('PUT', '/api/nexus/settings', data),
+  listPeers: () => req('GET', '/api/peers'),
+  getAgentNexusConfig: (id) => req('GET', `/api/agents/${id}/nexus-config`),
+  updateAgentNexusConfig: (id, data) => req('PUT', `/api/agents/${id}/nexus-config`, data),
+
+  // ── 群聊 ────────────────────────────────────────────────────────
+  listGroupChats: () => req('GET', '/api/group-chats'),
+  getGroupChat: (id) => req('GET', `/api/group-chats/${id}`),
+  createGroupChat: (data) => req('POST', '/api/group-chats', data),
+  postGroupMessage: (id, payload) => {
+    // 兼容旧用法：传入字符串视为 content
+    const body = typeof payload === 'string' ? { content: payload } : (payload || {});
+    return req('POST', `/api/group-chats/${id}/post`, body);
+  },
+  listGroupMessagesPaged: (id, before, limit = 30) =>
+    req('GET', `/api/group-chats/${id}/messages?before=${before || 0}&limit=${limit}`),
+  recallGroupMessage: (id, msgId) => req('POST', `/api/group-chats/${id}/messages/${msgId}/recall`),
+  leaveGroupChat: (id) => req('POST', `/api/group-chats/${id}/leave`),
+  pauseGroupChat: (id) => req('POST', `/api/group-chats/${id}/pause`),
+  resumeGroupChat: (id) => req('POST', `/api/group-chats/${id}/resume`),
+  terminateGroupChat: (id) => req('POST', `/api/group-chats/${id}/terminate`),
+  acceptGroupInvite: (id, localAgentIds) => req('POST', `/api/group-chats/${id}/accept`, { local_agent_ids: localAgentIds }),
+  rejectGroupInvite: (id) => req('POST', `/api/group-chats/${id}/reject`),
+  inviteGroupMembers: (id, data) => req('POST', `/api/group-chats/${id}/members/add`, data),
+  kickGroupMember: (id, payload) => req('POST', `/api/group-chats/${id}/members/remove`, payload),
+  deleteGroupChat: (id) => req('DELETE', `/api/group-chats/${id}`),
+  uploadGroupImage: async (file) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/api/group-chats/upload', { method: 'POST', body: form, credentials: 'include' });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`HTTP ${res.status}: ${text}`);
+    }
+    return res.json();
+  },
+
+  // ── Agent 群聊人格 ─────────────────────────────────────────
+  getAgentPersonality: (id) => req('GET', `/api/agents/${id}/personality`),
+  saveAgentPersonality: (id, data) => req('PUT', `/api/agents/${id}/personality`, data),
+
+  // ── 自我进化 ─────────────────────────────────────────────────
+  getEvolutionConfig: (id) => req('GET', `/api/agents/${id}/evolution`),
+  setEvolutionConfig: (id, enabled) => req('PUT', `/api/agents/${id}/evolution`, { enabled }),
+  listEvolutionLogs: (id, limit = 50) => req('GET', `/api/agents/${id}/evolution/logs?limit=${limit}`),
+  clearEvolutionLogs: (id) => req('DELETE', `/api/agents/${id}/evolution/logs`),
+  deleteEvolutionLog: (logId) => req('DELETE', `/api/evolution/logs/${logId}`),
+  revertEvolutionLog: (logId) => req('POST', `/api/evolution/logs/${logId}/revert`),
+  manualExtract: (id, data) => req('POST', `/api/agents/${id}/evolution/extract`, data),
+  listAllEvolutionLogs: (limit = 100, offset = 0) => req('GET', `/api/evolution/logs?limit=${limit}&offset=${offset}`),
+  getEvolutionStats: () => req('GET', '/api/evolution/stats'),
+  getEvolutionScannerConfig: () => req('GET', '/api/evolution/scanner-config'),
+  updateEvolutionScannerConfig: (cfg) => req('PUT', '/api/evolution/scanner-config', cfg),
+
+  // ── 记忆巩固（Dream）──────────────────────────────────────────
+  getDreamConfig: () => req('GET', '/api/dream/config'),
+  updateDreamConfig: (cfg) => req('PUT', '/api/dream/config', cfg),
+  getDreamStatus: () => req('GET', '/api/dream/status'),
+  triggerDream: (agentId) => req('POST', '/api/dream/trigger', { agent_id: agentId }),
+  getAgentDreamHistory: (agentId, limit = 20) => req('GET', `/api/agents/${agentId}/dream/history?limit=${limit}`),
+
+  // ── 文件浏览（代码视图）──────────────────────────────────────
+  listDirectory: (dirPath) => req('GET', `/api/files/list?path=${encodeURIComponent(dirPath || '')}`),
+  readFile: (filePath) => req('GET', `/api/files/read?path=${encodeURIComponent(filePath)}`),
+  writeFile: (filePath, content) => req('PUT', '/api/files/write', { path: filePath, content }),
+  getProjectInfo: (dirPath) => req('GET', `/api/files/project?path=${encodeURIComponent(dirPath || '')}`),
+  searchFiles: (dirPath, query, glob) => {
+    let url = `/api/files/search?path=${encodeURIComponent(dirPath || '')}&query=${encodeURIComponent(query)}`;
+    if (glob) url += `&glob=${encodeURIComponent(glob)}`;
+    return req('GET', url);
+  },
+  searchFileNames: (dirPath, query) =>
+    req('GET', `/api/files/search-names?path=${encodeURIComponent(dirPath || '')}&query=${encodeURIComponent(query)}`),
+
+  // ── 数据备份 ─────────────────────────────────────────────────
+  exportBackup: () => `${BASE}/api/backup/export`,
+  healthCheck: () => req('GET', '/api/health'),
+
+  // ── 主动式 Agent ────────────────────────────────────────────
+  getProactiveConfig: () => req('GET', '/api/proactive/config'),
+  updateProactiveConfig: (config) => req('PUT', '/api/proactive/config', config),
+  triggerDigest: () => req('POST', '/api/proactive/trigger-digest'),
+
+  // ── 批量技能导出 ──────────────────────────────────────────────
+  batchExportSkills: (ids) => req('POST', '/api/skills/batch-export', { ids }),
+
+  // ── WAN (广域网) ──────────────────────────────────────────────
+  listWANPeers: () => req('GET', '/api/wan/peers'),
+  getWANStatus: () => req('GET', '/api/wan/status'),
+
+  // ── Screen Agent ─────────────────────────────────────────────
+  screenAgentAnalyze: (data) => req('POST', '/api/screen-agent/analyze', data),
+  screenAgentPlan: (data) => req('POST', '/api/screen-agent/plan', data),
+  screenAgentStep: (data) => req('POST', '/api/screen-agent/step', data),
+  screenAgentStepResult: (data) => req('POST', '/api/screen-agent/step-result', data),
+  screenAgentAbort: (sessionId) => req('POST', '/api/screen-agent/abort', { session_id: sessionId }),
+  screenAgentReset: (sessionId) => req('POST', '/api/screen-agent/reset', { session_id: sessionId }),
+  screenAgentExecutePlan: (data) => req('POST', '/api/screen-agent/execute-plan', data),
+  screenAgentConfirm: (data) => req('POST', '/api/screen-agent/confirm', data),
+  listScreenActions: (sessionId, limit = 50) => req('GET', `/api/screen-agent/actions?session_id=${sessionId}&limit=${limit}`),
+  getAgentScreenConfig: (id) => req('GET', `/api/agents/${id}/screen-config`),
+  setAgentScreenConfig: (id, data) => req('PUT', `/api/agents/${id}/screen-config`, data),
+
+
+  // ── H5 远程访问 ───────────────────────────────────────────────
+  getH5Settings: () => req('GET', '/api/h5-access/settings'),
+  updateH5Settings: (data) => req('PUT', '/api/h5-access/settings', data),
+  listH5Tokens: () => req('GET', '/api/h5-access/tokens'),
+  generateH5Token: (data) => req('POST', '/api/h5-access/tokens', data),
+  revokeH5Token: (id) => req('POST', `/api/h5-access/tokens/${id}/revoke`),
+  deleteH5Token: (id) => req('DELETE', `/api/h5-access/tokens/${id}`),
+
+  // ── H5 云端隧道 ───────────────────────────────────────────────
+  enableH5Tunnel: (data) => req('POST', '/api/h5-tunnel/enable', data),
+  getH5TunnelStatus: () => req('GET', '/api/h5-tunnel/status'),
+
+  // ── 手机 App 配对 ─────────────────────────────────────────────
+  pairInitiate: () => req('POST', '/api/pair/initiate'),
+  pairComplete: (data) => req('POST', '/api/pair/complete', data),
+  pairVerify: () => req('POST', '/api/pair/verify'),
+  listPairedDevices: () => req('GET', '/api/pair/devices'),
+  unpairDevice: (id) => req('DELETE', `/api/pair/devices/${id}`),
+  rotateDeviceToken: (id) => req('POST', `/api/pair/devices/${id}/rotate`),
+  registerPushToken: (id, data) => req('POST', `/api/pair/devices/${id}/push-token`, data),
+  revokeAllDevices: () => req('POST', '/api/pair/revoke-all'),
+
+  // 推送通知配置
+  getPushConfig: () => req('GET', '/api/push/config'),
+  setPushConfig: (data) => req('PUT', '/api/push/config', data),
+  testPush: () => req('POST', '/api/push/test'),
+
+  // ── Bundle 导出/导入 ─────────────────────────────────────────
+  exportAgentBundleUrl: (id) => `/api/agents/${id}/export-bundle`,
+  importAgentBundle: async (file) => {
+    const form = new FormData();
+    form.append('bundle', file);
+    const res = await fetch('/api/agents/import-bundle', { method: 'POST', credentials: 'include', body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '导入失败');
+    return data;
+  },
+
+  // ── IM 看板 ─────────────────────────────────────────────────
+  listIMSessions: (platform) => req('GET', `/api/im-dashboard/sessions${platform ? `?platform=${platform}` : ''}`),
+  getIMDashboardStats: () => req('GET', '/api/im-dashboard/stats'),
+  getIMSessionMessages: (id, opts = {}) => {
+    const params = new URLSearchParams();
+    if (opts.limit) params.set('limit', opts.limit);
+    if (opts.before) params.set('before', opts.before);
+    return req('GET', `/api/im-dashboard/sessions/${id}/messages?${params}`);
+  },
+  deleteIMSession: (id) => req('DELETE', `/api/im-dashboard/sessions/${id}`),
+
+  // 飞书监听模式
+  listMonitorRules: (connectorId) => req('GET', `/api/feishu-monitor/rules?connector_id=${connectorId}`),
+  createMonitorRule: (data) => req('POST', '/api/feishu-monitor/rules', data),
+  updateMonitorRule: (id, data) => req('PUT', `/api/feishu-monitor/rules/${id}`, data),
+  deleteMonitorRule: (id) => req('DELETE', `/api/feishu-monitor/rules/${id}`),
+  toggleMonitorRule: (id) => req('PUT', `/api/feishu-monitor/rules/${id}/toggle`),
+  listMonitorLogs: (connectorId, limit) => req('GET', `/api/feishu-monitor/logs?connector_id=${connectorId}&limit=${limit || 50}`),
+  listFeishuChats: (connectorId) => req('GET', `/api/feishu-monitor/chats?connector_id=${connectorId}`),
+
+  // 飞书 Agent Teams 任务
+  listFeishuTasks: (connectorId, status) => req('GET', `/api/feishu-tasks?connector_id=${connectorId}${status ? `&status=${status}` : ''}`),
+  getFeishuTask: (id) => req('GET', `/api/feishu-tasks/${id}`),
+  closeFeishuTask: (id) => req('POST', `/api/feishu-tasks/${id}/close`),
+  listChatMembers: (connectorId, chatId) => req('GET', `/api/feishu-tasks/chat-members?connector_id=${connectorId}&chat_id=${chatId}`),
+
+  // P2P 机器人消息监听
+  listP2PWatchTargets: (connectorId) => req('GET', `/api/p2p-watch/targets?connector_id=${connectorId || 0}`),
+  createP2PWatchTarget: (data) => req('POST', '/api/p2p-watch/targets', data),
+  updateP2PWatchTarget: (id, data) => req('PUT', `/api/p2p-watch/targets/${id}`, data),
+  deleteP2PWatchTarget: (id) => req('DELETE', `/api/p2p-watch/targets/${id}`),
+  toggleP2PWatchTarget: (id) => req('PUT', `/api/p2p-watch/targets/${id}/toggle`),
+  getP2PWatchStatus: () => req('GET', '/api/p2p-watch/status'),
+  testP2PPoll: (chatId) => req('POST', '/api/p2p-watch/test', { chat_id: chatId }),
+};
+
+// ─── 灵犀社区平台 API ────────────────────────────────────────────────
+// 默认连接 http://localhost:8090（用户可配置）
+// 通过 localStorage.lingxi_community_url 切换服务器
+function getCommunityBase() {
+  if (typeof localStorage !== 'undefined' && localStorage.lingxi_community_url) {
+    return localStorage.lingxi_community_url;
+  }
+  return 'http://localhost:8090';
+}
+
+function communityHeaders() {
+  const token = (typeof localStorage !== 'undefined' && localStorage.lingxi_community_token) || '';
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': token ? `Bearer ${token}` : '',
+  };
+}
+
+async function communityReq(method, path, body) {
+  const opts = {
+    method,
+    headers: communityHeaders(),
+  };
+  if (body !== undefined && body !== null) opts.body = JSON.stringify(body);
+  const res = await fetch(getCommunityBase() + path, opts);
+  const text = await res.text();
+  let data;
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { raw: text }; }
+  if (!res.ok) {
+    const errMsg = data.error || `HTTP ${res.status}`;
+    const err = new Error(errMsg);
+    err.status = res.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+export const community = {
+  // ── 认证 ──────────────────────────────────────────────────────
+  registerAnon: () => communityReq('POST', '/community/auth/anon'),
+  getMe: () => communityReq('GET', '/community/auth/me'),
+  updateMe: (data) => communityReq('PUT', '/community/auth/me', data),
+  isLoggedIn: () => !!(typeof localStorage !== 'undefined' && localStorage.lingxi_community_token),
+
+  // ── Agent 浏览 ────────────────────────────────────────────────
+  listAgents: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return communityReq('GET', `/community/agents${qs ? '?' + qs : ''}`);
+  },
+  getAgent: (id) => communityReq('GET', `/community/agents/${id}`),
+  getLeaderboard: (kind = 'hot', limit = 20) =>
+    communityReq('GET', `/community/leaderboard?kind=${kind}&limit=${limit}`),
+  downloadBundleUrl: (id) => `${getCommunityBase()}/community/agents/${id}/bundle`,
+
+  // ── Agent 发布 ────────────────────────────────────────────────
+  publishAgent: async (formData) => {
+    // multipart 不带 Content-Type 让浏览器自动设置 boundary
+    const token = (typeof localStorage !== 'undefined' && localStorage.lingxi_community_token) || '';
+    const res = await fetch(getCommunityBase() + '/community/agents', {
+      method: 'POST',
+      headers: { 'Authorization': token ? `Bearer ${token}` : '' },
+      body: formData,
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '发布失败');
+    return data;
+  },
+  updateAgent: (id, data) => communityReq('PUT', `/community/agents/${id}`, data),
+  deleteAgent: (id) => communityReq('DELETE', `/community/agents/${id}`),
+  listMyAgents: () => communityReq('GET', '/community/agents/mine'),
+
+  // ── 评分 ──────────────────────────────────────────────────────
+  rateAgent: (id, score, review = '') =>
+    communityReq('POST', `/community/agents/${id}/rate`, { score, review }),
+  listRatings: (id) => communityReq('GET', `/community/agents/${id}/ratings`),
+
+  // ── 评论 ──────────────────────────────────────────────────────
+  createComment: (agentId, content, parentId = null) =>
+    communityReq('POST', `/community/agents/${agentId}/comments`, { content, parent_id: parentId }),
+  listComments: (agentId) => communityReq('GET', `/community/agents/${agentId}/comments`),
+  deleteComment: (id) => communityReq('DELETE', `/community/comments/${id}`),
+
+  // ── 用户/关注 ──────────────────────────────────────────────────
+  getUser: (id) => communityReq('GET', `/community/users/${id}`),
+  followUser: (id) => communityReq('POST', `/community/users/${id}/follow`),
+  unfollowUser: (id) => communityReq('DELETE', `/community/users/${id}/follow`),
+  listFollowing: (id) => communityReq('GET', `/community/users/${id}/following`),
+  listFollowers: (id) => communityReq('GET', `/community/users/${id}/followers`),
+
+  // ── 邀请码 ────────────────────────────────────────────────────
+  createInvocation: (agentId, dailyLimit = 50, expiresAt = null) =>
+    communityReq('POST', `/community/agents/${agentId}/invocations`, {
+      daily_limit: dailyLimit,
+      expires_at: expiresAt,
+    }),
+  listAgentInvocations: (agentId) =>
+    communityReq('GET', `/community/agents/${agentId}/invocations`),
+  listMyInvocations: () => communityReq('GET', '/community/invocations/mine'),
+  toggleInvocation: (code, isActive) =>
+    communityReq('POST', `/community/invocations/${code}/toggle`, { is_active: isActive }),
+  deleteInvocation: (code) => communityReq('DELETE', `/community/invocations/${code}`),
+  getInvocationInfo: (code) => communityReq('GET', `/community/invocations/${code}`),
+  invokeAgent: (code, payload) =>
+    communityReq('POST', `/community/invocations/${code}/invoke`, payload),
+  listInvocationLogs: () => communityReq('GET', '/community/invocations/logs/mine'),
+};
+
+// ─── WebSocket ────────────────────────────────────────────────────
+export class WSClient {
+  constructor() {
+    this.ws = null;
+    this.handlers = new Set();
+    this.subscribed = new Set();
+    this._closed = false;
+    this._reconnectTimer = null;
+  }
+  on(handler) {
+    this.handlers.add(handler);
+    return () => this.handlers.delete(handler);
+  }
+  connect(initialSessionId) {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const token = getJwtToken();
+    const qs = new URLSearchParams();
+    if (initialSessionId) qs.set('sessionId', String(initialSessionId));
+    if (token) qs.set('token', token);
+    const q = qs.toString();
+    const url = `${proto}//${location.host}${TUNNEL_BASE}/ws${q ? `?${q}` : ''}`;
+    this.ws = new WebSocket(url);
+    this.ws.onopen = () => {
+      // 重新订阅
+      for (const sid of this.subscribed) this._send({ type: 'subscribe', sessionId: sid });
+    };
+    this.ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data);
+        for (const h of this.handlers) h(msg);
+      } catch {}
+    };
+    this.ws.onclose = () => {
+      if (this._closed) return;
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = setTimeout(() => this.connect(), 1500);
+    };
+    this.ws.onerror = () => { try { this.ws.close(); } catch {} };
+  }
+  subscribe(sessionId) {
+    this.subscribed.add(sessionId);
+    this._send({ type: 'subscribe', sessionId });
+  }
+  unsubscribe(sessionId) {
+    this.subscribed.delete(sessionId);
+    this._send({ type: 'unsubscribe', sessionId });
+  }
+  _send(obj) {
+    if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj));
+  }
+  close() { this._closed = true; try { this.ws?.close(); } catch {} }
+}
+
+export const wsClient = new WSClient();
+
+// ─── Electron 桥接（可选）─────────────────────────────────────────
+export const electron = {
+  available: typeof window !== 'undefined' && !!window.electronAPI,
+  encryptSecret: async (plain) => {
+    if (window.electronAPI?.encryptSecret) return window.electronAPI.encryptSecret(plain);
+    return 'b64:' + btoa(unescape(encodeURIComponent(plain)));
+  },
+  decryptSecret: async (cipher) => {
+    if (window.electronAPI?.decryptSecret) return window.electronAPI.decryptSecret(cipher);
+    if (cipher && cipher.startsWith('b64:')) {
+      try { return decodeURIComponent(escape(atob(cipher.slice(4)))); } catch { return ''; }
+    }
+    return '';
+  },
+  pushActiveSecret: async (profileId) => {
+    if (window.electronAPI?.pushActiveSecret) return window.electronAPI.pushActiveSecret(profileId);
+    // Web 版：直接通过 HTTP 把明文 token 下发到后端
+    try {
+      const profiles = await req('GET', '/api/api-profiles?include_cipher=1');
+      const p = profiles.find((x) => x.id === profileId);
+      if (!p) return { ok: false };
+      const token = p.auth_token_cipher ? await electron.decryptSecret(p.auth_token_cipher) : '';
+      if (!token) return { ok: false };
+      // profile 已 JOIN provider，直接取 provider_protocol / provider_code
+      await req('POST', '/api/runtime/active-secret', {
+        id: p.id,
+        name: p.name,
+        model: p.model,
+        base_url: p.base_url,
+        token,
+        protocol: p.provider_protocol || 'anthropic',
+        transformer: p.transformer || '',
+        provider_code: p.provider_code || '',
+        provider_meta: '',
+      });
+      return { ok: true };
+    } catch (e) {
+      console.warn('[web] pushActiveSecret failed:', e);
+      return { ok: false };
+    }
+  },
+  openExternal: (url) => {
+    if (window.electronAPI?.openExternal) return window.electronAPI.openExternal(url);
+    window.open(url, '_blank');
+  },
+  startOAuth: async (provider) => {
+    if (window.electronAPI?.startOAuth) return window.electronAPI.startOAuth(provider);
+    throw new Error('OAuth 登录仅在桌面应用中可用');
+  },
+};

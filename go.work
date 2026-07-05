@@ -1,0 +1,8 @@
+go 1.24.1
+
+use (
+	./backend-core
+	./backend-desktop
+	./backend-web
+	./web-server
+)
