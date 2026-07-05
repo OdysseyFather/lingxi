@@ -1,0 +1,238 @@
+# 下拉选择-单选组件
+
+下拉选择-单选组件支持自定义单选菜单的选项文本、图标和回传参数，是一种交互组件。
+**注意事项**：本文档介绍下拉选择-单选组件的 JSON 2.0 结构，要查看历史 JSON 1.0 结构，参考[下拉选择-单选](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/card-components/interactive-components/single-select-dropdown-menu)。
+
+![](//sf3-cn.feishucdn.com/obj/open-platform-opendoc/13ce9b48fa13821486eefd0dcb0b74e9_SIX5GpBGRj.png?height=339&lazyload=true&maxWidth=400&width=667)
+
+## 嵌套规则
+
+- 下拉选择-单选组件支持嵌套在分栏、表单容器、折叠面板、循环容器、交互容器中使用。
+- 在卡片搭建工具中，下拉选择-单选组件暂不支持嵌套在交互容器中。
+
+## 组件属性
+
+### JSON 结构
+
+下拉选择-单选组件的完整 JSON 2.0 结构如下所示：
+```json
+{
+  "schema": "2.0",
+  "body": {
+    "elements": [
+      {
+        "tag": "select_static", // 下拉选择-单选组件的标签。
+        "element_id": "custom_id", // 操作组件的唯一标识。用于在调用组件相关接口中指定组件。需开发者自定义。
+        "margin": "0px 0px 0px 0px", // 组件的外边距，默认值 "0"，支持范围 [-99,99]px。
+        "type": "text", // 组件边框样式。默认值 default。
+        "name": "select_static1", // 下拉选择-单选组件的唯一标识。当下拉选择-单选组件内嵌在表单容器时，该属性生效，用于识别用户提交的文本属于哪个下拉选择-单选组件。
+        "required": false, // 下拉选择-单选组件的内容是否必填。默认值 false。当下拉选择-单选组件内嵌在表单容器时，该属性可用。其它情况将报错或不生效。
+        "disabled": false, // 是否禁用该单选组件。默认值 false。
+        "initial_option": "选项1", // 选项展示的初始内容。默认为空。
+        "initial_index": 2, // 选项展示的初始选项的序号。0 表示不展示选项。1 表示展示第一个选项。
+        "placeholder": {
+          // 下拉选择组件内的占位文本。
+          "tag": "plain_text",
+          "content": "默认提示文本"
+        },
+        "width": "default", // 下拉选择组件的宽度。
+        "behaviors": [
+          { // 为下拉选择组件配置回传交互。
+            "type": "callback",
+            "value": {
+              // 回传交互数据。支持 object 数据类型。开放平台 SDK 仅支持 object 类型的回传交互数据。
+              "key": "value"
+            }
+          }
+        ],
+        "options": [
+          // 选项配置
+          {
+            "text": {
+              // 选项名称
+              "tag": "plain_text",
+              "content": "我是交互组件"
+            },
+            "icon": {
+              // 添加图标作为选项前缀图标。支持自定义或使用图标库中的图标。
+              "tag": "standard_icon", // 图标类型。
+              "token": "chat-forbidden_outlined", // 图标的 token。仅在 tag 为 standard_icon 时生效。
+              "color": "orange", // 图标颜色。仅在 tag 为 standard_icon 时生效。
+              "img_key": "img_v2_38811724" // 图片的 key。仅在 tag 为 custom_icon 时生效。
+            },
+            "value": "selectDemo1" // 选项回调值，支持 string 类型数据。
+          }
+        ],
+        "confirm": {
+          // 二次确认弹窗配置
+          "title": {
+            "tag": "plain_text",
+            "content": "弹窗标题"
+          },
+          "text": {
+            "tag": "plain_text",
+            "content": "弹窗正文文案"
+          }
+        }
+      }
+    ]
+  }
+}
+```
+
+### 字段说明
+
+下拉选择-单选组件的字段说明如下表。
+
+字段 | 必填 | 类型 | 默认值 | 说明
+---|---|---|---|---
+tag | 是 | string | / | 组件的标签。下拉选择-单选组件取固定值 `select_static`。
+element_id | 否 | String | 空 | 操作组件的唯一标识。JSON 2.0 新增属性。用于在调用[组件相关接口](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/cardkit-v1/card-element/create)中指定组件。在同一张卡片内，该字段的值全局唯一。仅允许使用字母、数字和下划线，必须以字母开头，不得超过 20 字符。
+margin | 否 | String | 0 | 组件的外边距。JSON 2.0 新增属性。值的取值范围为 [-99,99]px。可选值：<br>- 单值，如 "10px"，表示组件的四个外边距都为 10 px。<br>- 双值，如 "4px 0"，表示组件的上下外边距为 4 px，左右外边距为 0 px。使用空格间隔（边距为 0 时可不加单位）。<br>- 多值，如 "4px 0 4px 0"，表示组件的上、右、下、左的外边距分别为 4px，12px，4px，12px。使用空格间隔。
+type | 否 | string | default | 组件边框样式。可选值：<br>- default：带边框样式<br>- text：不带边框的纯文本样式
+name | 否 | String | 空 | 单选组件的唯一标识。当单选组件内嵌在表单容器时，该属性生效，用于识别用户提交的文本属于哪个单选组件。<br>**注意**：当单选组件嵌套在表单容器中时，该字段必填且需在卡片全局内唯一。
+required | 否 | Boolean | false | 单选组件的内容是否必选。当组件内嵌在表单容器中时，该属性可用。其它情况将报错或不生效。可取值：<br>- true：单选组件必选。当用户点击表单容器的“提交”时，未填写单选组件，则前端提示“有必填项未填写”，不会向开发者的服务端发起回传请求。<br>- false：单选组件选填。当用户点击表单容器的“提交”时，未填写单选组件，仍提交表单容器中的数据。
+disabled | 否 | Boolean | false | 是否禁用该单选组件。该属性仅支持飞书 V7.4 及以上版本的客户端。可选值：<br>- true：禁用单选组件组件<br>- false：单选组件组件保持可用状态
+initial_option | 否 | String | 空 | 下拉选择组件的初始选项的内容。该配置将会覆盖 `placeholder` 配置的占位文本和 initial_index 配置的选项。
+initial_index | 否 | Int | 空 | 下拉选择组件的初始选项的序号。该配置将会覆盖 `placeholder` 配置的占位文本。0 表示不展示初始选项。1 表示展示第一个选项。
+placeholder | 否 | Object | / | 下拉选择组件内的占位文本。
+└ tag | 是 | String | plain_text | 占位提示标签。固定值为 `plain_text`。
+└ content | 否 | String | 空 | 占位文本的内容。
+width | 否 | String | default | 单选组件的宽度。支持以下枚举值：<br>- default：默认宽度<br>- fill：卡片最大支持宽度<br>- [100,∞)px：自定义宽度。超出卡片宽度时将按最大支持宽度展示
+behaviors | 是 | Struct | / | 配置交互类型和具体交互行为。详情参考[配置卡片交互](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/configuring-card-interactions)中 behaviors 的字段说明。
+options | 否 | Array of objects | / | 选项的配置。
+└ text | 是 | Object | / | 选项的名称。
+└ └ tag | 是 | String | plain_text | 选项名称的标签。固定值为 `plain_text`。
+└ └ content | 是 | String | 空 | 选项名称的文本。
+└ icon | 否 | Object | / | 添加图标作为文本前缀图标。支持自定义或使用图标库中的图标。
+└└  tag | 否 | String | / | 图标类型的标签。可取值：<br>- `standard_icon`：使用图标库中的图标。<br>- `custom_icon`：使用用自定义图片作为图标。
+└└  token | 否 | String | / | 图标库中图标的 token。当 `tag` 为 `standard_icon` 时生效。枚举值参见[图标库](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/enumerations-for-icons)。
+└└  color | 否 | String | / | 图标的颜色。支持设置线性和面性图标（即 token 末尾为 `outlined` 或 `filled` 的图标）的颜色。当 `tag` 为 `standard_icon` 时生效。枚举值参见[颜色枚举值](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/enumerations-for-fields-related-to-color)。
+└└  img_key | 否 | String | / | 自定义前缀图标的图片 key。当 `tag` 为 `custom_icon` 时生效。<br>图标 key 的获取方式：调用[上传图片](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/image/create)接口，上传用于发送消息的图片，并在返回值中获取图片的 image_key。
+└ value | 是 | String | / | 自定义选项回调值。当用户点击交互组件的选项后，会将 value 的值返回给接收回调数据的服务器。后续你可以通过服务器接收的 value 值进行业务处理。<br>**注意**：同一个选择组件内，各选项的 value 值不可重复，**否则将导致用户侧交互异常**，且服务器无法识别用户点击的是哪个选项。
+confirm | 否 | Struct | 默认不生效此属性。 | 二次确认弹窗配置。指在用户提交时弹出二次确认弹窗提示；只有用户点击确认后，才提交输入的内容。该字段默认提供了确认和取消按钮，你只需要配置弹窗的标题与内容即可。<br>**注意**：<code>confirm</code> 字段仅在用户点击包含提交属性的按钮时才会触发二次确认弹窗。
+└ title | 是 | Struct | / | 二次确认弹窗标题。
+└ └ tag | 是 | String | plain_text | 二次确认弹窗标题文本的标签。固定取值为 `plain_text`。
+└ └ content | 是 | String | / | 二次确认弹窗标题的内容。
+└ text | 是 | Struct | / | 二次确认弹窗的文本内容。
+└ └ tag | 是 | String | plain_text | 二次确认弹窗文本的标签。固定取值为 `plain_text`。
+└ └ content | 是 | String | / | 二次确认弹窗文本的具体内容。
+
+## 回调示例
+
+下拉选择-单选组件默认拥有交互能力。当用户提交选项后，你在开发者后台配置的请求地址将会收到回调数据。
+**注意事项**：下拉选择-单选组件一般包含多个选项，因此你需配置自定义回传参数，以区分用户提交的是哪个选项。详情参考[配置卡片交互](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/configuring-card-interactions)。
+
+- 如果你添加的是新版卡片回传交互回调(`card.action.trigger`)，卡片将默认将回传如下所示的交互事件。详情参考[卡片回传交互回调](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/card-callback-communication)。
+
+- 如果你添加的是旧版卡片回传交互回调(`card.action.trigger_v1`)，可参考[消息卡片回传交互（旧）](https://open.feishu.cn/document/ukTMukTMukTM/uYzM3QjL2MzN04iNzcDN/configuring-card-callbacks/card-callback-structure)了解回调结构。
+
+新版卡片回传交互(`card.action.trigger`)下拉选择-单选组件回调示例：
+
+```json
+{
+    "schema": "2.0", // 回调的版本
+    "header": { // 回调基本信息
+        "event_id": "f7984f25108f8137722bb63c*****", // 回调的唯一标识
+        "token": "066zT6pS4QCbgj5Do145GfDbbag*****", // 应用的 Verification Token
+        "create_time": "1603977298000000", // 	回调发送的时间，接近回调发生的时间
+        "event_type": "card.action.trigger", // 回调类型卡片交互场景中，固定为 "card.action.trigger"
+        "tenant_key": "2df73991750*****", // 应用归属的 tenant key，即租户唯一标识
+        "app_id": "cli_a5fb0ae6a4******" // 应用的 App ID
+    },
+    "event": { // 回调的详细信息
+        "operator": { // 回调触发者信息
+            "tenant_key": "2df73991750*****", // 回调触发者的 tenant key，即租户唯一标识
+            "user_id": "867*****", // 回调触发者的 user ID。当应用开启“获取用户 user ID”权限后，该参数返回
+            "open_id": "ou_3c14f3a59eaf2825dbe25359f15*****", // 	回调触发者的 Open ID
+	         "union_id": "on_cad4860e7af114fb4ff6c5d496d*****" // 回调触发者的 Union ID
+        },
+        "token": "c-295ee57216a5dc9de90fefd0aadb4b1d7d******", // 更新卡片用的凭证，有效期为 30 分钟，最多可更新 2 次
+        "action": { // 用户操作下拉选择-单选组件后回传的数据
+            "value": { // 如果下拉选择-单选组件中配置了 value （历史属性）或 behaviors 属性，则在此处返回自定义的回传交互参数
+                "key_1": "value_1"
+            },
+            "tag": "select_static", // 下拉选择-单选组件的标签。表示用户是在下拉选择-单选中完成的交互
+            "option": "1" // 下拉选择-单选组件内用户提交的选项的回传数据。需开发者通过 options.value 自定义该值
+        },
+        "host": "im_message", // 卡片展示场景
+        "context": { //  卡片展示场景相关信息
+            "open_message_id": "om_574d639e4a44e4dd646eaf628e2*****", // 卡片所在的消息 ID
+            "open_chat_id": "oc_e4d2605ca917e695f54f11aaf56*****" // 卡片所在的会话 ID
+        }
+    }
+}
+```
+
+## 示例代码
+
+以下的 JSON 2.0 示例代码可实现如下图所示的卡片效果：
+
+![](//sf3-cn.feishucdn.com/obj/open-platform-opendoc/13ce9b48fa13821486eefd0dcb0b74e9_Rk1KRWMzeC.png?height=339&lazyload=true&maxWidth=400&width=667)
+
+```json
+{
+  "schema": "2.0",
+  "body": {
+    "direction": "vertical",
+    "padding": "12px 12px 12px 12px",
+    "elements": [
+      {
+        "tag": "select_static",
+        "initial_option": "",
+        "placeholder": {
+          "tag": "plain_text",
+          "content": "请选择"
+        },
+        "options": [
+          {
+            "text": {
+              "tag": "plain_text",
+              "content": "选项1"
+            },
+            "value": "1",
+            "icon": {
+              "tag": "standard_icon",
+              "token": "signature_outlined"
+            }
+          },
+          {
+            "text": {
+              "tag": "plain_text",
+              "content": "选项2"
+            },
+            "value": "2",
+            "icon": {
+              "tag": "standard_icon",
+              "token": "signature_outlined"
+            }
+          },
+          {
+            "text": {
+              "tag": "plain_text",
+              "content": "选项3"
+            },
+            "value": "3",
+            "icon": {
+              "tag": "standard_icon",
+              "token": "signature_outlined"
+            }
+          }
+        ],
+        "type": "default",
+        "width": "default",
+        "disabled": false,
+        "behaviors": [
+          {
+            "type": "callback",
+            "value": {
+              "select_static": "click"
+            }
+          }
+        ],
+        "margin": "0px 0px 0px 0px"
+      }
+    ]
+  }
+}
+```

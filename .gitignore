@@ -6,10 +6,23 @@ frontend-desktop/dist/
 backend-desktop/smart-agent
 backend-desktop/smart-agent.exe
 backend-desktop/lingxi-agent
+backend-web/lingxi-web
+backend-web/lingxi-web.exe
+backend-web/frontend_dist/
+frontend-web/dist/
 signaling-server/lingxi-signaling
 signaling-server/signaling-linux-amd64
 signaling-server/signaling-server-linux
 dist-electron/
+
+# Root-level build artifacts
+/lingxi-agent
+/lingxi-web-agent
+*.tar.gz
+
+# Runtime data
+/data/
+/backups/
 
 # electron/resources/ holds large generated bundles (ai-engine, node-bin)
 # but bridge/ contains only our small source files (~5KB) and must be tracked.
@@ -50,9 +63,6 @@ ai-config/auth.json
 # npm
 npm-debug.log*
 .npm/
-
-# Mobile build output
-frontend-mobile/dist/
 
 # Temporary
 /tmp/

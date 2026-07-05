@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.jpg" width="128" alt="灵犀 Logo" />
+  <img src="docs/docs/images/logo.jpg" width="128" alt="灵犀 Logo" />
 </p>
 
 <h1 align="center">灵犀 AI Agent</h1>
@@ -37,7 +37,7 @@
 
 <!-- 📷 Hero 截图：灵犀主界面全貌 -->
 <p align="center">
-  <img src="images/screenshots/01-hero-home.png" alt="灵犀工作台" width="960" />
+  <img src="docs/images/screenshots/01-hero-home.png" alt="灵犀工作台" width="960" />
 </p>
 <p align="center"><sub>灵犀工作台 — 对话 · 智能体 · 工具 · 知识 · 一站式掌控</sub></p>
 
@@ -51,7 +51,7 @@
 
 <!-- 📷 功能全景架构图（用 GPT Image 生成，提示词见文末） -->
 <p align="center">
-  <img src="images/screenshots/architecture-panorama.png" alt="灵犀功能全景" width="960" />
+  <img src="docs/images/screenshots/architecture-panorama.png" alt="灵犀功能全景" width="960" />
 </p>
 <p align="center"><sub>灵犀 AI Agent 系统功能全景 — 从桌面壳到 AI 运行时的完整能力版图</sub></p>
 
@@ -166,7 +166,7 @@
 
 <!-- 📷 流式对话 -->
 <p align="center">
-  <img src="images/screenshots/02-chat-stream.png" alt="流式对话" width="960" />
+  <img src="docs/images/screenshots/02-chat-stream.png" alt="流式对话" width="960" />
 </p>
 <p align="center"><sub>流式对话 · 思考折叠 · 代码高亮 · 工具调用 · Mermaid 图表</sub></p>
 
@@ -201,13 +201,13 @@
 
 <!-- 📷 智能体交互 -->
 <p align="center">
-  <img src="images/智能体交互.png" alt="智能体交互" width="960" />
+  <img src="docs/images/智能体交互.png" alt="智能体交互" width="960" />
 </p>
 <p align="center"><sub>智能体自主执行 · 工具调用 · 多轮推理</sub></p>
 
 <!-- 📷 Mermaid 图表渲染 -->
 <p align="center">
-  <img src="images/screenshots/22-mermaid-chart.png" alt="Mermaid 图表" width="720" />
+  <img src="docs/images/screenshots/22-mermaid-chart.png" alt="Mermaid 图表" width="720" />
 </p>
 <p align="center"><sub>Mermaid / PlantUML 在对话中直接渲染为 SVG</sub></p>
 
@@ -231,19 +231,19 @@
 
 <!-- 📷 智能体工厂 -->
 <p align="center">
-  <img src="images/screenshots/agents-factory.png" alt="智能体工厂" width="960" />
+  <img src="docs/images/screenshots/agents-factory.png" alt="智能体工厂" width="960" />
 </p>
 <p align="center"><sub>智能体工厂 — 模板市场 + 五步创建向导</sub></p>
 
 <!-- 📷 智能体角色设定 -->
 <p align="center">
-  <img src="images/智能体角色设定.png" alt="智能体角色设定" width="960" />
+  <img src="docs/images/智能体角色设定.png" alt="智能体角色设定" width="960" />
 </p>
 <p align="center"><sub>角色设定 · 群聊人格参数 · temperature · max_tokens</sub></p>
 
 <!-- 📷 智能体配置 -->
 <p align="center">
-  <img src="images/智能体配置.png" alt="智能体能力配置" width="960" />
+  <img src="docs/images/智能体配置.png" alt="智能体能力配置" width="960" />
 </p>
 <p align="center"><sub>能力绑定 — 技能 · 知识库 · MCP 工具</sub></p>
 
@@ -271,7 +271,7 @@
 
 <!-- 📷 人格蒸馏 -->
 <p align="center">
-  <img src="images/screenshots/04-distill-modal.png" alt="人格蒸馏" width="960" />
+  <img src="docs/images/screenshots/04-distill-modal.png" alt="人格蒸馏" width="960" />
 </p>
 <p align="center"><sub>人格蒸馏 — 并行蒸馏 · SSE 流式日志 · 材料管理</sub></p>
 
@@ -292,7 +292,7 @@
 
 <!-- 📷 自我进化 -->
 <p align="center">
-  <img src="images/screenshots/06-evolution.png" alt="自我进化" width="960" />
+  <img src="docs/images/screenshots/06-evolution.png" alt="自我进化" width="960" />
 </p>
 <p align="center"><sub>进化历程 — 可筛选 · 可搜索 · 单条撤销 · 记忆巩固 Dream</sub></p>
 
@@ -300,13 +300,13 @@
 <tr>
 <td width="50%">
 <p align="center">
-  <img src="images/自我进化-agent设置.png" alt="进化设置" width="440" />
+  <img src="docs/images/自我进化-agent设置.png" alt="进化设置" width="440" />
 </p>
 <p align="center"><sub>Agent 内进化开关</sub></p>
 </td>
 <td width="50%">
 <p align="center">
-  <img src="images/自我进化-对话提取.png" alt="对话提取" width="440" />
+  <img src="docs/images/自我进化-对话提取.png" alt="对话提取" width="440" />
 </p>
 <p align="center"><sub>气泡「提取知识」按钮</sub></p>
 </td>
@@ -329,7 +329,7 @@
 
 <!-- 📷 知识库 -->
 <p align="center">
-  <img src="images/screenshots/10-knowledge-rag.png" alt="知识库" width="960" />
+  <img src="docs/images/screenshots/10-knowledge-rag.png" alt="知识库" width="960" />
 </p>
 <p align="center"><sub>知识库 — 分类管理 · 语义搜索 · 索引状态 · 文件夹监控 · 网页采集</sub></p>
 
@@ -348,7 +348,7 @@ Agent 在合适的时间用合适的方式找你，而不是反过来。
 
 <!-- 📷 主动式 Agent -->
 <p align="center">
-  <img src="images/screenshots/11-screen-agent.png" alt="主动式 Agent" width="960" />
+  <img src="docs/images/screenshots/11-screen-agent.png" alt="主动式 Agent" width="960" />
 </p>
 <p align="center"><sub>主动式 Agent — 日报 · 任务追踪 · 定时调度 · 上下文感知</sub></p>
 
@@ -366,7 +366,7 @@ Agent 在合适的时间用合适的方式找你，而不是反过来。
 
 <!-- 📷 深度搜索 -->
 <p align="center">
-  <img src="images/screenshots/22-mermaid-chart.png" alt="深度搜索" width="960" />
+  <img src="docs/images/screenshots/22-mermaid-chart.png" alt="深度搜索" width="960" />
 </p>
 <p align="center"><sub>深度搜索 — 多源并发 · LLM 综合 · 引用追踪 · 实时进度</sub></p>
 
@@ -384,7 +384,7 @@ Agent 在合适的时间用合适的方式找你，而不是反过来。
 
 <!-- 📷 Token 水位 -->
 <p align="center">
-  <img src="images/screenshots/20-usage.png" alt="Token 水位" width="960" />
+  <img src="docs/images/screenshots/20-usage.png" alt="Token 水位" width="960" />
 </p>
 <p align="center"><sub>Token 水位 — 实时监测 · 自动压缩 · 会话卡片预览</sub></p>
 
@@ -398,7 +398,7 @@ Agent 在合适的时间用合适的方式找你，而不是反过来。
 
 <!-- 📷 Screen Agent -->
 <p align="center">
-  <img src="images/screenshots/11-screen-agent.png" alt="Screen Agent" width="960" />
+  <img src="docs/images/screenshots/11-screen-agent.png" alt="Screen Agent" width="960" />
 </p>
 <p align="center"><sub>Screen Agent — 截屏理解 · 操作规划 · 逐步确认</sub></p>
 
@@ -414,7 +414,7 @@ Agent 在合适的时间用合适的方式找你，而不是反过来。
 
 <!-- 📷 Spotlight -->
 <p align="center">
-  <img src="images/screenshots/12-spotlight.png" alt="Spotlight" width="720" />
+  <img src="docs/images/screenshots/12-spotlight.png" alt="Spotlight" width="720" />
 </p>
 <p align="center"><sub>Spotlight — 上下文感知 · Quick Actions · 随叫随到</sub></p>
 
@@ -437,7 +437,7 @@ Agent 在合适的时间用合适的方式找你，而不是反过来。
 
 <!-- 📷 Nexus -->
 <p align="center">
-  <img src="images/screenshots/07-nexus-discover.png" alt="Nexus" width="960" />
+  <img src="docs/images/screenshots/07-nexus-discover.png" alt="Nexus" width="960" />
 </p>
 <p align="center"><sub>节点发现 — LAN + WAN 合并列表 · 一键发起群聊</sub></p>
 
@@ -445,13 +445,13 @@ Agent 在合适的时间用合适的方式找你，而不是反过来。
 <tr>
 <td width="50%">
 <p align="center">
-  <img src="images/screenshots/09-group-chat.png" alt="群聊" width="440" />
+  <img src="docs/images/screenshots/09-group-chat.png" alt="群聊" width="440" />
 </p>
 <p align="center"><sub>微信风 Agent 群聊</sub></p>
 </td>
 <td width="50%">
 <p align="center">
-  <img src="images/Agent对话实况2.png" alt="跨实例协作" width="440" />
+  <img src="docs/images/Agent对话实况2.png" alt="跨实例协作" width="440" />
 </p>
 <p align="center"><sub>跨实例实时群聊协作</sub></p>
 </td>
@@ -471,7 +471,7 @@ Agent 在合适的时间用合适的方式找你，而不是反过来。
 
 <!-- 📷 群聊 -->
 <p align="center">
-  <img src="images/screenshots/09-group-chat.png" alt="群聊" width="960" />
+  <img src="docs/images/screenshots/09-group-chat.png" alt="群聊" width="960" />
 </p>
 <p align="center"><sub>微信风 Agent 群聊 — 人格驱动 · 自然对话 · 跨实例协作</sub></p>
 
@@ -504,7 +504,7 @@ AI 生成 · ZIP 导入 · 在线编辑
 Smithery.ai 市场一键安装
 
 <!-- 📷 技能 -->
-<img src="images/screenshots/15-skills-market.png" alt="技能" width="300" />
+<img src="docs/images/screenshots/15-skills-market.png" alt="技能" width="300" />
 
 </td>
 <td width="33%" align="center">
@@ -515,7 +515,7 @@ stdio / SSE / HTTP
 配置导入导出
 
 <!-- 📷 MCP -->
-<img src="images/screenshots/16-mcp.png" alt="MCP" width="300" />
+<img src="docs/images/screenshots/16-mcp.png" alt="MCP" width="300" />
 
 </td>
 <td width="33%" align="center">
@@ -526,7 +526,7 @@ stdio / SSE / HTTP
 实现一人公司
 
 
-<img src="images/screenshots/agents.png" alt="工作流" width="300" />
+<img src="docs/images/screenshots/agents.png" alt="工作流" width="300" />
 
 </td>
 </tr>
@@ -568,7 +568,7 @@ Cron 调度 · 有/无状态
 执行记录 · 桌面通知
 
 <!-- 📷 定时任务 -->
-<img src="images/screenshots/18-scheduled-tasks.png" alt="定时任务" width="300" />
+<img src="docs/images/screenshots/18-scheduled-tasks.png" alt="定时任务" width="300" />
 
 </td>
 <td align="center">
@@ -583,7 +583,7 @@ IM Dashboard 消息看板
 Webhook 响应
 
 <!-- 📷 IM -->
-<img src="images/screenshots/19-im-connector.png" alt="IM" width="300" />
+<img src="docs/images/screenshots/19-im-connector.png" alt="IM" width="300" />
 
 </td>
 <td align="center">
@@ -595,7 +595,7 @@ Token 计数 · 费用趋势
 Recharts 可视化
 
 <!-- 📷 用量 -->
-<img src="images/screenshots/20-usage.png" alt="用量" width="300" />
+<img src="docs/images/screenshots/20-usage.png" alt="用量" width="300" />
 
 </td>
 </tr>
@@ -609,13 +609,13 @@ Recharts 可视化
 
 <!-- 📷 接入点 -->
 <p align="center">
-  <img src="images/screenshots/17-providers.png" alt="接入点" width="960" />
+  <img src="docs/images/screenshots/17-providers.png" alt="接入点" width="960" />
 </p>
 <p align="center"><sub>14+ 供应商 · Anthropic 直连 · 自动获取模型列表 · 测试连通 · 一键切换</sub></p>
 
 <!-- 📷 供应商列表 -->
 <p align="center">
-  <img src="images/llm.png" alt="模型供应商" width="960" />
+  <img src="docs/images/llm.png" alt="模型供应商" width="960" />
 </p>
 <p align="center"><sub>支持的模型供应商</sub></p>
 
@@ -629,7 +629,7 @@ CSS 变量驱动，切换瞬时生效。Flutter 手机端独立支持亮/暗/跟
 
 <!-- 📷 主题 -->
 <p align="center">
-  <img src="images/screenshots/21-themes.png" alt="主题" width="960" />
+  <img src="docs/images/screenshots/21-themes.png" alt="主题" width="960" />
 </p>
 <p align="center"><sub>17 套精心设计的主题 · 移动端独立亮/暗模式</sub></p>
 
@@ -652,13 +652,13 @@ CSS 变量驱动，切换瞬时生效。Flutter 手机端独立支持亮/暗/跟
 <tr>
 <td width="50%">
 <p align="center">
-  <img src="images/agent ppt创作.png" alt="Agent PPT 创作" width="440" />
+  <img src="docs/images/agent ppt创作.png" alt="Agent PPT 创作" width="440" />
 </p>
 <p align="center"><sub>Agent 长任务 — PPT 创作实况</sub></p>
 </td>
 <td width="50%">
 <p align="center">
-  <img src="images/规划推理.png" alt="规划推理" width="440" />
+  <img src="docs/images/规划推理.png" alt="规划推理" width="440" />
 </p>
 <p align="center"><sub>规划模式 — 推理中间过程</sub></p>
 </td>
@@ -666,13 +666,13 @@ CSS 变量驱动，切换瞬时生效。Flutter 手机端独立支持亮/暗/跟
 <tr>
 <td width="50%">
 <p align="center">
-  <img src="images/screenshots/09-group-chat.png" alt="群聊" width="440" />
+  <img src="docs/images/screenshots/09-group-chat.png" alt="群聊" width="440" />
 </p>
 <p align="center"><sub>Nexus — 微信风 Agent 群聊协作</sub></p>
 </td>
 <td width="50%">
 <p align="center">
-  <img src="images/Agent对话实况2.png" alt="跨实例协作" width="440" />
+  <img src="docs/images/Agent对话实况2.png" alt="跨实例协作" width="440" />
 </p>
 <p align="center"><sub>Nexus — 跨实例群聊实况</sub></p>
 </td>
@@ -680,13 +680,13 @@ CSS 变量驱动，切换瞬时生效。Flutter 手机端独立支持亮/暗/跟
 <tr>
 <td width="50%">
 <p align="center">
-  <img src="images/skill安装.png" alt="技能安装" width="440" />
+  <img src="docs/images/skill安装.png" alt="技能安装" width="440" />
 </p>
 <p align="center"><sub>Smithery 市场 — 搜索安装技能</sub></p>
 </td>
 <td width="50%">
 <p align="center">
-  <img src="images/screenshots/13-planning-mode.png" alt="规划模式" width="440" />
+  <img src="docs/images/screenshots/13-planning-mode.png" alt="规划模式" width="440" />
 </p>
 <p align="center"><sub>两阶段规划 — 先选维度再执行</sub></p>
 </td>
@@ -822,33 +822,47 @@ flutter run
 
 ## 🌐 Web 版部署（云服务器）
 
-灵犀支持部署到云服务器，通过浏览器随时随地访问。Web 版采用独立反向代理网关，不改动任何现有代码。
+灵犀支持部署到云服务器，通过浏览器随时随地访问。Web 版提供 **多用户版**（MySQL + JWT + 邀请码注册）与 **单用户旧版**（WEB_PASSWORD + SQLite）两种模式。
 
-### Docker 一键部署（推荐）
+### 多用户版 Docker 部署（推荐）
 
 ```bash
 cd web-server
 
-# 编辑 docker-compose.yml 中的 WEB_PASSWORD 和 ANTHROPIC_AUTH_TOKEN
-docker compose up -d
+# 编辑 docker-compose.web.yml 或设置环境变量：
+#   JWT_SECRET、ADMIN_BOOTSTRAP=admin:yourpassword、MYSQL_PASSWORD
+docker compose -f docker-compose.web.yml up -d --build
 
-# 访问 http://your-server:3000，使用密码登录
+# 访问 http://your-server:3000
+# 首次用 ADMIN_BOOTSTRAP 账号登录，在「设置 > 管理后台」生成邀请码
 ```
+
+| 环境变量 | 说明 |
+|---------|------|
+| `MYSQL_DSN` | MySQL 连接串（必填） |
+| `JWT_SECRET` | JWT 签名密钥（必填） |
+| `ADMIN_BOOTSTRAP` | 首次 `admin:password` 创建管理员（可选） |
+| `OPEN_REGISTRATION` | `true` 开放注册 / `false` 仅邀请码 |
+
+MySQL 备份：`scripts/mysql-backup.sh` · 恢复演练：`scripts/mysql-restore-drill.sh`
 
 ### 二进制部署
 
 ```bash
-# 构建 Linux 部署包
+# 构建部署包（backend-web + frontend-web + web-gateway）
 ./build-web.sh
 
-# 上传 web-deploy/ 到服务器
-scp -r web-deploy/ user@server:~/lingxi/
-
-# 在服务器上启动
-cd ~/lingxi && WEB_PASSWORD=your_password ./start.sh
+# 上传 web-deploy/ 到服务器后：
+export MYSQL_DSN="user:pass@tcp(localhost:3306)/lingxi?parseTime=true&charset=utf8mb4"
+export JWT_SECRET="your-random-secret"
+cd web-deploy && ./start.sh
 ```
 
-> 详细文档见 [`web-server/README.md`](web-server/README.md)
+### 单用户旧版（WEB_PASSWORD）
+
+仍可使用 `web-server/docker-compose.yml` + `WEB_PASSWORD` 单密码模式（SQLite，无多租户）。
+
+> 详细文档见 [`web-server/README.md`](web-server/README.md) · 数据范围见 [`docs/web-data-scope.md`](docs/web-data-scope.md)
 
 ---
 
@@ -863,14 +877,14 @@ cd ~/lingxi && WEB_PASSWORD=your_password ./start.sh
 如果灵犀对你有帮助，请 **Star ⭐** 支持持续开发！
 
 <p align="center">
-  <img src="images/打赏.png" alt="打赏" width="280" />
+  <img src="docs/images/打赏.png" alt="打赏" width="280" />
   <br/><sub>扫码打赏 · 支持持续迭代</sub>
 </p>
 
 ---
 
 <p align="center">
-  <img src="logo.jpg" width="48" alt="灵犀" />
+  <img src="docs/docs/images/logo.jpg" width="48" alt="灵犀" />
   <br/><br/>
   <strong>灵犀</strong> — 不只是聊天，是你桌面上的 AI Agent 操作系统。
   <br/><br/>

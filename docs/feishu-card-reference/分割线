@@ -1,0 +1,78 @@
+# 分割线组件
+
+你可以在卡片中添加分割线组件，使卡片内容更清晰。
+
+本文档介绍分割线组件的 JSON 2.0 结构，要查看历史 JSON 1.0 结构，参考[分割线](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/card-components/content-components/divider)。
+
+![](//sf3-cn.feishucdn.com/obj/open-platform-opendoc/062d8c93b9b67ee9fb8c4188c19097d5_6kwLHW7Hfi.png?height=224&lazyload=true&maxWidth=300&width=559)
+
+## JSON 结构
+
+分割线的完整 JSON 2.0 结构如下所示：
+```json
+{
+    "schema": "2.0",
+    "body": {
+        "elements": [
+            {
+                "tag": "hr",
+                "element_id": "custom_id", // 操作组件的唯一标识。JSON 2.0 新增属性。用于在调用组件相关接口中指定组件。需开发者自定义。
+                "margin": "0px 0px 0px 0px" // 组件的外边距。JSON 2.0 新增属性。默认值 "0"，支持范围 [-99,99]px。
+            }
+        ]
+    }
+}
+```
+
+## 字段说明
+
+分割线组件的字段说明如下表。
+
+名称 | 必须 | 类型 | 默认值 | 描述
+---|---|---|---|---
+tag | 是 | String | 空 | 组件的标签。分割线组件的固定取值为 `hr`。
+element_id | 否 | String | 空 | 操作组件的唯一标识。JSON 2.0 新增属性。用于在调用[组件相关接口](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/cardkit-v1/card-element/create)中指定组件。在同一张卡片内，该字段的值全局唯一。仅允许使用字母、数字和下划线，必须以字母开头，不得超过 20 字符。
+margin | 否 | String | 0 | 组件的外边距。JSON 2.0 新增属性。值的取值范围为 [-99,99]px。可选值：<br>- 单值，如 "10px"，表示组件的四个外边距都为 10 px。<br>- 双值，如 "4px 0"，表示组件的上下外边距为 4 px，左右外边距为 0 px。使用空格间隔（边距为 0 时可不加单位）。<br>- 多值，如 "4px 0 4px 0"，表示组件的上、右、下、左的外边距分别为 4px，12px，4px，12px。使用空格间隔。
+
+## 示例代码
+
+以下的 JSON 2.0 示例代码可实现如下图所示的卡片效果：
+
+![](//sf3-cn.feishucdn.com/obj/open-platform-opendoc/062d8c93b9b67ee9fb8c4188c19097d5_skrtnBe6Lz.png?height=224&lazyload=true&maxWidth=300&width=559)
+```json
+{
+    "schema": "2.0",
+    "body": {
+        "direction": "vertical",
+        "padding": "12px 12px 12px 12px",
+        "elements": [
+            {
+                "tag": "div",
+                "text": {
+                    "tag": "plain_text",
+                    "content": "普通文本示例",
+                    "text_size": "normal",
+                    "text_align": "left",
+                    "text_color": "default"
+                },
+                "margin": "0px 0px 0px 0px"
+            },
+            {
+                "tag": "hr",
+                "margin": "0px 0px 0px 0px"
+            },
+            {
+                "tag": "button",
+                "text": {
+                    "tag": "plain_text",
+                    "content": "查看更多"
+                },
+                "type": "primary",
+                "width": "default",
+                "size": "medium",
+                "margin": "0px 0px 0px 0px"
+            }
+        ]
+    }
+}
+```

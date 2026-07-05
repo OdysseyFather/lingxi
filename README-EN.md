@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="logo.jpg" width="128" alt="Lingxi Logo" />
+  <img src="docs/docs/images/logo.jpg" width="128" alt="Lingxi Logo" />
 </p>
 
 <h1 align="center">Lingxi AI Agent</h1>
@@ -37,7 +37,7 @@
 
 <!-- 📷 Hero screenshot -->
 <p align="center">
-  <img src="images/screenshots/01-hero-home.png" alt="Lingxi workbench" width="920" />
+  <img src="docs/images/screenshots/01-hero-home.png" alt="Lingxi workbench" width="920" />
 </p>
 <p align="center"><sub>The Lingxi workbench — chat, agents, and tools in one place</sub></p>
 
@@ -51,7 +51,7 @@
 
 <!-- 📷 Capability panorama diagram -->
 <p align="center">
-  <img src="images/screenshots/architecture-panorama.png" alt="Lingxi capability panorama" width="960" />
+  <img src="docs/images/screenshots/architecture-panorama.png" alt="Lingxi capability panorama" width="960" />
 </p>
 <p align="center"><sub>Lingxi AI Agent system capability panorama — from the desktop shell to the AI runtime</sub></p>
 
@@ -150,7 +150,7 @@
 
 ## 🎯 Feature deep dive
 
-> Every section includes screenshots. Already-captured images are shown inline; placeholders will display once you drop the corresponding PNG into `images/screenshots/`.
+> Every section includes screenshots. Already-captured images are shown inline; placeholders will display once you drop the corresponding PNG into `docs/images/screenshots/`.
 
 ---
 
@@ -164,7 +164,7 @@ Also built in: `/` slash commands (12 built-in), two-phase planning, interactive
 
 <!-- 📷 Streaming chat -->
 <p align="center">
-  <img src="images/screenshots/02-chat-stream.png" alt="Streaming chat" width="920" />
+  <img src="docs/images/screenshots/02-chat-stream.png" alt="Streaming chat" width="920" />
 </p>
 <p align="center"><sub>Streaming chat · thinking fold · code highlighting · tool calls</sub></p>
 
@@ -199,19 +199,19 @@ Also built in: `/` slash commands (12 built-in), two-phase planning, interactive
 
 <!-- 📷 Agent interaction -->
 <p align="center">
-  <img src="images/智能体交互.png" alt="Agent interaction" width="920" />
+  <img src="docs/images/智能体交互.png" alt="Agent interaction" width="920" />
 </p>
 <p align="center"><sub>Autonomous agent execution · tool calls · multi-turn reasoning</sub></p>
 
 <!-- 📷 Planning mode -->
 <p align="center">
-  <img src="images/screenshots/13-planning-mode.png" alt="Planning mode" width="920" />
+  <img src="docs/images/screenshots/13-planning-mode.png" alt="Planning mode" width="920" />
 </p>
 <p align="center"><sub>Two-phase planning — choose dimensions first, then execute</sub></p>
 
 <!-- 📷 Mermaid chart -->
 <p align="center">
-  <img src="images/screenshots/22-mermaid-chart.png" alt="Mermaid chart" width="720" />
+  <img src="docs/images/screenshots/22-mermaid-chart.png" alt="Mermaid chart" width="720" />
 </p>
 <p align="center"><sub>Mermaid / PlantUML rendered as interactive SVG in chat</sub></p>
 
@@ -241,19 +241,19 @@ Each agent is not a simple label but a **fully configurable entity**. A five-ste
 
 <!-- 📷 Agent factory -->
 <p align="center">
-  <img src="images/screenshots/03-agent-factory.png" alt="Agent factory" width="920" />
+  <img src="docs/images/screenshots/03-agent-factory.png" alt="Agent factory" width="920" />
 </p>
 <p align="center"><sub>Agent factory — template market + custom creation</sub></p>
 
 <!-- 📷 Role settings -->
 <p align="center">
-  <img src="images/智能体角色设定.png" alt="Role settings" width="920" />
+  <img src="docs/images/智能体角色设定.png" alt="Role settings" width="920" />
 </p>
 <p align="center"><sub>Five-step wizard · role settings · group-chat personality</sub></p>
 
 <!-- 📷 Capability bindings -->
 <p align="center">
-  <img src="images/智能体配置.png" alt="Capability bindings" width="920" />
+  <img src="docs/images/智能体配置.png" alt="Capability bindings" width="920" />
 </p>
 <p align="center"><sub>Capability bindings — skills · knowledge base · MCP tools</sub></p>
 
@@ -289,13 +289,13 @@ One of Lingxi's most distinctive features. Powered by [dot-skill](https://github
 
 <!-- 📷 Distillation modal (screenshot needed: show family picker + material list + streaming log area) -->
 <p align="center">
-  <img src="images/screenshots/04-distill-modal.png" alt="Persona distillation" width="920" />
+  <img src="docs/images/screenshots/04-distill-modal.png" alt="Persona distillation" width="920" />
 </p>
 <p align="center"><sub>Persona distillation — parallel runs · SSE streaming logs · material management</sub></p>
 
 <!-- 📷 Distill records (screenshot needed: records panel with multiple entries + status) -->
 <p align="center">
-  <img src="images/screenshots/05-distill-records.png" alt="Distill records" width="920" />
+  <img src="docs/images/screenshots/05-distill-records.png" alt="Distill records" width="920" />
 </p>
 <p align="center"><sub>Distill records — isolated storage · one-click import into new agents</sub></p>
 
@@ -318,7 +318,7 @@ Traditional AI assistants never change: you correct them a hundred times, and ne
 
 <!-- 📷 Self-evolution -->
 <p align="center">
-  <img src="images/screenshots/06-evolution.png" alt="Self-evolution" width="920" />
+  <img src="docs/images/screenshots/06-evolution.png" alt="Self-evolution" width="920" />
 </p>
 <p align="center"><sub>Evolution timeline — filterable · searchable · per-entry revert</sub></p>
 
@@ -327,7 +327,7 @@ Traditional AI assistants never change: you correct them a hundred times, and ne
 <td width="50%">
 
 <p align="center">
-  <img src="images/自我进化-agent设置.png" alt="Evolution settings" width="440" />
+  <img src="docs/images/自我进化-agent设置.png" alt="Evolution settings" width="440" />
 </p>
 <p align="center"><sub>Per-agent evolution toggle</sub></p>
 
@@ -335,7 +335,7 @@ Traditional AI assistants never change: you correct them a hundred times, and ne
 <td width="50%">
 
 <p align="center">
-  <img src="images/自我进化-对话提取.png" alt="Extract from chat" width="440" />
+  <img src="docs/images/自我进化-对话提取.png" alt="Extract from chat" width="440" />
 </p>
 <p align="center"><sub>"Extract knowledge" button on bubbles</sub></p>
 
@@ -361,7 +361,7 @@ Lingxi ships a complete local RAG (Retrieval-Augmented Generation) pipeline — 
 
 <!-- 📷 Knowledge base -->
 <p align="center">
-  <img src="images/screenshots/10-knowledge-rag.png" alt="Knowledge & RAG" width="920" />
+  <img src="docs/images/screenshots/10-knowledge-rag.png" alt="Knowledge & RAG" width="920" />
 </p>
 <p align="center"><sub>Knowledge base — categories · semantic search · index status · folder watch · web collection</sub></p>
 
@@ -380,7 +380,7 @@ The agent finds you at the right time in the right way, not the other way around
 
 <!-- 📷 Proactive Agent -->
 <p align="center">
-  <img src="images/screenshots/11-screen-agent.png" alt="Proactive Agent" width="920" />
+  <img src="docs/images/screenshots/11-screen-agent.png" alt="Proactive Agent" width="920" />
 </p>
 <p align="center"><sub>Proactive Agent — daily report · task tracking · scheduled triggers · context-aware</sub></p>
 
@@ -398,7 +398,7 @@ Trigger a multi-source web search with one `/search` slash command:
 
 <!-- 📷 Deep search -->
 <p align="center">
-  <img src="images/screenshots/22-mermaid-chart.png" alt="Deep search" width="920" />
+  <img src="docs/images/screenshots/22-mermaid-chart.png" alt="Deep search" width="920" />
 </p>
 <p align="center"><sub>Deep search — multi-source parallel · LLM synthesis · citation tracking · real-time progress</sub></p>
 
@@ -416,7 +416,7 @@ Real-time monitoring of each session's token usage, auto-compress near the thres
 
 <!-- 📷 Token water level -->
 <p align="center">
-  <img src="images/screenshots/20-usage.png" alt="Token water level" width="920" />
+  <img src="docs/images/screenshots/20-usage.png" alt="Token water level" width="920" />
 </p>
 <p align="center"><sub>Token water level — real-time monitoring · auto-compress · session card preview</sub></p>
 
@@ -440,7 +440,7 @@ Screen Agent gives Lingxi the ability to **see and operate your desktop**. Inste
 
 <!-- 📷 Screen Agent (screenshot needed: show capture block / step plan / confirm panel) -->
 <p align="center">
-  <img src="images/screenshots/11-screen-agent.png" alt="Screen Agent" width="920" />
+  <img src="docs/images/screenshots/11-screen-agent.png" alt="Screen Agent" width="920" />
 </p>
 <p align="center"><sub>Screen Agent — screen capture · action planning · step-by-step confirmation</sub></p>
 
@@ -457,7 +457,7 @@ Press `⌘⇧Space` and a lightweight floating panel slides down from the top, w
 
 <!-- 📷 Spotlight (screenshot needed: ⌘⇧Space floating panel with Quick Actions) -->
 <p align="center">
-  <img src="images/screenshots/12-spotlight.png" alt="Spotlight" width="720" />
+  <img src="docs/images/screenshots/12-spotlight.png" alt="Spotlight" width="720" />
 </p>
 <p align="center"><sub>Spotlight — ⌘⇧Space global float · context-aware · Quick Actions</sub></p>
 
@@ -487,7 +487,7 @@ Project Nexus lets agents on different computers **auto-discover each other and 
 
 <!-- 📷 Nexus discovery -->
 <p align="center">
-  <img src="images/screenshots/07-nexus-discover.png" alt="Nexus" width="920" />
+  <img src="docs/images/screenshots/07-nexus-discover.png" alt="Nexus" width="920" />
 </p>
 <p align="center"><sub>Node discovery — LAN + WAN merged list · online status · one-click start</sub></p>
 
@@ -496,7 +496,7 @@ Project Nexus lets agents on different computers **auto-discover each other and 
 <td width="50%">
 
 <p align="center">
-  <img src="images/screenshots/08-nexus-a2a-live.png" alt="A2A live" width="440" />
+  <img src="docs/images/screenshots/08-nexus-a2a-live.png" alt="A2A live" width="440" />
 </p>
 <p align="center"><sub>Bidirectional streaming A2A</sub></p>
 
@@ -504,7 +504,7 @@ Project Nexus lets agents on different computers **auto-discover each other and 
 <td width="50%">
 
 <p align="center">
-  <img src="images/Agent对话实况2.png" alt="A2A live 2" width="440" />
+  <img src="docs/images/Agent对话实况2.png" alt="A2A live 2" width="440" />
 </p>
 <p align="center"><sub>Cross-instance real-time collaboration</sub></p>
 
@@ -514,7 +514,7 @@ Project Nexus lets agents on different computers **auto-discover each other and 
 
 <!-- 📷 Invite -->
 <p align="center">
-  <img src="images/Agent对话接收请求.png" alt="Receive invite" width="720" />
+  <img src="docs/images/Agent对话接收请求.png" alt="Receive invite" width="720" />
 </p>
 <p align="center"><sub>Receiving an invite — pick your agent · view topic & goals · accept / reject</sub></p>
 
@@ -541,7 +541,7 @@ Lingxi's signature feature. Not simple round-robin, but a **pixel-perfect WeChat
 
 <!-- 📷 Group chat (screenshot needed: WeChat-style UI with green/white bubbles, multiple agents, timestamps, @mentions) -->
 <p align="center">
-  <img src="images/screenshots/09-group-chat.png" alt="Agent group chat" width="920" />
+  <img src="docs/images/screenshots/09-group-chat.png" alt="Agent group chat" width="920" />
 </p>
 <p align="center"><sub>WeChat-style agent group chat — personality-driven · natural pacing · @mentions · quotes</sub></p>
 
@@ -557,13 +557,13 @@ Agent capabilities extend through "skills." Supports AI-generated skills (stream
 
 <!-- 📷 Skills -->
 <p align="center">
-  <img src="images/screenshots/15-skills-market.png" alt="Skills" width="920" />
+  <img src="docs/images/screenshots/15-skills-market.png" alt="Skills" width="920" />
 </p>
 <p align="center"><sub>Skills — AI generation · ZIP import · Smithery marketplace</sub></p>
 
 <!-- 📷 Skill install -->
 <p align="center">
-  <img src="images/skill安装.png" alt="Skill install" width="920" />
+  <img src="docs/images/skill安装.png" alt="Skill install" width="920" />
 </p>
 <p align="center"><sub>Smithery.ai marketplace — search · categories · one-click install</sub></p>
 
@@ -573,7 +573,7 @@ MCP (Model Context Protocol) lets agents call external tools. Lingxi supports st
 
 <!-- 📷 MCP -->
 <p align="center">
-  <img src="images/screenshots/16-mcp.png" alt="MCP" width="920" />
+  <img src="docs/images/screenshots/16-mcp.png" alt="MCP" width="920" />
 </p>
 <p align="center"><sub>MCP management — stdio / SSE / HTTP · config export</sub></p>
 
@@ -583,7 +583,7 @@ Drag-and-drop node editor with 6 node types: prompt, conditional branch, loop, d
 
 <!-- 📷 Workflow -->
 <p align="center">
-  <img src="images/screenshots/14-workflow.png" alt="Workflow" width="920" />
+  <img src="docs/images/screenshots/14-workflow.png" alt="Workflow" width="920" />
 </p>
 <p align="center"><sub>Visual workflow editor — drag nodes · connect · preview execution</sub></p>
 
@@ -593,7 +593,7 @@ Let agents run tasks on a schedule: every N minutes/hours/daily/weekly/monthly/c
 
 <!-- 📷 Scheduled tasks -->
 <p align="center">
-  <img src="images/screenshots/18-scheduled-tasks.png" alt="Scheduled tasks" width="920" />
+  <img src="docs/images/screenshots/18-scheduled-tasks.png" alt="Scheduled tasks" width="920" />
 </p>
 <p align="center"><sub>Scheduler — Cron · run history · desktop notifications · WS live badge</sub></p>
 
@@ -603,7 +603,7 @@ Connect agents to WeChat Work, DingTalk, and Feishu via webhooks, making your ag
 
 <!-- 📷 IM connectors -->
 <p align="center">
-  <img src="images/screenshots/19-im-connector.png" alt="IM connectors" width="920" />
+  <img src="docs/images/screenshots/19-im-connector.png" alt="IM connectors" width="920" />
 </p>
 <p align="center"><sub>IM connectors — WeChat Work · DingTalk · Feishu (streaming cards)</sub></p>
 
@@ -617,13 +617,13 @@ Lingxi's built-in Bridge protocol layer lets you configure API keys and endpoint
 
 <!-- 📷 Providers -->
 <p align="center">
-  <img src="images/screenshots/17-providers.png" alt="Providers" width="920" />
+  <img src="docs/images/screenshots/17-providers.png" alt="Providers" width="920" />
 </p>
 <p align="center"><sub>API profiles — 14+ providers · connectivity test · one-click switch</sub></p>
 
 <!-- 📷 Provider list -->
 <p align="center">
-  <img src="images/llm.png" alt="Provider list" width="920" />
+  <img src="docs/images/llm.png" alt="Provider list" width="920" />
 </p>
 <p align="center"><sub>Supported model providers</sub></p>
 
@@ -633,7 +633,7 @@ Per-conversation token usage and cost tracking with budget alerts. Non-official 
 
 <!-- 📷 Usage -->
 <p align="center">
-  <img src="images/screenshots/20-usage.png" alt="Usage" width="920" />
+  <img src="docs/images/screenshots/20-usage.png" alt="Usage" width="920" />
 </p>
 <p align="center"><sub>Usage stats — token counts · cost estimates · budget alerts</sub></p>
 
@@ -647,7 +647,7 @@ UI polish includes: bubble corner radii with shadow/hover micro-interactions, ul
 
 <!-- 📷 Themes (screenshot needed: appearance settings or 2×3 theme mosaic) -->
 <p align="center">
-  <img src="images/screenshots/21-themes.png" alt="Themes" width="920" />
+  <img src="docs/images/screenshots/21-themes.png" alt="Themes" width="920" />
 </p>
 <p align="center"><sub>6 carefully designed themes · mobile app independent light/dark modes</sub></p>
 
@@ -671,7 +671,7 @@ UI polish includes: bubble corner radii with shadow/hover micro-interactions, ul
 <td width="50%">
 
 <p align="center">
-  <img src="images/agent ppt创作.png" alt="Agent PPT creation" width="440" />
+  <img src="docs/images/agent ppt创作.png" alt="Agent PPT creation" width="440" />
 </p>
 <p align="center"><sub>Agent long task — PPT creation in action</sub></p>
 
@@ -679,7 +679,7 @@ UI polish includes: bubble corner radii with shadow/hover micro-interactions, ul
 <td width="50%">
 
 <p align="center">
-  <img src="images/规划推理.png" alt="Planning reasoning" width="440" />
+  <img src="docs/images/规划推理.png" alt="Planning reasoning" width="440" />
 </p>
 <p align="center"><sub>Planning mode — intermediate reasoning</sub></p>
 
@@ -689,7 +689,7 @@ UI polish includes: bubble corner radii with shadow/hover micro-interactions, ul
 <td width="50%">
 
 <p align="center">
-  <img src="images/Agent 对话请求提问.png" alt="Start A2A" width="440" />
+  <img src="docs/images/Agent 对话请求提问.png" alt="Start A2A" width="440" />
 </p>
 <p align="center"><sub>Nexus — initiating an agent conversation invite</sub></p>
 
@@ -697,7 +697,7 @@ UI polish includes: bubble corner radii with shadow/hover micro-interactions, ul
 <td width="50%">
 
 <p align="center">
-  <img src="images/Agent对话接收请求.png" alt="Receive A2A" width="440" />
+  <img src="docs/images/Agent对话接收请求.png" alt="Receive A2A" width="440" />
 </p>
 <p align="center"><sub>Nexus — receiver picks an agent to respond</sub></p>
 
@@ -847,14 +847,14 @@ flutter run
 If Lingxi helps you, consider starring the repo or leaving a tip to support continued development.
 
 <p align="center">
-  <img src="images/打赏.png" alt="WeChat Pay" width="280" />
+  <img src="docs/images/打赏.png" alt="WeChat Pay" width="280" />
   <br/><sub>Scan to tip · support ongoing development</sub>
 </p>
 
 ---
 
 <p align="center">
-  <img src="logo.jpg" width="48" alt="Lingxi" />
+  <img src="docs/docs/images/logo.jpg" width="48" alt="Lingxi" />
   <br/><br/>
   <strong>Lingxi</strong> — AI as a work partner, not just a chatbot.
   <br/><br/>

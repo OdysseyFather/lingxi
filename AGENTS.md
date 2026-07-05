@@ -25,10 +25,14 @@
 
 ### 后端 `backend-desktop/`
 - **Go 1.24** + **Gin 1.10**
-- **Gorilla WebSocket** — 流式对话
-- **ncruces/go-sqlite3** — 纯 Go SQLite（无 CGO 依赖）
-- **ledongthuc/pdf** — PDF 文本提取
-- **nguyenthenguyen/docx** — DOCX 文本提取
+- **ncruces/go-sqlite3** — 桌面端 SQLite（无 CGO）
+- 共享 handler 层，桌面 `main.go` 注入 `sqlite.Store`
+
+### Web 多用户后端 `backend-web/` + `backend-core/`
+- **backend-core/store** — `Store` 接口（Session/Message/Auth/Quota），桌面 SQLite + Web MySQL 双实现
+- **backend-web** — MySQL 8 + JWT 自验签 + 邀请码注册 + per-user 数据目录
+- **frontend-web/** — Web 专用前端（JWT 登录、管理后台、配额展示）
+- 构建：`./build-web.sh` · Docker：`web-server/docker-compose.web.yml`
 
 ### 桌面壳 `electron/`
 - **Electron 36** + **electron-builder 25**
@@ -263,10 +267,16 @@ lingxi-agent/
 │       └── whisper/          # whisper.cpp 离线 ASR (whisper-cli + ggml-base.bin)
 │
 ├── ai-config/                # AI 引擎配置模板
-├── build-desktop.sh          # 一键构建脚本
+├── docs/                     # 项目文档与资源
+│   ├── images/               # 截图、Logo 等图片资源
+│   ├── feishu-card-reference/ # 飞书卡片官方参考文档
+│   ├── web-data-scope.md     # Web 版数据隔离说明
+│   └── web-disabled-routes.md # Web 版禁用路由说明
+├── build-desktop.sh          # 一键构建脚本（桌面端）
+├── build-web.sh              # 一键构建脚本（Web 端）
 ├── AGENTS.md                 # 本文件
-├── README.md                 # 用户文档
-└── README-EN.md              # 英文文档
+├── README.md                 # 用户文档（中文）
+└── README-EN.md              # 用户文档（英文）
 ```
 
 ---

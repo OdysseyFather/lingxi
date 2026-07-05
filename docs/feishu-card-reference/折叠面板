@@ -1,0 +1,246 @@
+# 折叠面板
+
+折叠面板允许在卡片中折叠次要信息，如备注、较长文本等，以突出主要信息。
+
+本文档介绍折叠面板组件的 JSON 2.0 结构，要查看历史 JSON 1.0 结构，参考[折叠面板](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/card-components/containers/collapsible-panel)。
+
+![](//sf3-cn.feishucdn.com/obj/open-platform-opendoc/d72600eb4e82048a9e58b8354ca8303f_b0QmSYN4Jq.gif?height=660&lazyload=true&maxWidth=300&width=762)
+
+## 注意事项
+
+- 折叠面板仅支持通过撰写卡片 JSON 代码的方式使用，暂不支持在卡片搭建工具上构建使用。
+- 容器类组件最多支持嵌套五层组件。建议你避免在折叠面板中嵌套多层组件。多层嵌套会压缩内容的展示空间，影响卡片的展示效果。
+
+## 嵌套规则
+
+折叠面板不支持内嵌表单容器（form）组件。
+
+## 组件属性
+
+本小节介绍折叠面板的属性。
+
+### JSON 结构
+
+折叠面板组件的完整 JSON 2.0 结构如下所示：
+```json
+{
+  "schema": "2.0", // 卡片 JSON 结构的版本。默认为 1.0。要使用 JSON 2.0 结构，必须显示声明 2.0。
+  "body": {
+    "elements": [
+      {
+        "tag": "collapsible_panel", // 折叠面板的标签。
+        "element_id": "custom_id", // 操作组件的唯一标识。JSON 2.0 新增属性。用于在调用组件相关接口中指定组件。需开发者自定义。
+        "direction": "vertical", // 面板内组件的排列方向。JSON 2.0 新增属性。可选值："vertical"（垂直排列）、"horizontal"（水平排列）。默认为 "vertical"。
+        "vertical_spacing": "8px", // 面板内组件的垂直间距。JSON 2.0 新增属性。可选值："small"(4px)、"medium"(8px)、"large"(12px)、"extra_large"(16px)或[0,99]px。
+        "horizontal_spacing": "8px", // 面板内组件内的垂直间距。JSON 2.0 新增属性。可选值："small"(4px)、"medium"(8px)、"large"(12px)、"extra_large"(16px)或[0,99]px。
+        "vertical_align": "top", // 面板内组件的垂直居中方式。JSON 2.0 新增属性。默认值为 top。
+        "horizontal_align": "left", // 面板内组件的水平居中方式。JSON 2.0 新增属性。默认值为 left。
+        "padding": "8px 8px 8px 8px", // 折叠面板的内边距。JSON 2.0 新增属性。支持范围 [0,99]px。
+        "margin": "0px 0px 0px 0px", // 折叠面板的外边距。JSON 2.0 新增属性。默认值 "0"，支持范围 [-99,99]px。
+        "expanded": true, // 面板是否展开。默认值 false。
+        "background_color": "grey", // 折叠面板的背景色，默认为透明。
+        "header": {
+          // 折叠面板的标题设置。
+          "title": {
+            // 标题文本设置。支持 plain_text 和 markdown。
+            "tag": "markdown",
+            "content": "**面板标题文本**"
+          },
+          "background_color": "grey", // 标题区的背景色，默认为透明。
+          "vertical_align": "center", // 标题区的垂直居中方式。
+          "padding": "4px 0px 4px 8px", // 标题区的内边距。
+          "position": "top", // 标题区的位置。
+          "width": "auto", // 标题区的宽度。默认值为 fill。
+          "icon": {
+            // 标题前缀图标
+            "tag": "standard_icon", // 图标类型.
+            "token": "chat-forbidden_outlined", // 图标库中图标的 token。当 tag 为 standard_icon 时生效。
+            "color": "orange", // 图标的颜色。当 tag 为 standard_icon 时生效。
+            "img_key": "img_v2_38811724", // 自定义前缀图标的图片 key。当 tag 为 custom_icon 时生效。
+            "size": "16px 16px" // 图标的尺寸。默认值为 10px 10px。
+          },
+          "icon_position": "follow_text", // 图标的位置。默认值为 right。
+          "icon_expanded_angle": -180 // 折叠面板展开时图标旋转的角度，正值为顺时针，负值为逆时针。默认值为 180。
+        },
+        "border": {
+          // 边框设置。默认不显示边框。
+          "color": "grey", // 边框的颜色。
+          "corner_radius": "5px" // 圆角设置。
+        },
+        "elements": [
+          // 此处可添加各个组件的 JSON 结构。暂不支持表单（form）组件。
+          {
+            "tag": "markdown",
+            "content": "很长的文本"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### 字段说明
+
+折叠面板各字段说明如下表所示：
+
+名称 | 必填 | 类型 | 默认值 | 说明
+---|---|---|---|---
+tag | 否 | string | / | 组件的标签。折叠面板取固定值为 <code>collapsible_panel</code>。
+expanded | 否 | Boolean | false | 面板是否展开。可选值：<br>- <code>true</code>：面板为展开状态<br>- <code>false</code>：面板为折叠状态。默认为折叠状态
+element_id | 否 | String | 空 | 操作组件的唯一标识。JSON 2.0 新增属性。用于在调用[组件相关接口](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/cardkit-v1/card-element/create)中指定组件。在同一张卡片内，该字段的值全局唯一。仅允许使用字母、数字和下划线，必须以字母开头，不得超过 20 字符。
+margin | 否 | String | 0px | 容器的外边距。值的取值范围为 [-99,99]px。可选值：<br>- 单值，如 "10px"，表示容器的四个外边距都为 10 px。<br>- 双值，如 "4px 0"，表示容器的上下外边距为 4 px，左右外边距为 0 px。使用空格间隔（边距为 0 时可不加单位）。<br>- 多值，如 "4px 0 4px 0"，表示容器的上、右、下、左的外边距分别为 4px，12px，4px，12px。使用空格间隔。
+horizontal_spacing | 否 | String | 8px | 容器内组件的水平间距，可选值：<br>- small：小间距，4px<br>- medium：中等间距，8px<br>- large：大间距，12px<br>- extra_large：超大间距，16px<br>- 具体数值，如 20px。取值范围为 [0,99]px
+horizontal_align | 否 | String | left | 容器内组件水平对齐的方式。可取值：<br>- left：左对齐<br>- center：居中对齐<br>- right：右对齐
+vertical_spacing | 否 | String | 12px | 容器内组件的水平间距，可选值：<br>- small：小间距，4px<br>- medium：中等间距，8px<br>- large：大间距，12px<br>- extra_large：超大间距，16px<br>- 具体数值，如 20px。取值范围为 [0,99]px
+vertical_align | 否 | String | top | 容器内组件垂直对齐的方式。可取值：<br>- top：上对齐<br>- center：居中对齐<br>- bottom：下对齐
+direction | 否 | String | vertical | 容器的排列方向。可选值：<br>- vertical：垂直排列<br>- horizontal：水平排列
+padding | 否 | String | 0px | 容器的内边距。值的取值范围为 [-99,99]px。可选值：<br>- 单值，如 "10px"，表示容器的四个外边距都为 10 px。<br>- 双值，如 "4px 0"，表示容器的上下外边距为 4 px，左右外边距为 0 px。使用空格间隔（边距为 0 时可不加单位）。<br>- 多值，如 "4px 0 4px 0"，表示容器的上、右、下、左的外边距分别为 4px，12px，4px，12px。使用空格间隔。
+background_color | 否 | String | 空 | 折叠面板的背景色，默认为透明。枚举值参见[颜色枚举值](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/enumerations-for-fields-related-to-color)。
+header | 是 | Object | - | 折叠面板的标题设置。
+└ title | 否 | Object | - | 标题文本设置。
+└└ tag | 是 | String | 空 | 文本类型的标签。可取值：<br>- <code>plain_text</code>：普通文本内容<br>- <code>markdown</code>：富文本内容。了解支持的 Markdown 语法，参考[富文本组件](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/card-components/content-components/rich-text)。
+└└ content | 否 | String | 空 | 折叠面板标题的内容。
+└ background_color | 否 | String | 空 | 折叠面板标题区域的背景颜色设置，默认为透明色。枚举值参见[颜色枚举值](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/enumerations-for-fields-related-to-color)。<br>**注意**：如果你未设置此字段，则折叠面板的标题区域的背景色由 <code>background_color</code> 字段决定。
+└ width | 否 | String | fill | 标题元素的宽度。JSON 2.0 新增属性。支持飞书客户端 7.32 及以上版本。<br>- `fill`：标题和折叠面板等宽<br>- `auto`：标题自适应文本长度<br>- `auto_when_fold`：仅在折叠面板收起后，标题自适应文本长度
+└ vertical_align | 否 | String | center | 标题区域的垂直居中方式。可取值：<br>- <code>top</code>：标题区域垂直居中于面板区域的顶部<br>- <code>center</code>：标题区域垂直居中于面板区域的中间<br>- <code>bottom</code>：标题区域垂直居中于面板区域的底部
+└ padding | 否 | String | 0 | 标题区域的内边距。值的取值范围为 [-99,99]px。可选值：<br>- 单值，如 "10px"，表示标题区的四个外边距都为 10 px。<br>- 双值，如 "4px 0"，表示标题区的上下外边距为 4 px，左右外边距为 0 px。使用空格间隔（边距为 0 时可不加单位）。<br>- 多值，如 "4px 0 4px 0"，表示标题区的上、右、下、左的外边距分别为 4px，12px，4px，12px。使用空格间隔。
+└ icon | 否 | Object | / | 添加图标作为标题前缀或后缀图标。支持自定义或使用图标库中的图标。示例代码如下：<br>```json<br>"icon": {<br>"tag": "standard_icon",<br>"token": "down-small-ccm_outlined",<br>"color": "",<br>"size": "16px 16px"<br>}<br>```
+└└ tag | 否 | String | / | 图标类型的标签。可取值：<br>- <code>standard_icon</code>：使用图标库中的图标<br>- <code>custom_icon</code>：使用用自定义图片作为图标
+└ └ token | 否 | String | / | 图标库中图标的 token。当 <code>tag</code> 为 <code>standard_icon</code> 时生效。枚举值参见[图标库](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/enumerations-for-icons)。
+└└ color | 否 | String | / | 图标的颜色。支持设置线性和面性图标（即 token 末尾为 <code>outlined</code> 或 <code>filled</code> 的图标）的颜色。当 <code>tag</code> 为 <code>standard_icon</code> 时生效。枚举值参见[颜色枚举值](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/enumerations-for-fields-related-to-color)。
+└└ img_key | 否 | String | / | 自定义前缀图标的图片 key。当 <code>tag</code> 为 <code>custom_icon</code> 时生效。图标 key 的获取方式：调用[上传图片](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/im-v1/image/create)接口，上传用于发送消息的图片，并在返回值中获取图片的 image_key。
+└ └ size | 否 | String | 10px 10px | 图标的尺寸。支持 "[1,999] [1,999]px"。
+└ icon_position | 否 | String | right | 图标的位置。可选值：<br>- <code>left</code>：图标在标题区域最左侧<br>- <code>right</code>：图标在标题区域最右侧<br>- <code>follow_text</code>：图标在文本右侧
+└ icon_expanded_angle | 否 | Number | 180 | 折叠面板展开时图标旋转的角度，正值为顺时针，负值为逆时针。可选值：<br>- <code>-180</code>：逆时针旋转 180 度<br>- <code>-90</code>：逆时针旋转 90 度<br>- <code>90</code>：顺时针旋转 90 度<br>- <code>180</code>：顺时针旋转 180 度
+border | 否 | Object | 空 | 边框设置。默认不显示边框。
+└ color | 否 | String | grey | 边框颜色设置。枚举值参见[颜色枚举值](https://open.feishu.cn/document/uAjLw4CM/ukzMukzMukzM/feishu-cards/enumerations-for-fields-related-to-color)。
+└ corner_radius | 否 | String | 5px | 圆角设置。
+elements | 否 | Array | 空 | 各个组件的 JSON 结构。暂不支持表单（form）组件。
+
+## 示例代码
+
+以下的 JSON 2.0 示例代码可实现如下图所示的卡片效果：
+
+![](//sf3-cn.feishucdn.com/obj/open-platform-opendoc/d72600eb4e82048a9e58b8354ca8303f_b0QmSYN4Jq.gif?height=660&lazyload=true&maxWidth=300&width=762)
+
+```json
+{
+  "schema": "2.0",
+  "header": {
+    "template": "yellow",
+    "title": {
+      "tag": "plain_text",
+      "content": "折叠面板展示"
+    }
+  },
+  "body": {
+    "elements": [
+      {
+        "tag": "markdown",
+        "content": "下面是一个 默认折叠 的折叠面板组件"
+      },
+      {
+        "tag": "collapsible_panel",
+        "expanded": false,
+        "header": {
+          "title": {
+            "tag": "plain_text",
+            "content": "面板标题文本"
+          },
+          "vertical_align": "center",
+          "icon": {
+            "tag": "standard_icon",
+            "token": "down-small-ccm_outlined",
+            "color": "",
+            "size": "16px 16px"
+          },
+          "icon_position": "right",
+          "icon_expanded_angle": -180
+        },
+        "border": {
+          "color": "grey",
+          "corner_radius": "5px"
+        },
+        "vertical_spacing": "8px",
+        "padding": "8px 8px 8px 8px",
+        "elements": [
+          {
+            "tag": "markdown",
+            "content": "很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本"
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "下面是一个 标题带背景色 且 默认展开 的折叠面板组件"
+      },
+      {
+        "tag": "collapsible_panel",
+        "expanded": true,
+        "header": {
+          "title": {
+            "tag": "markdown",
+            "content": "**面板标题文本**"
+          },
+          "background_color": "yellow",
+          "vertical_align": "center",
+          "icon": {
+            "tag": "standard_icon",
+            "token": "down-small-ccm_outlined",
+            "color": "white",
+            "size": "16px 16px"
+          },
+          "icon_position": "right",
+          "icon_expanded_angle": -180
+        },
+        "border": {
+          "color": "grey",
+          "corner_radius": "5px"
+        },
+        "vertical_spacing": "8px",
+        "padding": "8px 8px 8px 8px",
+        "elements": [
+          {
+            "tag": "markdown",
+            "content": "很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本"
+          }
+        ]
+      },
+      {
+        "tag": "markdown",
+        "content": "下面是一个无边框折叠面板组件"
+      },
+      {
+        "tag": "collapsible_panel",
+        "expanded": true,
+        "header": {
+          "title": {
+            "tag": "markdown",
+            "content": "**面板标题文本**"
+          },
+          "width": "auto_when_fold",
+          "vertical_align": "center",
+          "padding": "4px 0px 4px 8px",
+          "icon": {
+            "tag": "standard_icon",
+            "token": "down-small-ccm_outlined",
+            "color": "",
+            "size": "16px 16px"
+          },
+          "icon_position": "follow_text",
+          "icon_expanded_angle": -180
+        },
+        "vertical_spacing": "8px",
+        "padding": "8px 8px 8px 8px",
+        "elements": [
+          {
+            "tag": "markdown",
+            "content": "很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本很长的文本"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
