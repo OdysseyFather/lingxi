@@ -85,6 +85,10 @@ type feishuStreamSender struct {
 	chatID    string
 	msgID     string // 原消息 ID
 
+	// rootMsgID 话题根消息 ID：设置后 sendCardMessage 会以 reply_in_thread=true
+	// 将卡片发送到该消息的话题中，而非直接 reply 到 msgID
+	rootMsgID string
+
 	mu         sync.Mutex
 	cardID     string
 	replyMsgID string // 卡片消息的 message_id
@@ -106,32 +110,27 @@ type feishuStreamSender struct {
 	// 阶段状态：用于格式化不同类型的内容
 	currentPhase string // "thinking" | "tool" | "text" | ""
 
-	// 思考阶段已输出标记（只输出一次提示，不累积思考原文）
-	thinkingEmitted bool
+	// 思考链计数：每次从非 thinking 状态重新进入 thinking 时递增，每次追加一行提示
+	thinkingCount int
 
 	// 工具调用聚合
-	allToolNames      []string // 全部工具名（用于最终卡片折叠面板）
-	currentGroupTools []string // 当前活跃工具组的工具名（用于流式摘要行）
-	// toolLineFlushed 标记当前工具摘要行是否已写入 lastFlushed
-	toolLineFlushed bool
-	// currentToolLine 当前的工具摘要行文本（不含换行），用于覆盖式更新
-	currentToolLine string
-	// textStarted 标记正文是否已开始输出。一旦正文开始，
-	// 后续工具调用只静默记录到 allToolNames，不在流式卡片中显示
+	allToolNames     []string // 全部工具名（用于最终卡片折叠面板）
+	lastToolCategory string   // 上一次追加的工具类别，用于去重连续同类型
+	// textStarted 标记正文是否已开始输出
 	textStarted bool
 
 	pendingFlush  bool
 	flushTimer    *time.Timer
 	flushInterval time.Duration
 
-	// heartbeatTimer：工具执行期间如果长时间没有新事件，
-	// 自动追加进度指示器让用户知道 Agent 还在工作
-	heartbeatTimer *time.Timer
-	heartbeatCount int
-	heartbeatSuffix string // 当前心跳后缀（用于覆盖式更新）
-
 	cardTitle string
+	introLine string // 卡片首行固定文案
 	done      bool
+
+	// 心跳定时器：每 30 秒更新卡片内容，让用户知道 Agent 仍在工作
+	heartbeatTimer    *time.Timer
+	heartbeatCount    int       // 累计心跳次数（用于 15 分钟警告）
+	lastEventTime     time.Time // 上次收到事件的时间
 
 	// doneCallback 流式完成后用于构建交互元素的回调（在 replaceCardFinal 中调用）
 	doneCallback func() []map[string]interface{}
@@ -164,6 +163,72 @@ func (s *feishuStreamSender) SendAck() {
 	s.SendAckWithText("💭 正在思考...")
 }
 
+// PreCreateCard 立即创建流式卡片（不等首 token），标题为用户提问内容。
+// 如果成功，后续 OnStreamCallback 将直接追加到这张卡片上。
+func (s *feishuStreamSender) PreCreateCard(userQuestion, senderName string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if userQuestion != "" {
+		runes := []rune(userQuestion)
+		if len(runes) > 30 {
+			s.cardTitle = string(runes[:30]) + "..."
+		} else {
+			s.cardTitle = userQuestion
+		}
+	}
+
+	// 构造首行提示文案
+	displayName := senderName
+	if displayName == "" {
+		displayName = "用户"
+	}
+	displayQuestion := userQuestion
+	if qr := []rune(displayQuestion); len(qr) > 40 {
+		displayQuestion = string(qr[:40]) + "..."
+	}
+	s.introLine = fmt.Sprintf("📩 收到来自 **%s** 的提问「%s」，我已开始处理。\n\n", displayName, displayQuestion)
+
+	if err := s.initCard(); err != nil {
+		slog.Warn("[feishu-stream] PreCreateCard failed, fallback to ack", "err", err)
+		s.mu.Unlock()
+		s.SendAck()
+		s.mu.Lock()
+		return
+	}
+	// 将首行提示设为已发送内容的基础，后续追加内容会在其后
+	s.lastFlushed = s.introLine
+	slog.Info("[feishu-stream] PreCreateCard success", "cardID", s.cardID, "title", s.cardTitle)
+}
+
+// PreCreateCardContinuation 为话题内续接消息创建流式卡片（不带"📩 收到来自..."首行提示）。
+// 与 PreCreateCard 的区别：不设置 introLine，卡片直接从 AI 回复正文开始，
+// 避免话题内每次追问都重复显示"收到"提示。
+func (s *feishuStreamSender) PreCreateCardContinuation(userQuestion string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if userQuestion != "" {
+		runes := []rune(userQuestion)
+		if len(runes) > 30 {
+			s.cardTitle = string(runes[:30]) + "..."
+		} else {
+			s.cardTitle = userQuestion
+		}
+	}
+
+	s.introLine = ""
+
+	if err := s.initCard(); err != nil {
+		slog.Warn("[feishu-stream] PreCreateCardContinuation failed, fallback to ack", "err", err)
+		s.mu.Unlock()
+		s.SendAck()
+		s.mu.Lock()
+		return
+	}
+	slog.Info("[feishu-stream] PreCreateCardContinuation success", "cardID", s.cardID, "title", s.cardTitle)
+}
+
 // SendAckWithText 发送自定义确认提示文本
 func (s *feishuStreamSender) SendAckWithText(text string) {
 	token, err := GetTenantToken(s.appID, s.appSecret)
@@ -192,9 +257,16 @@ func (s *feishuStreamSender) OnStreamCallback(kind StreamKind, payload string, d
 
 	switch kind {
 	case KindThinking:
-		if !s.thinkingEmitted {
-			s.thinkingEmitted = true
-			s.pendingAppend += "> 💭 正在分析问题...\n\n"
+		if s.currentPhase != "thinking" {
+			if s.currentPhase != "" {
+				s.pendingAppend += "\n---\n\n"
+			}
+			s.thinkingCount++
+			if s.thinkingCount == 1 {
+				s.pendingAppend += "> 💭 我正在分析您的问题... ⏳\n\n"
+			} else {
+				s.pendingAppend += "> 💭 我正在深入思考中... ⏳\n\n"
+			}
 			s.currentPhase = "thinking"
 		}
 		if payload != "" {
@@ -207,30 +279,27 @@ func (s *feishuStreamSender) OnStreamCallback(kind StreamKind, payload string, d
 		if toolName == "" {
 			toolName = "工具"
 		}
-		s.allToolNames = append(s.allToolNames, toolName)
 
-		// 正文已开始输出后，后续工具调用只静默记录，不在卡片中显示。
-		// 最终卡片的工具折叠面板会完整展示所有工具调用。
-		if s.textStarted {
-			s.currentPhase = "tool"
-			break
+		// 阶段切换时追加分割线
+		if s.currentPhase != "tool" && s.currentPhase != "" {
+			s.pendingAppend += "\n---\n\n"
+			s.lastToolCategory = "" // 重置类别，新阶段第一个工具一定显示
 		}
 
-		if s.currentPhase == "text" {
-			s.freezeCurrentToolLine()
+		s.allToolNames = append(s.allToolNames, toolName)
+		category := toolCategory(toolName)
+		if category != s.lastToolCategory {
+			s.pendingAppend += toolEmojiLine(toolName) + "\n"
+			s.lastToolCategory = category
 		}
 		s.currentPhase = "tool"
-		s.currentGroupTools = append(s.currentGroupTools, toolName)
-		s.heartbeatSuffix = ""
-		s.updateToolSummaryLine()
 
 	case KindText:
 		if payload != "" {
 			s.fullTextReply.WriteString(payload)
 
 			if s.currentPhase != "text" {
-				s.freezeCurrentToolLine()
-				if s.thinkingEmitted || len(s.allToolNames) > 0 {
+				if s.thinkingCount > 0 {
 					s.pendingAppend += "\n---\n\n"
 				}
 				s.textStarted = true
@@ -243,7 +312,6 @@ func (s *feishuStreamSender) OnStreamCallback(kind StreamKind, payload string, d
 	s.resetHeartbeat()
 
 	if done {
-		s.freezeCurrentToolLine()
 		s.done = true
 		if s.flushTimer != nil {
 			s.flushTimer.Stop()
@@ -281,52 +349,51 @@ func (s *feishuStreamSender) OnStreamCallback(kind StreamKind, payload string, d
 	return nil
 }
 
-// updateToolSummaryLine 重新计算工具摘要行并覆盖 pendingAppend 中的旧摘要行。
-// 如果旧摘要行已经被 flush 到飞书（toolLineFlushed=true），则只能追加新行。
-func (s *feishuStreamSender) updateToolSummaryLine() {
-	summary := s.buildToolSummary(s.currentGroupTools)
-	newLine := "> 🔧 执行中：" + summary
-	if s.heartbeatSuffix != "" {
-		newLine += " " + s.heartbeatSuffix
-	}
 
-	if s.toolLineFlushed {
-		s.pendingAppend += "\n" + newLine + "\n"
-		s.toolLineFlushed = false
-	} else if s.currentToolLine != "" {
-		oldLine := s.currentToolLine
-		idx := strings.LastIndex(s.pendingAppend, oldLine)
-		if idx >= 0 {
-			s.pendingAppend = s.pendingAppend[:idx] + newLine + s.pendingAppend[idx+len(oldLine):]
-		} else {
-			s.pendingAppend += newLine + "\n"
-		}
-	} else {
-		s.pendingAppend += newLine + "\n"
+// toolCategory 将工具名映射到类别（用于连续同类型去重）
+func toolCategory(toolName string) string {
+	lower := strings.ToLower(toolName)
+	switch {
+	case lower == "bash" || lower == "shell" || strings.Contains(lower, "command") || strings.Contains(lower, "terminal"):
+		return "exec"
+	case lower == "read" || lower == "readfile" || strings.Contains(lower, "read"):
+		return "read"
+	case lower == "write" || lower == "edit" || lower == "multiedit" || lower == "strreplace" ||
+		strings.Contains(lower, "write") || strings.Contains(lower, "edit"):
+		return "write"
+	case lower == "grep" || lower == "glob" || lower == "search" || lower == "semanticsearch" ||
+		strings.Contains(lower, "search") || strings.Contains(lower, "grep") || strings.Contains(lower, "find"):
+		return "search"
+	case lower == "webfetch" || lower == "websearch" || strings.Contains(lower, "web") || strings.Contains(lower, "fetch") || strings.Contains(lower, "http"):
+		return "web"
+	case lower == "task" || lower == "agent" || strings.Contains(lower, "agent") || strings.Contains(lower, "subagent"):
+		return "agent"
+	default:
+		return "other"
 	}
-	s.currentToolLine = newLine
 }
 
-// freezeCurrentToolLine 冻结当前工具摘要行（不再覆盖），为进入 text 或新 tool 组做准备
-func (s *feishuStreamSender) freezeCurrentToolLine() {
-	if s.currentToolLine == "" {
-		return
+// toolEmojiLine 根据工具名返回带 emoji 的友好中文提示行（第一人称 + ⏳）
+func toolEmojiLine(toolName string) string {
+	lower := strings.ToLower(toolName)
+	switch {
+	case lower == "bash" || lower == "shell" || strings.Contains(lower, "command") || strings.Contains(lower, "terminal"):
+		return "> ⚡ 我正在执行相关技能... ⏳"
+	case lower == "read" || lower == "readfile" || strings.Contains(lower, "read"):
+		return "> 📖 我正在阅读相关内容... ⏳"
+	case lower == "write" || lower == "edit" || lower == "multiedit" || lower == "strreplace" ||
+		strings.Contains(lower, "write") || strings.Contains(lower, "edit"):
+		return "> ✏️ 我正在编写内容... ⏳"
+	case lower == "grep" || lower == "glob" || lower == "search" || lower == "semanticsearch" ||
+		strings.Contains(lower, "search") || strings.Contains(lower, "grep") || strings.Contains(lower, "find"):
+		return "> 🔍 我正在分析相关代码... ⏳"
+	case lower == "webfetch" || lower == "websearch" || strings.Contains(lower, "web") || strings.Contains(lower, "fetch") || strings.Contains(lower, "http"):
+		return "> 🌐 我正在联网查询... ⏳"
+	case lower == "task" || lower == "agent" || strings.Contains(lower, "agent") || strings.Contains(lower, "subagent"):
+		return "> 🤖 我正在协调子任务... ⏳"
+	default:
+		return "> 🔧 我正在处理中... ⏳"
 	}
-	// 将"执行中"替换为"✅"
-	frozenLine := strings.Replace(s.currentToolLine, "执行中：", "✅ ", 1)
-	// 移除心跳后缀
-	for _, suffix := range []string{" ⏳.", " ⏳..", " ⏳...", " ⏳"} {
-		frozenLine = strings.TrimSuffix(frozenLine, suffix)
-	}
-	if s.currentToolLine != frozenLine {
-		idx := strings.LastIndex(s.pendingAppend, s.currentToolLine)
-		if idx >= 0 {
-			s.pendingAppend = s.pendingAppend[:idx] + frozenLine + s.pendingAppend[idx+len(s.currentToolLine):]
-		}
-	}
-	s.currentToolLine = ""
-	s.currentGroupTools = nil
-	s.toolLineFlushed = false
 }
 
 // buildToolSummary 构建工具摘要文本（如 "Bash ×3 · Read · Grep"）
@@ -466,59 +533,74 @@ func isInteractiveJSON(jsonStr string) bool {
 	return t == "choice" || t == "input" || t == "checker"
 }
 
-// flushLocked 后更新 toolLineFlushed 标记
-func (s *feishuStreamSender) markToolLineFlushed() {
-	if s.currentToolLine != "" && s.pendingAppend == "" {
-		s.toolLineFlushed = true
-	}
-}
 
-// resetHeartbeat 重置心跳定时器。
-// 如果 15 秒内没有新事件（工具执行时间较长），更新工具摘要行的后缀指示器，
-// 而非追加新行，避免心跳消息堆叠。
-func (s *feishuStreamSender) resetHeartbeat() {
-	if s.heartbeatTimer != nil {
-		s.heartbeatTimer.Stop()
-	}
+// heartbeatTick 心跳回调（每 30 秒触发一次）
+func (s *feishuStreamSender) heartbeatTick() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.done || s.cardID == "" {
 		return
 	}
-	s.heartbeatTimer = time.AfterFunc(15*time.Second, func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		if s.done {
-			return
-		}
-		s.heartbeatCount++
-		dots := strings.Repeat(".", (s.heartbeatCount%3)+1)
+	s.heartbeatCount++
+	elapsed := time.Since(s.lastEventTime)
 
-		if s.currentPhase == "tool" && s.currentToolLine != "" && !s.toolLineFlushed && !s.textStarted {
-			// 工具阶段（正文未开始）：更新工具行的后缀
-			oldLine := s.currentToolLine
-			s.heartbeatSuffix = "⏳" + dots
-			newLine := strings.TrimSuffix(oldLine, " "+s.heartbeatSuffix)
-			for _, sfx := range []string{" ⏳.", " ⏳..", " ⏳...", " ⏳"} {
-				newLine = strings.TrimSuffix(newLine, sfx)
-			}
-			newLine += " " + s.heartbeatSuffix
-			idx := strings.LastIndex(s.pendingAppend, oldLine)
-			if idx >= 0 {
-				s.pendingAppend = s.pendingAppend[:idx] + newLine + s.pendingAppend[idx+len(oldLine):]
-				s.currentToolLine = newLine
-			}
-		} else if !s.textStarted {
-			// 非工具阶段（正文未开始）：追加独立的进度行
-			s.pendingAppend += fmt.Sprintf("> ⏳ 仍在处理中%s\n", dots)
-		}
-		// 正文已开始后不再追加任何进度指示（避免污染正文）
+	// 15 分钟无新事件，打警告日志
+	if elapsed > 15*time.Minute {
+		slog.Warn("[feishu-stream] no events for 15min, agent may be stuck",
+			"cardID", s.cardID, "elapsed", elapsed.String())
+	}
 
-		if err := s.flushLocked(); err != nil {
-			slog.Warn("[feishu-stream] heartbeat flush error", "err", err)
+	// 构建心跳时间文案
+	elapsedSec := int(elapsed.Seconds())
+	var timeStr string
+	if elapsedSec >= 60 {
+		timeStr = fmt.Sprintf("%d分%d秒", elapsedSec/60, elapsedSec%60)
+	} else {
+		timeStr = fmt.Sprintf("%d秒", elapsedSec)
+	}
+	heartbeatLine := fmt.Sprintf("\n> ⏳ 仍在处理中（已持续 %s）...", timeStr)
+
+	// 显示内容 = 已确认内容 + 待追加 + 心跳行（心跳行不合并进 lastFlushed）
+	content := s.lastFlushed + s.pendingAppend + heartbeatLine
+	displayContent := removeInteractiveJSON(content)
+	displayContent = removeSuggestionLines(displayContent)
+
+	// 心跳内容也做截断保护
+	if len(displayContent) > maxCardContentBytes {
+		displayContent = truncateContent(displayContent, maxCardContentBytes)
+	}
+
+	token, err := GetTenantToken(s.appID, s.appSecret)
+	if err != nil {
+		slog.Warn("[feishu-stream] heartbeat: get token failed", "err", err)
+	} else {
+		s.sequence++
+		if err := s.updateElement(token, displayContent, s.sequence); err != nil {
+			slog.Warn("[feishu-stream] heartbeat: update failed",
+				"err", err, "contentLen", len(displayContent))
 		}
-		s.resetHeartbeat()
-	})
+	}
+
+	// 继续下一次心跳
+	if !s.done {
+		s.heartbeatTimer = time.AfterFunc(30*time.Second, func() { s.heartbeatTick() })
+	}
 }
 
+// resetHeartbeat 重置心跳定时器（每次收到新事件时调用，需持有 mu 锁）
+func (s *feishuStreamSender) resetHeartbeat() {
+	s.lastEventTime = time.Now()
+	s.heartbeatCount = 0
+	if s.heartbeatTimer != nil {
+		s.heartbeatTimer.Stop()
+	}
+	if s.done {
+		return
+	}
+	s.heartbeatTimer = time.AfterFunc(30*time.Second, func() { s.heartbeatTick() })
+}
+
+// stopHeartbeat 停止心跳定时器
 func (s *feishuStreamSender) stopHeartbeat() {
 	if s.heartbeatTimer != nil {
 		s.heartbeatTimer.Stop()
@@ -565,13 +647,44 @@ func (s *feishuStreamSender) initCard() error {
 	}
 	s.cardID = cardID
 
-	replyMsgID, err := s.sendCardMessage(token, cardID)
-	if err != nil {
-		return fmt.Errorf("send card message: %w", err)
+	var replyMsgID string
+	var lastErr error
+	for i := 0; i < 3; i++ {
+		replyMsgID, lastErr = s.sendCardMessage(token, cardID)
+		if lastErr == nil {
+			break
+		}
+		slog.Warn("[feishu-stream] sendCardMessage retry",
+			"attempt", i+1, "cardID", cardID, "err", lastErr)
+		time.Sleep(time.Duration(300*(i+1)) * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("send card message: %w", lastErr)
 	}
 	s.replyMsgID = replyMsgID
 	slog.Info("[feishu-stream] card created", "cardID", cardID, "replyMsgID", replyMsgID)
 	return nil
+}
+
+// maxCardContentBytes 飞书卡片总体积 30KB，预留 10KB 给卡片 JSON 结构/标题/按钮等，
+// 流式 markdown 内容控制在 20KB 以内。
+const maxCardContentBytes = 20 * 1024
+
+// truncateContent 当内容超过 maxBytes 时，截断保留末尾部分
+func truncateContent(content string, maxBytes int) string {
+	if len(content) <= maxBytes {
+		return content
+	}
+	keep := maxBytes - 100 // 留 100 字节给省略标记
+	if keep < 500 {
+		keep = 500
+	}
+	truncated := content[len(content)-keep:]
+	// 避免截断在多字节字符中间（找第一个换行符开始）
+	if idx := strings.Index(truncated, "\n"); idx >= 0 && idx < 200 {
+		truncated = truncated[idx+1:]
+	}
+	return "...(早期内容已省略)...\n\n" + truncated
 }
 
 func (s *feishuStreamSender) flushLocked() error {
@@ -608,10 +721,20 @@ func (s *feishuStreamSender) flushLocked() error {
 	if s.done {
 		// 清理流式标记行（🔧 工具/💭 思考/⏳ 心跳），最终卡片用折叠面板展示
 		content = removeToolMarkerLines(content)
+		// done 阶段也做截断保护
+		if len(content) > maxCardContentBytes {
+			slog.Info("[feishu-stream] truncating final content",
+				"originalLen", len(content), "maxBytes", maxCardContentBytes)
+			content = truncateContent(content, maxCardContentBytes)
+		}
 		if err := s.replaceCardFinal(token, content); err != nil {
 			slog.Warn("[feishu-stream] replaceCardFinal failed, fallback", "err", err)
 			cleanContent := removeInteractiveJSON(content)
 			cleanContent = removeSuggestionLines(cleanContent)
+			// 最终回退也做截断
+			if len(cleanContent) > maxCardContentBytes {
+				cleanContent = truncateContent(cleanContent, maxCardContentBytes)
+			}
 			if err2 := s.updateElement(token, cleanContent, s.sequence); err2 != nil {
 				slog.Warn("[feishu-stream] updateElement fallback also failed", "err", err2)
 			}
@@ -624,7 +747,31 @@ func (s *feishuStreamSender) flushLocked() error {
 		// 流式过程中也实时过滤交互 JSON（避免用户看到原始 JSON）
 		displayContent := removeInteractiveJSON(content)
 		displayContent = removeSuggestionLines(displayContent)
+
+		// 内容超限保护：截断后重试
+		if len(displayContent) > maxCardContentBytes {
+			slog.Info("[feishu-stream] content exceeds limit, truncating",
+				"contentLen", len(displayContent), "maxBytes", maxCardContentBytes)
+			displayContent = truncateContent(displayContent, maxCardContentBytes)
+			// 截断后前缀不再匹配，飞书会全量替换（无打字机效果），但至少能更新成功
+		}
+
 		if err := s.updateElement(token, displayContent, s.sequence); err != nil {
+			slog.Warn("[feishu-stream] flush updateElement failed",
+				"err", err, "contentLen", len(displayContent))
+			// 尝试更激进的截断后重试一次
+			if len(displayContent) > 5000 {
+				shorter := truncateContent(displayContent, maxCardContentBytes/2)
+				s.sequence++
+				if err2 := s.updateElement(token, shorter, s.sequence); err2 != nil {
+					slog.Warn("[feishu-stream] flush retry also failed", "err", err2)
+					return err
+				}
+				// 重试成功，用截断后的内容更新 lastFlushed
+				s.lastFlushed = content // 保留原始完整内容（含 JSON）
+				s.pendingAppend = ""
+				return nil
+			}
 			return err
 		}
 	}
@@ -633,7 +780,6 @@ func (s *feishuStreamSender) flushLocked() error {
 	// 注意：lastFlushed 保留原始内容（包含 JSON），因为 fullTextReply 和 cleanInteractiveJSONFromContent 需要完整内容
 	s.lastFlushed = content
 	s.pendingAppend = ""
-	s.markToolLineFlushed()
 	return nil
 }
 
@@ -650,8 +796,9 @@ func (s *feishuStreamSender) replaceCardFinal(token, content string) error {
 	// 如果有思考内容，用折叠面板展示（默认折叠）
 	thinkingText := strings.TrimSpace(s.thinkingContent.String())
 	if thinkingText != "" {
-		// 从主内容中移除流式阶段的思考提示行
-		content = strings.Replace(content, "> 💭 正在分析问题...\n\n", "", 1)
+		// 从主内容中移除流式阶段的所有思考提示行
+		content = strings.Replace(content, "> 💭 正在分析问题...\n\n", "", -1)
+		content = strings.Replace(content, "> 💭 Agent 正在深度思考中...\n\n", "", -1)
 		content = strings.TrimLeft(content, "\n")
 
 		// 截断过长的思考内容（飞书卡片有大小限制）
@@ -741,6 +888,10 @@ func (s *feishuStreamSender) replaceCardFinal(token, content string) error {
 		slog.Info("[feishu-stream] replaceCardFinal: no interactive JSON found to strip",
 			"contentLen", len(content), "contentPreview", truncateStr(content, 200))
 	}
+	// 移除首行固定提示（最终卡片不需要）
+	if s.introLine != "" {
+		content = strings.Replace(content, s.introLine, "", 1)
+	}
 	// 移除 ~?~ 建议问题行（这些是 Claude 的后续问题提示，在飞书卡片中无意义）
 	content = removeSuggestionLines(content)
 	// 移除流式阶段的工具调用标记行（> 🔧 Bash ×3 · Read 等）
@@ -764,6 +915,22 @@ func (s *feishuStreamSender) replaceCardFinal(token, content string) error {
 
 	card := BuildPrettyCard(s.cardTitle, elements, false)
 	cardJSON, _ := json.Marshal(card)
+
+	// 卡片 JSON 超 30KB 时，截断主内容后重试
+	if len(cardJSON) > 30*1024 {
+		slog.Warn("[feishu-stream] replaceCardFinal: cardJSON exceeds 30KB, truncating content",
+			"cardJSONLen", len(cardJSON), "contentLen", len(content))
+		content = truncateContent(content, maxCardContentBytes/2)
+		// 重新查找并替换 elements 中的 streaming_md
+		for i, el := range elements {
+			if eid, ok := el["element_id"].(string); ok && eid == "streaming_md" {
+				elements[i]["content"] = content
+				break
+			}
+		}
+		card = BuildPrettyCard(s.cardTitle, elements, false)
+		cardJSON, _ = json.Marshal(card)
+	}
 
 	slog.Info("[feishu-stream] replaceCardFinal sending card",
 		"cardID", s.cardID,
@@ -892,11 +1059,15 @@ func (s *feishuStreamSender) sendInteractiveCardSeparately(token string) {
 // ── 飞书 API 调用 ────────────────────────────────────────────
 
 func (s *feishuStreamSender) buildCardJSON() string {
+	initContent := s.introLine
+	if initContent == "" {
+		initContent = "思考中..."
+	}
 	elements := []map[string]interface{}{
 		{
 			"tag":        "markdown",
 			"element_id": "streaming_md",
-			"content":    "思考中...",
+			"content":    initContent,
 		},
 	}
 	card := BuildPrettyCard(s.cardTitle, elements, true)
@@ -921,6 +1092,9 @@ func (s *feishuStreamSender) createCardEntity(token, cardDataJSON string) (strin
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
+	slog.Info("[feishu-stream] createCardEntity response",
+		"status", resp.StatusCode, "body", string(respBody))
+
 	var result struct {
 		Code int    `json:"code"`
 		Msg  string `json:"msg"`
@@ -932,8 +1106,9 @@ func (s *feishuStreamSender) createCardEntity(token, cardDataJSON string) (strin
 		return "", fmt.Errorf("parse create card response: %w, body: %s", err, string(respBody))
 	}
 	if result.Code != 0 {
-		return "", fmt.Errorf("create card error: code=%d msg=%s", result.Code, result.Msg)
+		return "", fmt.Errorf("create card error: code=%d msg=%s, body=%s", result.Code, result.Msg, string(respBody))
 	}
+	slog.Info("[feishu-stream] createCardEntity ok", "cardID", result.Data.CardID)
 	return result.Data.CardID, nil
 }
 
@@ -951,8 +1126,15 @@ func (s *feishuStreamSender) sendCardMessage(token, cardID string) (string, erro
 	var url string
 	var reqBody []byte
 
-	if s.msgID != "" {
-		// 回复原消息（线程模式）
+	// 话题模式：reply_in_thread=true 将卡片发送到 rootMsgID 的话题中
+	if s.rootMsgID != "" {
+		url = fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/messages/%s/reply", s.rootMsgID)
+		reqBody, _ = json.Marshal(map[string]interface{}{
+			"msg_type":        "interactive",
+			"content":         string(content),
+			"reply_in_thread": true,
+		})
+	} else if s.msgID != "" {
 		url = fmt.Sprintf("https://open.feishu.cn/open-apis/im/v1/messages/%s/reply", s.msgID)
 		reqBody, _ = json.Marshal(map[string]string{
 			"msg_type": "interactive",
@@ -966,6 +1148,10 @@ func (s *feishuStreamSender) sendCardMessage(token, cardID string) (string, erro
 			"content":    string(content),
 		})
 	}
+
+	slog.Info("[feishu-stream] sendCardMessage request",
+		"cardID", cardID, "chatID", s.chatID, "msgID", s.msgID,
+		"rootMsgID", s.rootMsgID, "receiveType", receiveType, "url", url)
 
 	req, _ := http.NewRequest("POST", url, bytes.NewReader(reqBody))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -989,12 +1175,20 @@ func (s *feishuStreamSender) sendCardMessage(token, cardID string) (string, erro
 		return "", fmt.Errorf("parse send message response: %w, body: %s", err, string(respBody))
 	}
 	if result.Code != 0 {
-		return "", fmt.Errorf("send card message error: code=%d msg=%s", result.Code, result.Msg)
+		// 话题不支持时（230071），fallback 到直接回复
+		if result.Code == 230071 && s.rootMsgID != "" {
+			slog.Warn("[feishu-stream] thread reply not supported, fallback to direct reply",
+				"code", result.Code, "rootMsgID", s.rootMsgID)
+			s.rootMsgID = ""
+			return s.sendCardMessage(token, cardID)
+		}
+		return "", fmt.Errorf("send card message error: code=%d msg=%s, body=%s", result.Code, result.Msg, string(respBody))
 	}
 	return result.Data.MessageID, nil
 }
 
 func (s *feishuStreamSender) updateElement(token, content string, seq int) error {
+	contentLen := len(content)
 	body, _ := json.Marshal(map[string]interface{}{
 		"content":  content,
 		"sequence": seq,
@@ -1011,9 +1205,22 @@ func (s *feishuStreamSender) updateElement(token, content string, seq int) error
 	}
 	defer resp.Body.Close()
 
+	respBody, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
+		slog.Warn("[feishu-stream] updateElement HTTP error",
+			"status", resp.StatusCode, "contentLen", contentLen, "body", string(respBody))
 		return fmt.Errorf("update element error: status=%d body=%s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		Code int    `json:"code"`
+		Msg  string `json:"msg"`
+	}
+	if json.Unmarshal(respBody, &result) == nil && result.Code != 0 {
+		slog.Warn("[feishu-stream] updateElement API error",
+			"code", result.Code, "msg", result.Msg, "contentLen", contentLen)
+		return fmt.Errorf("update element API error: code=%d msg=%s", result.Code, result.Msg)
 	}
 	return nil
 }
@@ -1107,6 +1314,24 @@ func removeToolMarkerLines(text string) string {
 			continue
 		}
 		if strings.HasPrefix(trimmed, "> ⏳") || strings.HasPrefix(trimmed, "> \xe2\x8f\xb3") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "> 🖥️") || strings.HasPrefix(trimmed, "> \xf0\x9f\x96\xa5") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "> 📄") || strings.HasPrefix(trimmed, "> \xf0\x9f\x93\x84") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "> ✏️") || strings.HasPrefix(trimmed, "> \xe2\x9c\x8f") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "> 🔍") || strings.HasPrefix(trimmed, "> \xf0\x9f\x94\x8d") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "> 🌐") || strings.HasPrefix(trimmed, "> \xf0\x9f\x8c\x90") {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "> 🤖") || strings.HasPrefix(trimmed, "> \xf0\x9f\xa4\x96") {
 			continue
 		}
 		if trimmed == "---" {
@@ -1240,7 +1465,7 @@ func BuildPrettyCard(title string, elements []map[string]interface{}, streaming 
 		},
 		"subtitle": map[string]interface{}{
 			"tag":     "plain_text",
-			"content": "灵犀 AI Agent",
+			"content": "",
 		},
 		"ud_icon": map[string]interface{}{
 			"tag":   "standard_icon",

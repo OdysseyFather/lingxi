@@ -22,7 +22,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const buildVersion = "2026-07-12T22:20-card-content-truncation"
+
 func main() {
+	slog.Info("[lingxi-web] starting", "build_version", buildVersion)
 	cfg := config.Load()
 	if cfg.MySQLDSN == "" {
 		slog.Error("MYSQL_DSN 未设置")
@@ -59,10 +62,24 @@ func main() {
 	webconn.SetClaudeStreamRunnerCtx(func(ctx context.Context, message string, sessionID int64, imagePaths []string, onChunk func(string, bool)) (int64, error) {
 		return whandler.WebRunClaudeStreamingCtx(ctx, 0, message, sessionID, imagePaths, onChunk)
 	})
+	webconn.SetClaudeStreamRunnerCtxExt(func(ctx context.Context, message string, sessionID int64, imagePaths []string, onEvent func(webconn.StreamKind, string, bool)) (int64, error) {
+		return whandler.WebRunClaudeStreamingCtxExt(ctx, 0, message, sessionID, imagePaths, func(kind string, payload string, done bool) {
+			onEvent(webconn.StreamKind(kind), payload, done)
+		})
+	})
 	webconn.RunClaudeForTaskFunc = func(message string, sessionID int64) (string, int64, error) {
 		return whandler.WebRunClaudeSync(0, message, sessionID, nil)
 	}
+
+	// 注入飞书用户白名单查询函数
+	webconn.GetFeishuAllowedUsersFunc = whandler.GetFeishuAllowedUsers
 	go whandler.LoadAllEnabledConnectors()
+
+	// P2P 消息轮询引擎启动
+	go whandler.InitAndStartP2PWatcher()
+
+	// go-proxy 预启动：容器启动时就启动代理，避免首次请求 5s 启动延迟
+	go whandler.PreStartGoProxy()
 
 	// 定时任务调度器
 	websched.Init(st, func(uid int64, message string, sessionID int64) (string, int64, error) {
@@ -108,8 +125,11 @@ func main() {
 	// 公开认证
 	whandler.RegisterAuthRoutes(api)
 
-	// 受保护 API（速率限制 + JWT）
-	protected := api.Group("", middleware.RequireUser([]byte(cfg.JWTSecret)), whandler.RateLimitAPI())
+	// 公开配对（手机端尚无 JWT，需要在认证前访问）
+	api.POST("/pair/complete", whandler.WebPairComplete)
+
+	// 受保护 API（JWT）
+	protected := api.Group("", middleware.RequireUser([]byte(cfg.JWTSecret)))
 	registerWebRoutes(protected, cfg)
 
 	// Admin
@@ -153,6 +173,7 @@ func main() {
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	<-ch
 	websched.Stop()
+	whandler.StopWebP2PWatcher()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
@@ -266,6 +287,15 @@ func registerWebRoutes(api *gin.RouterGroup, _ config.Config) {
 	api.POST("/api-profiles/:id/test", whandler.WebTestAPIProfile)
 	api.POST("/api-profiles/fetch-models", whandler.WebFetchModels)
 
+	// runtime/active-secret（web 版不需要运行时推送密钥，返回空 OK）
+	api.POST("/runtime/active-secret", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	// 路由状态（Go 协议转换代理）
+	api.GET("/router/status", whandler.WebGetRouterStatus)
+	api.POST("/router/stop", whandler.WebStopRouter)
+
 	// 用量
 	api.GET("/usage", whandler.GetUsage)
 	api.GET("/usage/quota", whandler.WebGetUsageQuota)
@@ -298,6 +328,10 @@ func registerWebRoutes(api *gin.RouterGroup, _ config.Config) {
 	api.GET("/feishu-tasks/:id", whandler.WebGetFeishuTask)
 	api.POST("/feishu-tasks/:id/close", whandler.WebCloseFeishuTask)
 	api.GET("/feishu-tasks/chat-members", whandler.WebListChatMembers)
+
+	// 飞书用户白名单
+	api.GET("/feishu-whitelist", whandler.GetFeishuWhitelistHandler)
+	api.PUT("/feishu-whitelist", whandler.SetFeishuWhitelistHandler)
 
 	// 自我进化
 	api.GET("/agents/:id/evolution", whandler.WebGetEvolutionConfig)
@@ -341,6 +375,41 @@ func registerWebRoutes(api *gin.RouterGroup, _ config.Config) {
 
 	// 备份导出
 	api.GET("/backup/export", whandler.WebExportBackup)
+
+	// H5 远程访问设置
+	api.GET("/h5-access/settings", whandler.WebGetH5AccessSettings)
+	api.PUT("/h5-access/settings", whandler.WebUpdateH5AccessSettings)
+	api.GET("/h5-access/tokens", whandler.WebListH5Tokens)
+	api.POST("/h5-access/tokens", whandler.WebGenerateH5Token)
+	api.POST("/h5-access/tokens/:id/revoke", whandler.WebRevokeH5Token)
+	api.DELETE("/h5-access/tokens/:id", whandler.WebDeleteH5Token)
+
+	// H5 隧道（web 版 stub）
+	api.GET("/h5-tunnel/status", whandler.WebGetH5TunnelStatus)
+	api.POST("/h5-tunnel/enable", whandler.WebEnableH5Tunnel)
+
+	// 手机 App 配对（pair/complete 在公开路由注册，这里不重复）
+	api.POST("/pair/initiate", whandler.WebPairInitiate)
+	api.POST("/pair/verify", whandler.WebPairVerify)
+	api.GET("/pair/devices", whandler.WebListPairedDevices)
+	api.DELETE("/pair/devices/:id", whandler.WebUnpairDevice)
+	api.POST("/pair/devices/:id/rotate", whandler.WebRotateDeviceToken)
+	api.POST("/pair/devices/:id/push-token", whandler.WebRegisterPushToken)
+	api.POST("/pair/revoke-all", whandler.WebRevokeAllDevices)
+
+	// 推送通知配置
+	api.GET("/push/config", whandler.WebGetPushConfig)
+	api.PUT("/push/config", whandler.WebSetPushConfig)
+	api.POST("/push/test", whandler.WebTestPush)
+
+	// P2P 消息轮询监听
+	api.GET("/p2p-watch/targets", whandler.ListP2PWatchTargets)
+	api.POST("/p2p-watch/targets", whandler.CreateP2PWatchTarget)
+	api.PUT("/p2p-watch/targets/:id", whandler.UpdateP2PWatchTarget)
+	api.DELETE("/p2p-watch/targets/:id", whandler.DeleteP2PWatchTarget)
+	api.PUT("/p2p-watch/targets/:id/toggle", whandler.ToggleP2PWatchTarget)
+	api.GET("/p2p-watch/status", whandler.GetP2PWatchStatusHandler)
+	api.POST("/p2p-watch/test-poll", whandler.TestP2PPollHandler)
 
 	// 合规：导出与删除（Web 专属）
 	api.GET("/me/export", whandler.ExportUserData)
