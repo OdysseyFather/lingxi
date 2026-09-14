@@ -6,6 +6,8 @@ alwaysApply: true
 
 # 灵犀 AI Agent — Cursor 开发规范
 
+Web OnCall Python 依赖在 `web-server/Dockerfile.web` 最终运行阶段安装，独立执行 `check-skill-python.py` 离线检查；两步都必须失败即停止，不得被 CLI 安装的 `|| true` 吞掉。依赖变更需重建镜像。
+
 ## 项目概述
 
 灵犀 AI Agent 是一个本地优先的桌面 AI Agent 工作台。架构为 **Electron (桌面壳) + React (前端) + Go (后端)**，通过本地 AI 引擎与多模型接入层连接不同模型供应商。

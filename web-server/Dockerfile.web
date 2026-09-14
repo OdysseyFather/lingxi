@@ -38,6 +38,11 @@ RUN npm run build
 # ─── 阶段 4: 运行时 ───────────────────────────────────────────
 FROM node:22-alpine
 
+# 技能依赖安装失败必须阻断构建，不能被下方 CLI 安装的容错逻辑吞掉。
+RUN apk add --no-cache python3 py3-requests py3-openpyxl
+COPY web-server/check-skill-python.py /usr/local/lib/lingxi/check-skill-python.py
+RUN python3 /usr/local/lib/lingxi/check-skill-python.py
+
 RUN apk add --no-cache bash curl && \
     npm install -g @anthropic-ai/claude-code 2>/dev/null || true && \
     npm cache clean --force

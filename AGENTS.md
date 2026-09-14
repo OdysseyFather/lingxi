@@ -1,5 +1,7 @@
 # AGENTS.md — 灵犀 AI Agent 项目指南
 
+Web OnCall Python 技能依赖由 `web-server/Dockerfile.web` 最终运行阶段的 Alpine 包维护；依赖安装与 `check-skill-python.py` 离线检查必须失败即停止构建，不得放入 CLI 安装的 `|| true` 容错链。依赖变更需重建镜像，不能仅更新技能包。
+
 本文件为 AI 助手（Codex / Cursor / Copilot 等）提供项目上下文，帮助快速理解系统全貌并高效开发。
 
 ---

@@ -826,6 +826,8 @@ flutter run
 
 ### 多用户版 Docker 部署（推荐）
 
+Web OnCall 的 Python 技能依赖由 `web-server/Dockerfile.web` 的最终运行阶段安装：`python3`、`py3-requests` 和 `py3-openpyxl`。构建时执行离线请求构造及 Excel 读写检查，依赖失败会阻断构建。依赖变更后需重新构建并发布镜像，仅重启旧容器或更新技能包不会生效。发布后可在 Agent 所在容器执行 `python3 /usr/local/lib/lingxi/check-skill-python.py`，核对实际解释器及依赖；该检查不访问业务接口。
+
 ```bash
 cd web-server
 
